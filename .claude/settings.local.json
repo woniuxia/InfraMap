@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "WebFetch(domain:v2.tauri.app)",
+      "WebFetch(domain:crates.io)",
+      "Bash(rustc --version 2>/dev/null && cargo --version 2>/dev/null && node --version 2>/dev/null && npm --version 2>/dev/null)",
+      "Bash(head:*)",
+      "Bash(pnpm:*)",
+      "Bash(grep:*)",
+      "Bash(true:*)",
+      "Bash(python:*)",
+      "Bash(tail:*)",
+      "Bash(cat:*)",
+      "Bash(\"C:/Users/huahua/AppData/Local/Programs/Python/Python312/python.exe\":*)",
+      "Bash(cd E:/Projects/InfraMap/src-tauri && cargo check 2>&1)",
+      "Bash(cd E:/Projects/InfraMap/src-tauri && cargo build 2>&1)",
+      "Bash(cd:*)"
+    ]
+  }
+}
