@@ -5,6 +5,7 @@ pub struct NginxConfig {
     #[serde(default)]
     pub id: String,
     pub name: String,
+    pub address: String,
     pub listen_port: Option<i64>,
     pub strategy: Option<String>,
     pub upstream_servers: Option<String>,

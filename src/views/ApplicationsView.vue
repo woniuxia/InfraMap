@@ -4,6 +4,7 @@ import { ElMessage } from "element-plus";
 import type { Application } from "@/types";
 import type { SearchFieldConfig, SearchToolbarQueryPayload } from "@/types/searchToolbar";
 import {
+  listApplicationOwnerCandidates,
   listApplications,
   listTopApplicationTechStacks,
   saveApplication,
@@ -12,6 +13,7 @@ import {
 import type { ApplicationTechStackSide } from "@/api/applications";
 import { useResourceList } from "@/composables/useResourceList";
 import { buildTechStackSuggestions, parseTechStack, techStackToText } from "@/utils/techStack";
+import { buildApplicationCopyDraft } from "@/utils/resourceCopy";
 import SearchToolbar from "@/components/filters/SearchToolbar.vue";
 import DeploymentPanel from "@/components/DeploymentPanel.vue";
 import DependencyPanel from "@/components/DependencyPanel.vue";
@@ -40,12 +42,15 @@ const saveLoading = ref(false);
 
 const techStackList = ref<string[]>([]);
 const topTechStackOptions = ref<string[]>([]);
+const ownerList = ref<string[]>([]);
+const ownerOptions = ref<string[]>([]);
 const techStackSuggestions = computed(() =>
   buildTechStackSuggestions(
     topTechStackOptions.value.map((item) => ({ tech_stack: item })),
     techStackList.value
   )
 );
+const ownerSuggestions = computed(() => normalizeOwners([...ownerOptions.value, ...ownerList.value], ""));
 
 interface ApplicationListFilters {
   type: string[];
@@ -139,6 +144,21 @@ function handleTechStackChange(values: string[]) {
   techStackList.value = buildTechStackSuggestions([], values);
 }
 
+function normalizeOwners(owners?: string[], owner?: string) {
+  const values = [...(owners ?? []), owner ?? ""]
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+  return Array.from(new Set(values));
+}
+
+function handleOwnerChange(values: string[]) {
+  ownerList.value = normalizeOwners(values);
+}
+
+function ownersForRow(row: Application) {
+  return normalizeOwners(row.owners, row.owner);
+}
+
 function resolveTechStackSide(type: Application["type"] | undefined): ApplicationTechStackSide {
   return type === "frontend" ? "frontend" : "backend";
 }
@@ -165,18 +185,33 @@ function openAdd() {
     updated_at: "",
   };
   techStackList.value = [];
+  ownerList.value = [];
   topTechStackOptions.value = [];
+  ownerOptions.value = [];
   isEditing.value = false;
   drawerVisible.value = true;
   fetchTopTechStackOptions(editingApp.value.type);
+  fetchOwnerOptions();
 }
 
 function openEdit(row: Application) {
   editingApp.value = { ...row };
   techStackList.value = parseTechStack(row.tech_stack);
+  ownerList.value = normalizeOwners(row.owners, row.owner);
   isEditing.value = true;
   drawerVisible.value = true;
   fetchTopTechStackOptions(editingApp.value.type);
+  fetchOwnerOptions();
+}
+
+function openCopy(row: Application) {
+  editingApp.value = buildApplicationCopyDraft(row);
+  techStackList.value = parseTechStack(editingApp.value.tech_stack);
+  ownerList.value = normalizeOwners(editingApp.value.owners, editingApp.value.owner);
+  isEditing.value = false;
+  drawerVisible.value = true;
+  fetchTopTechStackOptions(editingApp.value.type);
+  fetchOwnerOptions();
 }
 
 function handleTypeChange(type: Application["type"] | undefined) {
@@ -192,13 +227,24 @@ async function fetchTopTechStackOptions(type: Application["type"] | undefined) {
   }
 }
 
+async function fetchOwnerOptions() {
+  try {
+    ownerOptions.value = await listApplicationOwnerCandidates(100);
+  } catch {
+    // error shown by tauriInvoke
+  }
+}
+
 async function handleSave() {
+  const owners = normalizeOwners(ownerList.value);
   const payload: Partial<Application> = {
     id: "",
     is_deleted: 0,
     created_at: "",
     updated_at: "",
     ...editingApp.value,
+    owner: owners[0],
+    owners,
     tech_stack: techStackToText(techStackList.value),
   };
   saveLoading.value = true;
@@ -208,6 +254,7 @@ async function handleSave() {
     drawerVisible.value = false;
     fetchData();
     fetchTopTechStackOptions((payload.type as Application["type"] | undefined) ?? editingApp.value.type);
+    fetchOwnerOptions();
   } catch {
     // error shown by tauriInvoke
   } finally {
@@ -257,6 +304,7 @@ function envTagType(env: string): "primary" | "success" | "warning" | "info" | "
 onMounted(() => {
   fetchData();
   fetchTopTechStackOptions("backend");
+  fetchOwnerOptions();
 });
 </script>
 
@@ -275,7 +323,7 @@ onMounted(() => {
       </template>
     </SearchToolbar>
 
-    <el-table :data="data" v-loading="loading" border stripe class="w-full">
+    <el-table :data="data" v-loading="loading" border stripe class="w-full im-table-fixed-ops">
       <el-table-column prop="name" label="服务名称" min-width="150" align="center" />
       <el-table-column prop="type" label="类型" width="100" align="center">
         <template #default="{ row }">{{ typeLabel(row.type) }}</template>
@@ -289,15 +337,23 @@ onMounted(() => {
         </template>
       </el-table-column>
       <el-table-column prop="tech_stack" label="技术栈" width="140" show-overflow-tooltip align="center" />
-      <el-table-column prop="owner" label="负责人" width="100" align="center" />
+      <el-table-column label="负责人" min-width="160" align="center">
+        <template #default="{ row }">
+          <div v-if="ownersForRow(row).length > 0" class="owner-tags">
+            <el-tag v-for="owner in ownersForRow(row)" :key="owner" size="small" effect="plain">{{ owner }}</el-tag>
+          </div>
+          <span v-else>-</span>
+        </template>
+      </el-table-column>
       <el-table-column prop="status" label="状态" width="100" align="center">
         <template #default="{ row }">
           <el-tag :type="statusTagType(row.status)" size="small">{{ statusLabel(row.status) }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="150" fixed="right" align="center">
+      <el-table-column label="操作" width="210" fixed="right" align="center">
         <template #default="{ row }">
           <el-button text type="primary" size="small" @click="openEdit(row)">编辑</el-button>
+          <el-button text type="primary" size="small" @click="openCopy(row)">复制</el-button>
           <el-button text type="danger" size="small" @click="handleDelete(row.id, row.name)">删除</el-button>
         </template>
       </el-table-column>
@@ -376,7 +432,19 @@ onMounted(() => {
           <el-input v-model="editingApp.git_repo" placeholder="Git 仓库地址" />
         </el-form-item>
         <el-form-item label="负责人">
-          <el-input v-model="editingApp.owner" placeholder="负责人姓名" />
+          <el-select
+            v-model="ownerList"
+            class="w-full"
+            multiple
+            filterable
+            allow-create
+            default-first-option
+            :reserve-keyword="false"
+            placeholder="输入负责人姓名进行筛选，按回车可新增"
+            @change="(values) => handleOwnerChange(values as string[])"
+          >
+            <el-option v-for="item in ownerSuggestions" :key="item" :label="item" :value="item" />
+          </el-select>
         </el-form-item>
 
         <el-divider content-position="left">运维信息</el-divider>
@@ -552,6 +620,13 @@ onMounted(() => {
   margin-top: 16px;
   display: flex;
   justify-content: flex-end;
+}
+
+.owner-tags {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px;
 }
 </style>
 

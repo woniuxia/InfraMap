@@ -30,6 +30,7 @@ export interface Application {
   env: "prod" | "dev" | "test";
   git_repo?: string;
   owner?: string;
+  owners?: string[];
   status: "running" | "stopped" | "maintenance";
   description?: string;
   is_deleted: number;
@@ -57,6 +58,7 @@ export interface Middleware {
 export interface NginxConfig {
   id: string;
   name: string;
+  address: string;
   listen_port?: number;
   strategy?: "roundrobin" | "ip_hash";
   upstream_servers?: string;
@@ -79,6 +81,18 @@ export interface Deployment {
   deleted_at?: string;
   created_at: string;
   updated_at: string;
+}
+
+export type DeploymentResourceType = "application" | "middleware" | "nginx";
+
+export interface ResourceDeployContext {
+  resource_type: DeploymentResourceType;
+  resource_id: string;
+  address?: string | null;
+  resource_env?: "prod" | "dev" | "test" | null;
+  parsed_ip?: string | null;
+  matched_host_id?: string | null;
+  matched_host_name?: string | null;
 }
 
 export interface Dependency {
@@ -247,6 +261,7 @@ export interface DbPreviewSummary {
 export interface ImportResult {
   hosts_imported: number;
   applications_imported: number;
+  application_owners_imported?: number;
   middlewares_imported: number;
   nginx_configs_imported: number;
   deployments_imported: number;

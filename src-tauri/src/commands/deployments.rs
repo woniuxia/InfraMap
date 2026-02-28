@@ -1,3 +1,4 @@
+use std::net::Ipv4Addr;
 use tauri::State;
 
 use crate::db::audit::insert_audit_log;
@@ -7,6 +8,19 @@ use crate::error::{AppError, AppResult};
 use crate::models::common::{PagedResult, QueryParams};
 use crate::models::deployment::Deployment;
 use crate::validation::validate_deployment;
+use rusqlite::OptionalExtension;
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResourceDeployContext {
+    pub resource_type: String,
+    pub resource_id: String,
+    pub address: Option<String>,
+    pub resource_env: Option<String>,
+    pub parsed_ip: Option<String>,
+    pub matched_host_id: Option<String>,
+    pub matched_host_name: Option<String>,
+}
 
 fn row_to_deployment(row: &rusqlite::Row) -> rusqlite::Result<Deployment> {
     Ok(Deployment {
@@ -24,6 +38,159 @@ fn row_to_deployment(row: &rusqlite::Row) -> rusqlite::Result<Deployment> {
 
 const SELECT_COLUMNS: &str = "id, resource_id, resource_type, host_id, port, \
      is_deleted, deleted_at, created_at, updated_at";
+
+fn normalize_ipv4(candidate: &str) -> Option<String> {
+    candidate
+        .trim()
+        .parse::<Ipv4Addr>()
+        .ok()
+        .map(|ip| ip.to_string())
+}
+
+fn extract_ipv4_from_address(address: &str) -> Option<String> {
+    let trimmed = address.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    if let Some(ip) = normalize_ipv4(trimmed) {
+        return Some(ip);
+    }
+
+    if let Some(rest) = trimmed.split("://").nth(1) {
+        let host_port = rest.split('/').next().unwrap_or_default();
+        let host_port = host_port.split('@').last().unwrap_or_default();
+        let host = host_port.split(':').next().unwrap_or_default();
+        if let Some(ip) = normalize_ipv4(host) {
+            return Some(ip);
+        }
+    }
+
+    let colon_segments: Vec<&str> = trimmed.split(':').collect();
+    if colon_segments.len() == 2 {
+        if let Some(ip) = normalize_ipv4(colon_segments[0]) {
+            return Some(ip);
+        }
+    }
+
+    for token in trimmed.split(|c: char| !c.is_ascii_digit() && c != '.') {
+        if let Some(ip) = normalize_ipv4(token) {
+            return Some(ip);
+        }
+    }
+
+    None
+}
+
+fn query_resource_address_env(
+    command: &str,
+    conn: &rusqlite::Connection,
+    resource_type: &str,
+    resource_id: &str,
+) -> AppResult<(Option<String>, Option<String>)> {
+    match resource_type {
+        "application" => conn
+            .query_row(
+                "SELECT address, env FROM applications WHERE id = ?1 AND is_deleted = 0",
+                rusqlite::params![resource_id],
+                |row| {
+                    Ok((
+                        row.get::<_, Option<String>>(0)?,
+                        Some(row.get::<_, String>(1)?),
+                    ))
+                },
+            )
+            .map_err(|e| AppError::not_found(command, "应用不存在或已删除。", Some(e.to_string()))),
+        "middleware" => conn
+            .query_row(
+                "SELECT address, env FROM middlewares WHERE id = ?1 AND is_deleted = 0",
+                rusqlite::params![resource_id],
+                |row| {
+                    Ok((
+                        Some(row.get::<_, String>(0)?),
+                        Some(row.get::<_, String>(1)?),
+                    ))
+                },
+            )
+            .map_err(|e| {
+                AppError::not_found(command, "中间件不存在或已删除。", Some(e.to_string()))
+            }),
+        "nginx" => conn
+            .query_row(
+                "SELECT address, env FROM nginx_configs WHERE id = ?1 AND is_deleted = 0",
+                rusqlite::params![resource_id],
+                |row| {
+                    Ok((
+                        Some(row.get::<_, String>(0)?),
+                        Some(row.get::<_, String>(1)?),
+                    ))
+                },
+            )
+            .map_err(|e| {
+                AppError::not_found(command, "网关配置不存在或已删除。", Some(e.to_string()))
+            }),
+        _ => Err(AppError::validation(
+            command,
+            format!(
+                "resource_type must be one of application/middleware/nginx, got {}",
+                resource_type
+            ),
+        )),
+    }
+}
+
+fn build_resource_deploy_context(
+    command: &str,
+    conn: &rusqlite::Connection,
+    resource_type: &str,
+    resource_id: &str,
+) -> AppResult<ResourceDeployContext> {
+    let (address, resource_env) =
+        query_resource_address_env(command, conn, resource_type, resource_id)?;
+    let parsed_ip = address.as_deref().and_then(extract_ipv4_from_address);
+
+    let (matched_host_id, matched_host_name) = if let Some(ref ip) = parsed_ip {
+        conn.query_row(
+            "SELECT id, hostname FROM hosts WHERE ip_address = ?1 AND is_deleted = 0 LIMIT 1",
+            rusqlite::params![ip],
+            |row| {
+                Ok((
+                    Some(row.get::<_, String>(0)?),
+                    Some(row.get::<_, String>(1)?),
+                ))
+            },
+        )
+        .optional()
+        .map_err(|e| AppError::from_db_error(command, "查询匹配服务器", e))?
+        .unwrap_or((None, None))
+    } else {
+        (None, None)
+    };
+
+    Ok(ResourceDeployContext {
+        resource_type: resource_type.to_string(),
+        resource_id: resource_id.to_string(),
+        address,
+        resource_env,
+        parsed_ip,
+        matched_host_id,
+        matched_host_name,
+    })
+}
+
+#[tauri::command]
+pub fn get_resource_deploy_context(
+    pool: State<DbPool>,
+    resource_type: String,
+    resource_id: String,
+) -> AppResult<ResourceDeployContext> {
+    let command = "get_resource_deploy_context";
+    let conn = pool
+        .get()
+        .map_err(|e| AppError::db_unavailable(command, format!("Pool error: {}", e)))?;
+
+    build_resource_deploy_context(command, &conn, &resource_type, &resource_id)
+}
 
 #[tauri::command]
 pub fn list_deployments(
@@ -174,5 +341,93 @@ pub fn soft_delete_deployment(pool: State<DbPool>, id: String) -> AppResult<()> 
             let _ = conn.execute_batch("ROLLBACK;");
             Err(AppError::from_db_error(command, "删除部署关系", e))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::error::AppErrorCode;
+    use crate::test_helpers::{
+        insert_test_application, insert_test_host, insert_test_middleware,
+        insert_test_nginx_config, setup_test_db,
+    };
+
+    use super::{build_resource_deploy_context, extract_ipv4_from_address};
+
+    #[test]
+    fn extract_ipv4_from_address_should_support_common_patterns() {
+        assert_eq!(
+            extract_ipv4_from_address("10.0.0.1"),
+            Some("10.0.0.1".to_string())
+        );
+        assert_eq!(
+            extract_ipv4_from_address("redis://10.0.0.2:6379"),
+            Some("10.0.0.2".to_string())
+        );
+        assert_eq!(
+            extract_ipv4_from_address("10.0.0.3:8080"),
+            Some("10.0.0.3".to_string())
+        );
+        assert_eq!(extract_ipv4_from_address("api.example.com"), None);
+    }
+
+    #[test]
+    fn build_resource_deploy_context_should_match_existing_host_for_middleware() {
+        let conn = setup_test_db();
+        insert_test_host(&conn, "h1", "redis-host", "10.0.0.8");
+        insert_test_middleware(&conn, "mw1", "redis-main", "cache");
+        conn.execute(
+            "UPDATE middlewares SET address = 'redis://10.0.0.8:6379', env = 'prod' WHERE id = 'mw1'",
+            [],
+        )
+        .expect("update middleware address");
+
+        let context = build_resource_deploy_context("test", &conn, "middleware", "mw1")
+            .expect("build context");
+        assert_eq!(context.parsed_ip.as_deref(), Some("10.0.0.8"));
+        assert_eq!(context.matched_host_id.as_deref(), Some("h1"));
+        assert_eq!(context.resource_env.as_deref(), Some("prod"));
+    }
+
+    #[test]
+    fn build_resource_deploy_context_should_return_unmatched_ip_for_nginx() {
+        let conn = setup_test_db();
+        insert_test_nginx_config(&conn, "ng1", "gateway-1");
+        conn.execute(
+            "UPDATE nginx_configs SET address = 'http://10.9.9.9:80', env='dev' WHERE id = 'ng1'",
+            [],
+        )
+        .expect("update nginx address");
+
+        let context =
+            build_resource_deploy_context("test", &conn, "nginx", "ng1").expect("build context");
+        assert_eq!(context.parsed_ip.as_deref(), Some("10.9.9.9"));
+        assert_eq!(context.matched_host_id, None);
+        assert_eq!(context.resource_env.as_deref(), Some("dev"));
+    }
+
+    #[test]
+    fn build_resource_deploy_context_should_allow_non_ip_application_address() {
+        let conn = setup_test_db();
+        insert_test_application(&conn, "app1", "payment", "prod");
+        conn.execute(
+            "UPDATE applications SET address = 'https://api.example.com' WHERE id = 'app1'",
+            [],
+        )
+        .expect("update app address");
+
+        let context = build_resource_deploy_context("test", &conn, "application", "app1")
+            .expect("build context");
+        assert_eq!(context.address.as_deref(), Some("https://api.example.com"));
+        assert_eq!(context.parsed_ip, None);
+        assert_eq!(context.matched_host_id, None);
+    }
+
+    #[test]
+    fn build_resource_deploy_context_should_fail_for_invalid_type() {
+        let conn = setup_test_db();
+        let err = build_resource_deploy_context("test", &conn, "invalid", "x")
+            .expect_err("invalid type should fail");
+        assert_eq!(err.code, AppErrorCode::ValidationError);
     }
 }

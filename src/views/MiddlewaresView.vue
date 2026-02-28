@@ -6,6 +6,7 @@ import type { SearchFieldConfig, SearchToolbarQueryPayload } from "@/types/searc
 import { listMiddlewares, saveMiddleware, softDeleteMiddleware } from "@/api/middlewares";
 import { useResourceList } from "@/composables/useResourceList";
 import { getMiddlewareDefaultPort, getMiddlewareTypeOptions } from "@/utils/middlewareCatalog";
+import { buildMiddlewareCopyDraft } from "@/utils/resourceCopy";
 import SearchToolbar from "@/components/filters/SearchToolbar.vue";
 import DeploymentPanel from "@/components/DeploymentPanel.vue";
 
@@ -112,6 +113,13 @@ function openEdit(row: Middleware) {
   drawerVisible.value = true;
 }
 
+function openCopy(row: Middleware) {
+  autoFilledPort.value = undefined;
+  editingMw.value = buildMiddlewareCopyDraft(row);
+  isEditing.value = false;
+  drawerVisible.value = true;
+}
+
 async function handleSave() {
   const payload: Partial<Middleware> = {
     id: "",
@@ -180,7 +188,7 @@ watch(
         <el-button type="primary" @click="openAdd">新增中间件</el-button>
       </template>
     </SearchToolbar>
-    <el-table :data="data" v-loading="loading" border stripe class="w-full">
+    <el-table :data="data" v-loading="loading" border stripe class="w-full im-table-fixed-ops">
       <el-table-column prop="name" label="实例名称" min-width="150" align="center" />
       <el-table-column prop="category" label="分类" width="100" align="center">
         <template #default="{ row }">{{ categoryLabel(row.category) }}</template>
@@ -195,9 +203,10 @@ watch(
           <el-tag :type="envTagType(row.env)" size="small">{{ envLabel(row.env) }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="150" fixed="right" align="center">
+      <el-table-column label="操作" width="210" fixed="right" align="center">
         <template #default="{ row }">
           <el-button text type="primary" size="small" @click="openEdit(row)">编辑</el-button>
+          <el-button text type="primary" size="small" @click="openCopy(row)">复制</el-button>
           <el-button text type="danger" size="small" @click="handleDelete(row.id, row.name)">删除</el-button>
         </template>
       </el-table-column>

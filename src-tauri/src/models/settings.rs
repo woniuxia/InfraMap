@@ -55,6 +55,8 @@ pub struct ExportMetadata {
 pub struct ExportPayload {
     pub hosts: Vec<serde_json::Value>,
     pub applications: Vec<serde_json::Value>,
+    #[serde(default)]
+    pub application_owners: Vec<serde_json::Value>,
     pub middlewares: Vec<serde_json::Value>,
     pub nginx_configs: Vec<serde_json::Value>,
     pub deployments: Vec<serde_json::Value>,
@@ -65,6 +67,7 @@ pub struct ExportPayload {
 pub struct ImportResult {
     pub hosts_imported: u64,
     pub applications_imported: u64,
+    pub application_owners_imported: u64,
     pub middlewares_imported: u64,
     pub nginx_configs_imported: u64,
     pub deployments_imported: u64,

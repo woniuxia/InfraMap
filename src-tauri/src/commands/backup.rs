@@ -220,6 +220,7 @@ pub fn export_json(pool: State<DbPool>, filepath: String) -> AppResult<()> {
     let tables = [
         "hosts",
         "applications",
+        "application_owners",
         "middlewares",
         "nginx_configs",
         "deployments",
@@ -242,6 +243,7 @@ pub fn export_json(pool: State<DbPool>, filepath: String) -> AppResult<()> {
         data: ExportPayload {
             hosts: table_data.remove(0),
             applications: table_data.remove(0),
+            application_owners: table_data.remove(0),
             middlewares: table_data.remove(0),
             nginx_configs: table_data.remove(0),
             deployments: table_data.remove(0),
@@ -293,6 +295,7 @@ pub fn import_json(
             "deployments",
             "nginx_configs",
             "middlewares",
+            "application_owners",
             "applications",
             "hosts",
             "audit_logs",
@@ -307,6 +310,9 @@ pub fn import_json(
             .map_err(|e| AppError::from_backup_error(command, "导入 hosts", e))?;
         let apps_count = import_table_rows(&conn, "applications", &export.data.applications)
             .map_err(|e| AppError::from_backup_error(command, "导入 applications", e))?;
+        let app_owners_count =
+            import_table_rows(&conn, "application_owners", &export.data.application_owners)
+                .map_err(|e| AppError::from_backup_error(command, "导入 application_owners", e))?;
         let mw_count = import_table_rows(&conn, "middlewares", &export.data.middlewares)
             .map_err(|e| AppError::from_backup_error(command, "导入 middlewares", e))?;
         let nginx_count = import_table_rows(&conn, "nginx_configs", &export.data.nginx_configs)
@@ -319,6 +325,7 @@ pub fn import_json(
         Ok(ImportResult {
             hosts_imported: hosts_count,
             applications_imported: apps_count,
+            application_owners_imported: app_owners_count,
             middlewares_imported: mw_count,
             nginx_configs_imported: nginx_count,
             deployments_imported: dep_count,

@@ -17,6 +17,10 @@ export function listTopApplicationTechStacks(
   return tauriInvoke<string[]>('list_top_application_tech_stacks', { limit, app_type: appType })
 }
 
+export function listApplicationOwnerCandidates(limit = 100): Promise<string[]> {
+  return tauriInvoke<string[]>('list_application_owner_candidates', { limit })
+}
+
 export function saveApplication(data: Partial<Application>): Promise<void> {
   return tauriInvoke<void>('save_application', { data })
 }

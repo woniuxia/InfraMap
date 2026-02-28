@@ -14,6 +14,8 @@ pub struct Application {
     pub env: String,
     pub git_repo: Option<String>,
     pub owner: Option<String>,
+    #[serde(default)]
+    pub owners: Option<Vec<String>>,
     pub status: String,
     pub description: Option<String>,
     #[serde(default)]

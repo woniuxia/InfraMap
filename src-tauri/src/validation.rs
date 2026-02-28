@@ -129,6 +129,14 @@ pub fn validate_application(app: &Application) -> Result<(), String> {
     if let Some(port) = app.port {
         validate_port(port)?;
     }
+    if let Some(ref owners) = app.owners {
+        if owners.len() > 20 {
+            return Err("owners length must be <= 20".into());
+        }
+        for owner in owners {
+            validate_string_length(owner, 1, 50, "owner")?;
+        }
+    }
     Ok(())
 }
 
@@ -159,6 +167,7 @@ pub fn validate_middleware(mw: &Middleware) -> Result<(), String> {
 pub fn validate_nginx_config(nc: &NginxConfig) -> Result<(), String> {
     validate_required(&nc.name, "name")?;
     validate_string_length(&nc.name, 1, 200, "name")?;
+    validate_required(&nc.address, "address")?;
     validate_enum(&nc.env, &["prod", "dev", "test"], "env")?;
     validate_enum(&nc.status, &["running", "stopped", "maintenance"], "status")?;
     if let Some(ref strategy) = nc.strategy {
@@ -406,6 +415,7 @@ mod tests {
             env: "prod".into(),
             git_repo: None,
             owner: None,
+            owners: None,
             status: "running".into(),
             description: None,
             is_deleted: 0,
@@ -470,6 +480,7 @@ mod tests {
         NginxConfig {
             id: "n1".into(),
             name: "nginx-main".into(),
+            address: "10.0.0.1".into(),
             listen_port: Some(80),
             strategy: Some("roundrobin".into()),
             upstream_servers: Some(r#"["10.0.0.1:8080"]"#.into()),
@@ -492,6 +503,13 @@ mod tests {
     fn test_validate_nginx_config_invalid_strategy() {
         let mut nc = make_test_nginx();
         nc.strategy = Some("random".into());
+        assert!(validate_nginx_config(&nc).is_err());
+    }
+
+    #[test]
+    fn test_validate_nginx_config_requires_address() {
+        let mut nc = make_test_nginx();
+        nc.address = "".into();
         assert!(validate_nginx_config(&nc).is_err());
     }
 

@@ -6,8 +6,17 @@ import type { Host } from "@/types";
 import type { SearchFieldConfig, SearchToolbarQueryPayload } from "@/types/searchToolbar";
 import { listHosts, saveHost, softDeleteHost } from "@/api/hosts";
 import { useResourceList } from "@/composables/useResourceList";
+import { buildHostCopyDraft } from "@/utils/resourceCopy";
 import SearchToolbar from "@/components/filters/SearchToolbar.vue";
-import { COMMON_DISK_OPTIONS_GB, COMMON_RAM_OPTIONS_GB } from "@/views/hostsHardwareOptions";
+import {
+  COMMON_CPU_CORES_OPTIONS,
+  COMMON_CPU_FREQ_OPTIONS,
+  COMMON_CPU_THREADS_OPTIONS,
+  COMMON_DISK_OPTIONS_GB,
+  COMMON_RAM_OPTIONS_GB,
+  normalizeCpuFreqValue,
+  normalizePositiveIntegerValue,
+} from "@/views/hostsHardwareOptions";
 
 const {
   loading,
@@ -77,6 +86,29 @@ const toolbarFields: SearchFieldConfig[] = [
 
 const ipv4Pattern = /^((25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(25[0-5]|2[0-4]\d|[01]?\d\d?)$/;
 
+const validateOptionalPositiveInteger = (
+  _rule: unknown,
+  value: unknown,
+  callback: (error?: Error) => void,
+) => {
+  if (value === undefined || value === null) {
+    callback();
+    return;
+  }
+
+  if (typeof value === "string" && value.trim() === "") {
+    callback();
+    return;
+  }
+
+  if (normalizePositiveIntegerValue(value) === undefined) {
+    callback(new Error("Please enter a positive integer"));
+    return;
+  }
+
+  callback();
+};
+
 const formRules: FormRules = {
   hostname: [
     { required: true, message: "请输入主机名", trigger: "blur" },
@@ -87,6 +119,11 @@ const formRules: FormRules = {
     { pattern: ipv4Pattern, message: "请输入有效的 IPv4 地址，如 192.168.1.100", trigger: "blur" },
   ],
   env: [{ required: true, message: "请选择环境", trigger: "change" }],
+  cpu_cores: [{ validator: validateOptionalPositiveInteger, trigger: "change" }],
+  cpu_threads: [{ validator: validateOptionalPositiveInteger, trigger: "change" }],
+  ram_gb: [{ validator: validateOptionalPositiveInteger, trigger: "change" }],
+  disk_gb: [{ validator: validateOptionalPositiveInteger, trigger: "change" }],
+  cpu_freq: [{ min: 0, max: 50, message: "Length should be less than 50 characters", trigger: "blur" }],
   status: [
     { required: true, message: "请选择状态", trigger: "change" },
   ],
@@ -167,10 +204,72 @@ function openEdit(row: Host) {
   dialogVisible.value = true;
 }
 
+function openCopy(row: Host) {
+  editingHost.value = buildHostCopyDraft(row);
+  tagList.value = parseTags(editingHost.value.tags);
+  isEditing.value = false;
+  dialogVisible.value = true;
+  ElMessage.info("已生成副本草稿，请填写新 IP 后保存");
+}
+
+function hasInputValue(value: unknown): boolean {
+  if (value === undefined || value === null) {
+    return false;
+  }
+
+  if (typeof value === "string") {
+    return value.trim() !== "";
+  }
+
+  return true;
+}
+
+function validateHardwareFields(): boolean {
+  const numberFields: Array<{ key: keyof Host; label: string }> = [
+    { key: "cpu_cores", label: "CPU cores" },
+    { key: "cpu_threads", label: "CPU threads" },
+    { key: "ram_gb", label: "RAM" },
+    { key: "disk_gb", label: "Disk" },
+  ];
+
+  for (const field of numberFields) {
+    const rawValue = editingHost.value[field.key];
+    if (hasInputValue(rawValue) && normalizePositiveIntegerValue(rawValue) === undefined) {
+      ElMessage.warning(`${field.label} must be a positive integer`);
+      return false;
+    }
+  }
+
+  const rawCpuFreq = editingHost.value.cpu_freq;
+  if (hasInputValue(rawCpuFreq)) {
+    const normalizedCpuFreq = normalizeCpuFreqValue(rawCpuFreq);
+    if (!normalizedCpuFreq) {
+      ElMessage.warning("CPU frequency is invalid");
+      return false;
+    }
+    if (normalizedCpuFreq.length > 50) {
+      ElMessage.warning("CPU frequency must be less than 50 characters");
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function normalizeHardwareFields() {
+  editingHost.value.cpu_cores = normalizePositiveIntegerValue(editingHost.value.cpu_cores);
+  editingHost.value.cpu_threads = normalizePositiveIntegerValue(editingHost.value.cpu_threads);
+  editingHost.value.ram_gb = normalizePositiveIntegerValue(editingHost.value.ram_gb);
+  editingHost.value.disk_gb = normalizePositiveIntegerValue(editingHost.value.disk_gb);
+  editingHost.value.cpu_freq = normalizeCpuFreqValue(editingHost.value.cpu_freq);
+}
+
 async function handleSave() {
   const valid = await formRef.value?.validate().catch(() => false);
   if (!valid) return;
+  if (!validateHardwareFields()) return;
 
+  normalizeHardwareFields();
   saveLoading.value = true;
   try {
     await saveHost(editingHost.value);
@@ -228,7 +327,7 @@ onMounted(() => fetchData());
         <el-button type="primary" @click="openAdd">新增服务器</el-button>
       </template>
     </SearchToolbar>
-    <el-table :data="data" v-loading="loading" border stripe class="w-full">
+    <el-table :data="data" v-loading="loading" border stripe class="w-full im-table-fixed-ops">
       <el-table-column prop="hostname" label="主机名" min-width="150" align="center" />
       <el-table-column prop="ip_address" label="IP地址" width="150" align="center" />
       <el-table-column prop="env" label="环境" width="90" align="center">
@@ -246,9 +345,10 @@ onMounted(() => fetchData());
           }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="150" fixed="right" align="center">
+      <el-table-column label="操作" width="210" fixed="right" align="center">
         <template #default="{ row }">
           <el-button text type="primary" size="small" @click="openEdit(row)">编辑</el-button>
+          <el-button text type="primary" size="small" @click="openCopy(row)">复制</el-button>
           <el-button text type="danger" size="small" @click="handleDelete(row.id, row.hostname)"
             >删除</el-button
           >
@@ -310,31 +410,60 @@ onMounted(() => fetchData());
             <el-col :span="8">
               <div class="inline-field">
                 <span class="inline-label">核心数</span>
-                <el-input-number
+                <el-select
                   v-model="editingHost.cpu_cores"
-                  :min="1"
-                  controls-position="right"
-                  placeholder="如 8"
+                  filterable
+                  allow-create
+                  default-first-option
+                  clearable
+                  placeholder="8"
                   class="inline-input"
-                />
+                >
+                  <el-option
+                    v-for="value in COMMON_CPU_CORES_OPTIONS"
+                    :key="`cpu-core-${value}`"
+                    :label="String(value)"
+                    :value="value"
+                  />
+                </el-select>
               </div>
             </el-col>
             <el-col :span="8">
               <div class="inline-field">
                 <span class="inline-label">线程数</span>
-                <el-input-number
+                <el-select
                   v-model="editingHost.cpu_threads"
-                  :min="1"
-                  controls-position="right"
-                  placeholder="如 16"
+                  filterable
+                  allow-create
+                  default-first-option
+                  clearable
+                  placeholder="16"
                   class="inline-input"
-                />
+                >
+                  <el-option
+                    v-for="value in COMMON_CPU_THREADS_OPTIONS"
+                    :key="`cpu-thread-${value}`"
+                    :label="String(value)"
+                    :value="value"
+                  />
+                </el-select>
               </div>
             </el-col>
             <el-col :span="8">
               <div class="inline-field">
                 <span class="inline-label">频率</span>
-                <el-input v-model="editingHost.cpu_freq" placeholder="如 2.40 GHz" class="inline-input" />
+                <el-select
+                  v-model="editingHost.cpu_freq"
+                  filterable
+                  allow-create
+                  default-first-option
+                  clearable
+                  placeholder="2.4"
+                  class="inline-input"
+                >
+                  <el-option v-for="value in COMMON_CPU_FREQ_OPTIONS" :key="`cpu-freq-${value}`" :label="value" :value="value" />
+                </el-select>
+                <span class="inline-unit">GHz</span>
               </div>
             </el-col>
           </el-row>
@@ -344,55 +473,45 @@ onMounted(() => fetchData());
             <el-col :span="12">
               <div class="inline-field">
                 <span class="inline-label">内存</span>
-                <el-input-number
+                <el-select
                   v-model="editingHost.ram_gb"
-                  :min="0"
-                  controls-position="right"
+                  filterable
+                  allow-create
+                  default-first-option
+                  clearable
+                  placeholder="16"
                   class="inline-input"
                 >
-                  <template #suffix>GB</template>
-                </el-input-number>
-                <div class="quick-size-options">
-                  <el-button
-                    v-for="size in COMMON_RAM_OPTIONS_GB"
-                    :key="`ram-${size}`"
-                    size="small"
-                    text
-                    bg
-                    :type="editingHost.ram_gb === size ? 'primary' : undefined"
-                    class="quick-size-button"
-                    @click="editingHost.ram_gb = size"
-                  >
-                    {{ size }} GB
-                  </el-button>
-                </div>
+                  <el-option
+                    v-for="value in COMMON_RAM_OPTIONS_GB"
+                    :key="`ram-${value}`"
+                    :label="String(value)"
+                    :value="value"
+                  />
+                </el-select>
+                <span class="inline-unit">GB</span>
               </div>
             </el-col>
             <el-col :span="12">
               <div class="inline-field">
                 <span class="inline-label">磁盘</span>
-                <el-input-number
+                <el-select
                   v-model="editingHost.disk_gb"
-                  :min="0"
-                  controls-position="right"
+                  filterable
+                  allow-create
+                  default-first-option
+                  clearable
+                  placeholder="512"
                   class="inline-input"
                 >
-                  <template #suffix>GB</template>
-                </el-input-number>
-                <div class="quick-size-options">
-                  <el-button
-                    v-for="size in COMMON_DISK_OPTIONS_GB"
-                    :key="`disk-${size}`"
-                    size="small"
-                    text
-                    bg
-                    :type="editingHost.disk_gb === size ? 'primary' : undefined"
-                    class="quick-size-button"
-                    @click="editingHost.disk_gb = size"
-                  >
-                    {{ size }} GB
-                  </el-button>
-                </div>
+                  <el-option
+                    v-for="value in COMMON_DISK_OPTIONS_GB"
+                    :key="`disk-${value}`"
+                    :label="String(value)"
+                    :value="value"
+                  />
+                </el-select>
+                <span class="inline-unit">GB</span>
               </div>
             </el-col>
           </el-row>
@@ -552,16 +671,13 @@ onMounted(() => fetchData());
   min-width: 40px;
   white-space: nowrap;
 }
+.inline-unit {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  line-height: 1.2;
+}
 .inline-input {
   width: 100%;
-}
-.quick-size-options {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-.quick-size-button {
-  margin: 0;
 }
 </style>
 

@@ -177,6 +177,34 @@ pub const MIGRATIONS: &[(i32, &str)] = &[
         CREATE INDEX IF NOT EXISTS idx_hosts_env ON hosts(env) WHERE is_deleted = 0;
     "#,
     ),
+    (
+        5,
+        r#"
+        CREATE TABLE IF NOT EXISTS application_owners (
+            id TEXT PRIMARY KEY,
+            application_id TEXT NOT NULL,
+            owner_name TEXT NOT NULL,
+            is_deleted INTEGER NOT NULL DEFAULT 0,
+            deleted_at TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS uk_application_owners_app_owner
+        ON application_owners(application_id, owner_name) WHERE is_deleted = 0;
+        CREATE INDEX IF NOT EXISTS idx_application_owners_application
+        ON application_owners(application_id) WHERE is_deleted = 0;
+        CREATE INDEX IF NOT EXISTS idx_application_owners_owner_name
+        ON application_owners(owner_name) WHERE is_deleted = 0;
+    "#,
+    ),
+    (
+        6,
+        r#"
+        ALTER TABLE nginx_configs ADD COLUMN address TEXT NOT NULL DEFAULT '';
+        UPDATE nginx_configs SET address = 'unknown' WHERE TRIM(address) = '';
+    "#,
+    ),
 ];
 
 #[cfg(test)]
@@ -207,6 +235,41 @@ mod tests {
         assert!(
             columns.iter().any(|col| col == "env"),
             "hosts table should contain env column"
+        );
+    }
+
+    #[test]
+    fn application_owners_table_should_exist_after_migrations() {
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        apply_all_migrations(&conn);
+
+        let exists: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='application_owners'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("query sqlite_master");
+
+        assert_eq!(exists, 1, "application_owners table should exist");
+    }
+
+    #[test]
+    fn nginx_configs_table_should_have_address_column_after_migrations() {
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        apply_all_migrations(&conn);
+
+        let mut stmt = conn
+            .prepare("PRAGMA table_info(nginx_configs)")
+            .expect("prepare table info query");
+        let rows = stmt
+            .query_map([], |row| row.get::<_, String>(1))
+            .expect("query table info");
+        let columns: Vec<String> = rows.filter_map(|r| r.ok()).collect();
+
+        assert!(
+            columns.iter().any(|col| col == "address"),
+            "nginx_configs table should contain address column"
         );
     }
 }

@@ -1,9 +1,14 @@
 <script setup lang="ts">
-import { ref, watch, onMounted } from "vue";
+import { computed, ref, watch, onMounted } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
-import type { Deployment, Host } from "@/types";
-import { listDeployments, saveDeployment, softDeleteDeployment } from "@/api/deployments";
-import { listHosts } from "@/api/hosts";
+import type { Deployment, Host, ResourceDeployContext } from "@/types";
+import {
+  getResourceDeployContext,
+  listDeployments,
+  saveDeployment,
+  softDeleteDeployment,
+} from "@/api/deployments";
+import { listHosts, saveHost } from "@/api/hosts";
 
 const props = defineProps<{
   resourceId: string;
@@ -17,6 +22,27 @@ const loading = ref(false);
 const addVisible = ref(false);
 const newDeploy = ref<{ host_id: string; port?: number }>({ host_id: "" });
 const saveLoading = ref(false);
+const contextLoading = ref(false);
+const quickCreateLoading = ref(false);
+const hostLocked = ref(false);
+const resourceContext = ref<ResourceDeployContext | null>(null);
+
+const hasUnmatchedIp = computed(
+  () => Boolean(resourceContext.value?.parsed_ip) && !resourceContext.value?.matched_host_id
+);
+const parsedIp = computed(() => resourceContext.value?.parsed_ip || "");
+
+function normalizeHostEnv(value?: string | null): Host["env"] {
+  if (value === "dev" || value === "test") {
+    return value;
+  }
+  return "prod";
+}
+
+function formatTempHostName(date: Date = new Date()) {
+  const pad2 = (value: number) => String(value).padStart(2, "0");
+  return `temp-host-${date.getFullYear()}${pad2(date.getMonth() + 1)}${pad2(date.getDate())}${pad2(date.getHours())}${pad2(date.getMinutes())}${pad2(date.getSeconds())}`;
+}
 
 async function fetchDeployments() {
   if (!props.resourceId) return;
@@ -49,12 +75,86 @@ function hostName(hostId: string) {
   return h ? `${h.hostname} (${h.ip_address})` : hostId;
 }
 
-function openAdd() {
+async function loadResourceDeployContext() {
+  contextLoading.value = true;
+  try {
+    const context = await getResourceDeployContext(props.resourceType, props.resourceId);
+    resourceContext.value = context;
+    if (context.matched_host_id) {
+      newDeploy.value.host_id = context.matched_host_id;
+      hostLocked.value = true;
+      return;
+    }
+    if (context.parsed_ip) {
+      ElMessage.warning(`连接地址解析到 IP ${context.parsed_ip}，请先选择或快捷新建服务器`);
+    }
+  } catch {
+    // ignore and fallback to manual selection
+    resourceContext.value = null;
+  } finally {
+    contextLoading.value = false;
+  }
+}
+
+async function openAdd() {
   newDeploy.value = { host_id: "", port: props.defaultPort };
+  hostLocked.value = false;
+  resourceContext.value = null;
   addVisible.value = true;
+  await fetchHosts();
+  await loadResourceDeployContext();
+}
+
+async function handleQuickCreateHost() {
+  const ip = resourceContext.value?.parsed_ip;
+  if (!ip) return;
+
+  quickCreateLoading.value = true;
+  try {
+    await saveHost({
+      id: "",
+      hostname: formatTempHostName(),
+      ip_address: ip,
+      env: normalizeHostEnv(resourceContext.value?.resource_env),
+      status: "running",
+      is_deleted: 0,
+      created_at: "",
+      updated_at: "",
+    });
+  } catch {
+    // if created concurrently by others, continue to refresh and reuse
+  } finally {
+    await fetchHosts();
+    const matched = hosts.value.find((h) => h.ip_address === ip);
+    if (matched) {
+      newDeploy.value.host_id = matched.id;
+      hostLocked.value = true;
+      resourceContext.value = {
+        ...(resourceContext.value || {
+          resource_type: props.resourceType,
+          resource_id: props.resourceId,
+          parsed_ip: ip,
+        }),
+        matched_host_id: matched.id,
+        matched_host_name: matched.hostname,
+      };
+      ElMessage.success("已快捷创建临时服务器，请后续在主机维护完善信息");
+    } else {
+      ElMessage.warning("快捷创建未返回可用服务器，请手动创建后重试");
+    }
+    quickCreateLoading.value = false;
+  }
+}
+
+function unlockHostSelection() {
+  hostLocked.value = false;
 }
 
 async function handleAdd() {
+  if (hasUnmatchedIp.value && !newDeploy.value.host_id) {
+    ElMessage.warning("该连接地址尚未匹配服务器，请先快捷新建或手动选择服务器");
+    return;
+  }
   if (!newDeploy.value.host_id) {
     ElMessage.warning("请选择目标服务器");
     return;
@@ -130,7 +230,13 @@ onMounted(() => {
     <el-dialog v-model="addVisible" title="添加部署关系" width="360px" append-to-body>
       <el-form :model="newDeploy" label-width="110px">
         <el-form-item label="目标服务器" required>
-          <el-select v-model="newDeploy.host_id" filterable placeholder="选择服务器" class="w-full">
+          <el-select
+            v-model="newDeploy.host_id"
+            filterable
+            placeholder="选择服务器"
+            class="w-full"
+            :disabled="hostLocked || contextLoading"
+          >
             <el-option
               v-for="h in hosts"
               :key="h.id"
@@ -138,6 +244,16 @@ onMounted(() => {
               :value="h.id"
             />
           </el-select>
+          <div v-if="hostLocked" class="host-lock-row">
+            <span class="lock-tip">已按连接地址自动匹配</span>
+            <el-button text size="small" @click="unlockHostSelection">解锁手动选择</el-button>
+          </div>
+          <div v-if="hasUnmatchedIp" class="ip-warning-row">
+            <span class="warning-text">未找到 IP {{ parsedIp }} 对应服务器</span>
+            <el-button text type="primary" size="small" :loading="quickCreateLoading" @click="handleQuickCreateHost">
+              快捷新建服务器
+            </el-button>
+          </div>
         </el-form-item>
         <el-form-item label="运行端口">
           <el-input-number v-model="newDeploy.port" :min="1" :max="65535" class="w-full" />
@@ -145,7 +261,9 @@ onMounted(() => {
       </el-form>
       <template #footer>
         <el-button @click="addVisible = false">取消</el-button>
-        <el-button type="primary" :loading="saveLoading" @click="handleAdd">确定</el-button>
+        <el-button type="primary" :loading="saveLoading" :disabled="!newDeploy.host_id || contextLoading" @click="handleAdd">
+          确定
+        </el-button>
       </template>
     </el-dialog>
   </div>
@@ -167,5 +285,21 @@ onMounted(() => {
   font-size: 14px;
   font-weight: 600;
   color: var(--im-text-primary);
+}
+.host-lock-row,
+.ip-warning-row {
+  margin-top: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.lock-tip {
+  color: var(--im-text-secondary);
+  font-size: 12px;
+}
+.warning-text {
+  color: var(--im-color-warning-600, #d97706);
+  font-size: 12px;
 }
 </style>

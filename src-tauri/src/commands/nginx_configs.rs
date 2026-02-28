@@ -12,20 +12,21 @@ fn row_to_nginx_config(row: &rusqlite::Row) -> rusqlite::Result<NginxConfig> {
     Ok(NginxConfig {
         id: row.get(0)?,
         name: row.get(1)?,
-        listen_port: row.get(2)?,
-        strategy: row.get(3)?,
-        upstream_servers: row.get(4)?,
-        env: row.get(5)?,
-        status: row.get(6)?,
-        description: row.get(7)?,
-        is_deleted: row.get(8)?,
-        deleted_at: row.get(9)?,
-        created_at: row.get(10)?,
-        updated_at: row.get(11)?,
+        address: row.get(2)?,
+        listen_port: row.get(3)?,
+        strategy: row.get(4)?,
+        upstream_servers: row.get(5)?,
+        env: row.get(6)?,
+        status: row.get(7)?,
+        description: row.get(8)?,
+        is_deleted: row.get(9)?,
+        deleted_at: row.get(10)?,
+        created_at: row.get(11)?,
+        updated_at: row.get(12)?,
     })
 }
 
-const SELECT_COLUMNS: &str = "id, name, listen_port, strategy, upstream_servers, \
+const SELECT_COLUMNS: &str = "id, name, address, listen_port, strategy, upstream_servers, \
      env, status, description, is_deleted, deleted_at, created_at, updated_at";
 
 #[tauri::command]
@@ -38,7 +39,7 @@ pub fn list_nginx_configs(
         .get()
         .map_err(|e| AppError::db_unavailable(command, format!("Pool error: {}", e)))?;
 
-    let search_columns = &["name"];
+    let search_columns = &["name", "address"];
     let filter_columns = &["env", "status", "strategy"];
     let (where_clause, sql_params) = build_where_clause(&params, search_columns, filter_columns);
 
@@ -125,12 +126,13 @@ pub fn save_nginx_config(pool: State<DbPool>, data: NginxConfig) -> AppResult<()
                 data.id.clone()
             };
             conn.execute(
-                "INSERT INTO nginx_configs (id, name, listen_port, strategy, upstream_servers,
+                "INSERT INTO nginx_configs (id, name, address, listen_port, strategy, upstream_servers,
                                             env, status, description, is_deleted, deleted_at, created_at, updated_at)
-                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,0,NULL,?9,?9)",
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,0,NULL,?10,?10)",
                 rusqlite::params![
                     id,
                     data.name,
+                    data.address,
                     data.listen_port,
                     data.strategy,
                     data.upstream_servers,
@@ -145,11 +147,12 @@ pub fn save_nginx_config(pool: State<DbPool>, data: NginxConfig) -> AppResult<()
                 .map_err(|e| AppError::from_db_error(command, "写入审计日志", e))?;
         } else {
             conn.execute(
-                "UPDATE nginx_configs SET name=?1, listen_port=?2, strategy=?3, upstream_servers=?4,
-                                          env=?5, status=?6, description=?7, updated_at=?8
-                 WHERE id=?9 AND is_deleted=0",
+                "UPDATE nginx_configs SET name=?1, address=?2, listen_port=?3, strategy=?4, upstream_servers=?5,
+                                          env=?6, status=?7, description=?8, updated_at=?9
+                 WHERE id=?10 AND is_deleted=0",
                 rusqlite::params![
                     data.name,
+                    data.address,
                     data.listen_port,
                     data.strategy,
                     data.upstream_servers,
