@@ -10,9 +10,114 @@ html, body, #app {
   height: 100%;
   width: 100%;
   overflow: hidden;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-family: var(--im-font-body);
+  color: var(--im-text-primary);
+  background: var(--im-bg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  background:
+    radial-gradient(ellipse at 12% 0%, rgba(111, 168, 255, 0.12) 0%, transparent 45%),
+    radial-gradient(ellipse at 86% 100%, rgba(65, 197, 138, 0.08) 0%, transparent 42%),
+    var(--im-bg);
+}
+
+html[data-theme="light"] body {
+  background:
+    radial-gradient(ellipse at 12% 0%, rgba(72, 132, 228, 0.12) 0%, transparent 45%),
+    radial-gradient(ellipse at 86% 100%, rgba(65, 197, 138, 0.08) 0%, transparent 42%),
+    var(--im-bg);
 }
 
 .el-main {
   padding: 16px;
+}
+
+*:focus-visible {
+  outline: 2px solid var(--im-accent-dim);
+  outline-offset: 1px;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--im-border-active);
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--im-accent);
+}
+
+::selection {
+  background: var(--im-accent-dim);
+  color: var(--im-text-primary);
+}
+
+.el-card,
+.el-dialog,
+.el-popover,
+.el-popper {
+  border-radius: var(--im-radius-md);
+}
+
+.el-input__wrapper,
+.el-textarea__inner {
+  transition:
+    box-shadow var(--im-duration-base) var(--im-ease-standard),
+    border-color var(--im-duration-base) var(--im-ease-standard);
+}
+
+.el-input__wrapper:hover {
+  box-shadow: 0 0 0 1px var(--im-border-active) inset;
+}
+
+.el-input__wrapper.is-focus,
+.el-textarea__inner:focus {
+  box-shadow: 0 0 0 1px var(--im-accent) inset;
+}
+
+.w-full {
+  width: 100%;
+}
+
+.w-90 {
+  width: 90px;
+}
+
+.w-100 {
+  width: 100px;
+}
+
+.w-120 {
+  width: 120px;
+}
+
+.w-140 {
+  width: 140px;
+}
+
+.w-200 {
+  width: 200px;
+}
+
+.w-220 {
+  width: 220px;
+}
+
+.w-250 {
+  width: 250px;
+}
+
+.w-300 {
+  width: 300px;
 }

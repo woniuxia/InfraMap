@@ -12,22 +12,25 @@ fn row_to_host(row: &rusqlite::Row) -> rusqlite::Result<Host> {
         hostname: row.get(1)?,
         ip_address: row.get(2)?,
         os_type: row.get(3)?,
-        cpu_info: row.get(4)?,
-        ram_gb: row.get(5)?,
-        disk_gb: row.get(6)?,
-        status: row.get(7)?,
-        tags: row.get(8)?,
-        description: row.get(9)?,
-        is_deleted: row.get(10)?,
-        deleted_at: row.get(11)?,
-        created_at: row.get(12)?,
-        updated_at: row.get(13)?,
+        cpu_model: row.get(4)?,
+        cpu_cores: row.get(5)?,
+        cpu_threads: row.get(6)?,
+        cpu_freq: row.get(7)?,
+        ram_gb: row.get(8)?,
+        disk_gb: row.get(9)?,
+        status: row.get(10)?,
+        tags: row.get(11)?,
+        description: row.get(12)?,
+        is_deleted: row.get(13)?,
+        deleted_at: row.get(14)?,
+        created_at: row.get(15)?,
+        updated_at: row.get(16)?,
     })
 }
 
 const SELECT_COLUMNS: &str =
-    "id, hostname, ip_address, os_type, cpu_info, ram_gb, disk_gb, \
-     status, tags, description, is_deleted, deleted_at, created_at, updated_at";
+    "id, hostname, ip_address, os_type, cpu_model, cpu_cores, cpu_threads, cpu_freq, \
+     ram_gb, disk_gb, status, tags, description, is_deleted, deleted_at, created_at, updated_at";
 
 #[tauri::command]
 pub fn list_hosts(pool: State<DbPool>, params: QueryParams) -> Result<PagedResult<Host>, String> {
@@ -95,19 +98,22 @@ pub fn save_host(pool: State<DbPool>, data: Host) -> Result<(), String> {
         if is_new {
             let id = if data.id.is_empty() { uuid::Uuid::new_v4().to_string() } else { data.id.clone() };
             conn.execute(
-                "INSERT INTO hosts (id, hostname, ip_address, os_type, cpu_info, ram_gb, disk_gb,
-                                    status, tags, description, is_deleted, deleted_at, created_at, updated_at)
-                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,0,NULL,?11,?11)",
-                rusqlite::params![id, data.hostname, data.ip_address, data.os_type, data.cpu_info,
+                "INSERT INTO hosts (id, hostname, ip_address, os_type, cpu_model, cpu_cores, cpu_threads, cpu_freq,
+                                    ram_gb, disk_gb, status, tags, description, is_deleted, deleted_at, created_at, updated_at)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,0,NULL,?14,?14)",
+                rusqlite::params![id, data.hostname, data.ip_address, data.os_type,
+                                 data.cpu_model, data.cpu_cores, data.cpu_threads, data.cpu_freq,
                                  data.ram_gb, data.disk_gb, data.status, data.tags, data.description, now],
             ).map_err(|e| format!("Insert failed: {}", e))?;
             insert_audit_log(&conn, "create", "host", &id, Some(&data.hostname), None)?;
         } else {
             conn.execute(
-                "UPDATE hosts SET hostname=?1, ip_address=?2, os_type=?3, cpu_info=?4, ram_gb=?5, disk_gb=?6,
-                                  status=?7, tags=?8, description=?9, updated_at=?10
-                 WHERE id=?11 AND is_deleted=0",
-                rusqlite::params![data.hostname, data.ip_address, data.os_type, data.cpu_info,
+                "UPDATE hosts SET hostname=?1, ip_address=?2, os_type=?3, cpu_model=?4, cpu_cores=?5,
+                                  cpu_threads=?6, cpu_freq=?7, ram_gb=?8, disk_gb=?9,
+                                  status=?10, tags=?11, description=?12, updated_at=?13
+                 WHERE id=?14 AND is_deleted=0",
+                rusqlite::params![data.hostname, data.ip_address, data.os_type,
+                                 data.cpu_model, data.cpu_cores, data.cpu_threads, data.cpu_freq,
                                  data.ram_gb, data.disk_gb, data.status, data.tags, data.description, now, data.id],
             ).map_err(|e| format!("Update failed: {}", e))?;
             insert_audit_log(&conn, "update", "host", &data.id, Some(&data.hostname), None)?;

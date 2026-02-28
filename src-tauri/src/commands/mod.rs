@@ -7,3 +7,6 @@ pub mod deployments;
 pub mod dependencies;
 pub mod dashboard;
 pub mod audit_logs;
+pub mod topology;
+pub mod settings;
+pub mod backup;

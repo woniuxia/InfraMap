@@ -1,5 +1,130 @@
 :root {
-  --sidebar-width: 200px;
-  --sidebar-collapsed-width: 64px;
+  --sidebar-width: 220px;
+  --sidebar-collapsed-width: 68px;
   --header-height: 56px;
+
+  --im-bg: #0a0f1a;
+  --im-surface-0: #0f1728;
+  --im-surface-1: #141f33;
+  --im-surface-2: #1c2a40;
+  --im-surface-3: #24344d;
+
+  --im-border: rgba(111, 168, 255, 0.14);
+  --im-border-light: rgba(111, 168, 255, 0.09);
+  --im-border-subtle: rgba(111, 168, 255, 0.06);
+  --im-border-active: rgba(111, 168, 255, 0.34);
+
+  --im-text-primary: #e6eefc;
+  --im-text-regular: #c4d0e6;
+  --im-text-secondary: #93a4c4;
+  --im-text-muted: #6f7f9c;
+  --im-text-disabled: #55627d;
+
+  --im-accent: #6fa8ff;
+  --im-accent-light: #95beff;
+  --im-accent-dim: rgba(111, 168, 255, 0.16);
+  --im-accent-soft: rgba(111, 168, 255, 0.08);
+
+  --im-success: #41c58a;
+  --im-warning: #f2b645;
+  --im-danger: #ef6b73;
+  --im-info: #5ca3ff;
+
+  --im-radius-sm: 8px;
+  --im-radius-md: 12px;
+  --im-radius-lg: 16px;
+  --im-radius-xl: 20px;
+
+  --im-shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.22);
+  --im-shadow-md: 0 10px 26px rgba(0, 0, 0, 0.26);
+  --im-shadow-lg: 0 16px 44px rgba(0, 0, 0, 0.34);
+
+  --im-duration-fast: 120ms;
+  --im-duration-base: 180ms;
+  --im-duration-slow: 300ms;
+  --im-ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+
+  --im-font-display: "Outfit", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --im-font-body: "DM Sans", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --im-font-mono: "JetBrains Mono", "Cascadia Code", "Consolas", monospace;
+
+  --el-color-primary: var(--im-accent);
+  --el-color-primary-light-3: #8ab8ff;
+  --el-color-primary-light-5: #a2c5ff;
+  --el-color-primary-light-7: #bdd5ff;
+  --el-color-primary-light-8: #c9deff;
+  --el-color-primary-light-9: #d8e7ff;
+  --el-color-primary-dark-2: #4f91ff;
+
+  --el-color-success: var(--im-success);
+  --el-color-warning: var(--im-warning);
+  --el-color-danger: var(--im-danger);
+  --el-color-info: var(--im-info);
+
+  --el-bg-color-page: var(--im-bg);
+  --el-bg-color: var(--im-surface-0);
+  --el-bg-color-overlay: var(--im-surface-1);
+
+  --el-text-color-primary: var(--im-text-primary);
+  --el-text-color-regular: var(--im-text-regular);
+  --el-text-color-secondary: var(--im-text-secondary);
+  --el-text-color-placeholder: var(--im-text-muted);
+  --el-text-color-disabled: var(--im-text-disabled);
+
+  --el-border-color: var(--im-border);
+  --el-border-color-light: var(--im-border-light);
+  --el-border-color-lighter: var(--im-border-subtle);
+  --el-border-color-extra-light: rgba(111, 168, 255, 0.04);
+  --el-border-color-dark: rgba(111, 168, 255, 0.2);
+  --el-border-color-darker: rgba(111, 168, 255, 0.28);
+
+  --el-fill-color: rgba(255, 255, 255, 0.055);
+  --el-fill-color-light: rgba(255, 255, 255, 0.038);
+  --el-fill-color-lighter: rgba(255, 255, 255, 0.028);
+  --el-fill-color-extra-light: rgba(255, 255, 255, 0.02);
+  --el-fill-color-dark: rgba(255, 255, 255, 0.07);
+  --el-fill-color-darker: rgba(255, 255, 255, 0.09);
+  --el-fill-color-blank: var(--im-surface-1);
+
+  --el-menu-bg-color: transparent;
+  --el-menu-hover-bg-color: rgba(255, 255, 255, 0.06);
+  --el-menu-active-color: var(--im-accent);
+  --el-menu-text-color: var(--im-text-secondary);
+  --el-menu-hover-text-color: var(--im-text-primary);
+}
+
+html[data-theme="light"] {
+  --im-bg: #f3f7ff;
+  --im-surface-0: #ffffff;
+  --im-surface-1: #f8fbff;
+  --im-surface-2: #eef4ff;
+  --im-surface-3: #e6eeff;
+
+  --im-border: rgba(35, 86, 166, 0.16);
+  --im-border-light: rgba(35, 86, 166, 0.1);
+  --im-border-subtle: rgba(35, 86, 166, 0.07);
+  --im-border-active: rgba(72, 132, 228, 0.4);
+
+  --im-text-primary: #1a2842;
+  --im-text-regular: #31466d;
+  --im-text-secondary: #536991;
+  --im-text-muted: #7f90ae;
+  --im-text-disabled: #a2b0c8;
+
+  --im-accent: #4884e4;
+  --im-accent-light: #679cf4;
+  --im-accent-dim: rgba(72, 132, 228, 0.12);
+  --im-accent-soft: rgba(72, 132, 228, 0.07);
+
+  --im-shadow-sm: 0 2px 8px rgba(20, 44, 90, 0.08);
+  --im-shadow-md: 0 8px 24px rgba(20, 44, 90, 0.12);
+  --im-shadow-lg: 0 14px 36px rgba(20, 44, 90, 0.16);
+
+  --el-color-primary: var(--im-accent);
+  --el-color-primary-light-3: #6297ef;
+  --el-color-primary-light-5: #7aa8f3;
+  --el-color-primary-light-7: #a4c5f7;
+  --el-color-primary-light-8: #bfd6fb;
+  --el-color-primary-light-9: #d9e6fd;
+  --el-color-primary-dark-2: #2f71dc;
 }

@@ -7,3 +7,5 @@ pub mod deployment;
 pub mod dependency;
 pub mod audit_log;
 pub mod dashboard;
+pub mod topology;
+pub mod settings;

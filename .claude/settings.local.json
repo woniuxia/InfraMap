@@ -15,7 +15,12 @@
       "Bash(\"C:/Users/huahua/AppData/Local/Programs/Python/Python312/python.exe\":*)",
       "Bash(cd E:/Projects/InfraMap/src-tauri && cargo check 2>&1)",
       "Bash(cd E:/Projects/InfraMap/src-tauri && cargo build 2>&1)",
-      "Bash(cd:*)"
+      "Bash(cd:*)",
+      "Bash(cd \"E:/Projects/InfraMap\" && npx vue-tsc --noEmit 2>&1)",
+      "Bash(cd \"E:/Projects/InfraMap\" && npx vite build 2>&1)",
+      "Bash(cd E:/Projects/InfraMap && npx vue-tsc --noEmit 2>&1)",
+      "Bash(cd E:/Projects/InfraMap/src-tauri && cargo test 2>&1)",
+      "Bash(cd E:/Projects/InfraMap && npx vitest run 2>&1)"
     ]
   }
 }

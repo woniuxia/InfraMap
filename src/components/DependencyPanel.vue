@@ -27,7 +27,7 @@ const targetOptions = ref<ResourceOption[]>([]);
 const newDep = ref<{
   target_id: string;
   target_type: string;
-  relation_type: string;
+  relation_type: NonNullable<Dependency["relation_type"]>;
   description: string;
 }>({
   target_id: "",
@@ -183,7 +183,7 @@ onMounted(() => {
             v-model="newDep.target_id"
             filterable
             placeholder="选择目标资源"
-            style="width: 100%"
+            class="w-full"
             @change="onTargetChange"
           >
             <el-option-group
@@ -205,7 +205,7 @@ onMounted(() => {
           </el-select>
         </el-form-item>
         <el-form-item label="关系类型" required>
-          <el-select v-model="newDep.relation_type" style="width: 100%">
+          <el-select v-model="newDep.relation_type" class="w-full">
             <el-option label="HTTP调用" value="http_call" />
             <el-option label="TCP连接" value="tcp" />
             <el-option label="MQ生产" value="mq_produce" />
@@ -227,7 +227,7 @@ onMounted(() => {
 <style scoped lang="scss">
 .dependency-panel {
   margin-top: 16px;
-  border-top: 1px solid var(--el-border-color-lighter);
+  border-top: 1px solid var(--im-border-subtle);
   padding-top: 12px;
 }
 .panel-header {
@@ -239,6 +239,6 @@ onMounted(() => {
 .panel-title {
   font-size: 14px;
   font-weight: 600;
-  color: var(--el-text-color-primary);
+  color: var(--im-text-primary);
 }
 </style>

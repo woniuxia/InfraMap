@@ -15,7 +15,6 @@ const pageTitle = computed(() => (route.meta?.title as string) || "InfraMap");
         placeholder="搜索服务名/IP..."
         :prefix-icon="Search"
         class="global-search"
-        style="width: 300px"
         clearable
       />
     </div>
@@ -30,13 +29,17 @@ const pageTitle = computed(() => (route.meta?.title as string) || "InfraMap");
   width: 100%;
 }
 .page-title {
+  font-family: var(--im-font-display);
   font-size: 18px;
   font-weight: 600;
-  color: var(--el-text-color-primary);
+  color: var(--im-text-primary);
 }
 .topbar-right {
   display: flex;
   align-items: center;
   gap: 12px;
+}
+.global-search {
+  width: 300px;
 }
 </style>

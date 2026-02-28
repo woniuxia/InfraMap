@@ -129,7 +129,7 @@ onMounted(() => {
     <el-dialog v-model="addVisible" title="添加部署关系" width="400px" append-to-body>
       <el-form :model="newDeploy" label-width="90px">
         <el-form-item label="目标服务器" required>
-          <el-select v-model="newDeploy.host_id" filterable placeholder="选择服务器" style="width: 100%">
+          <el-select v-model="newDeploy.host_id" filterable placeholder="选择服务器" class="w-full">
             <el-option
               v-for="h in hosts"
               :key="h.id"
@@ -139,7 +139,7 @@ onMounted(() => {
           </el-select>
         </el-form-item>
         <el-form-item label="运行端口">
-          <el-input-number v-model="newDeploy.port" :min="1" :max="65535" style="width: 100%" />
+          <el-input-number v-model="newDeploy.port" :min="1" :max="65535" class="w-full" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -153,7 +153,7 @@ onMounted(() => {
 <style scoped lang="scss">
 .deployment-panel {
   margin-top: 16px;
-  border-top: 1px solid var(--el-border-color-lighter);
+  border-top: 1px solid var(--im-border-subtle);
   padding-top: 12px;
 }
 .panel-header {
@@ -165,6 +165,6 @@ onMounted(() => {
 .panel-title {
   font-size: 14px;
   font-weight: 600;
-  color: var(--el-text-color-primary);
+  color: var(--im-text-primary);
 }
 </style>

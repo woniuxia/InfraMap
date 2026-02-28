@@ -35,8 +35,8 @@ const SELECT_COLUMNS: &str =
 pub fn list_applications(pool: State<DbPool>, params: QueryParams) -> Result<PagedResult<Application>, String> {
     let conn = pool.get().map_err(|e| format!("Pool error: {}", e))?;
 
-    let search_columns = &["name", "address"];
-    let filter_columns = &["type", "env", "status", "owner"];
+    let search_columns = &["name", "address", "owner", "tech_stack", "git_repo"];
+    let filter_columns = &["type", "env", "status", "owner", "deploy_mode"];
     let (where_clause, sql_params) = build_where_clause(&params, search_columns, filter_columns);
 
     let total = count_query(&conn, "applications", &where_clause, &sql_params)?;

@@ -1,9 +1,11 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { ref, onMounted } from "vue";
 import { ElMessage } from "element-plus";
 import type { NginxConfig } from "@/types";
+import type { SearchFieldConfig, SearchToolbarQueryPayload } from "@/types/searchToolbar";
 import { listNginxConfigs, saveNginxConfig, softDeleteNginxConfig } from "@/api/nginx-configs";
 import { useResourceList } from "@/composables/useResourceList";
+import SearchToolbar from "@/components/filters/SearchToolbar.vue";
 import DeploymentPanel from "@/components/DeploymentPanel.vue";
 
 const {
@@ -12,15 +14,14 @@ const {
   total,
   queryParams,
   fetchData,
-  handleSearch,
-  handleFilter,
+  handleQuery,
   handlePageChange,
   handlePageSizeChange,
   handleDelete,
 } = useResourceList<NginxConfig>({
   listFn: listNginxConfigs,
   deleteFn: softDeleteNginxConfig,
-  entityLabel: "负载均衡",
+  entityLabel: "璐熻浇鍧囪　",
 });
 
 const searchText = ref("");
@@ -29,12 +30,81 @@ const editingNc = ref<Partial<NginxConfig>>({});
 const isEditing = ref(false);
 const saveLoading = ref(false);
 
-function onSearch() {
-  handleSearch(searchText.value);
+interface NginxListFilters {
+  env: string[];
+  status: string[];
+  strategy: string[];
+}
+
+function createDefaultFilters(): NginxListFilters {
+  return {
+    env: [],
+    status: [],
+    strategy: [],
+  };
+}
+
+const listFilters = ref<NginxListFilters>(createDefaultFilters());
+const envOptions = [
+  { label: "生产", value: "prod" },
+  { label: "开发", value: "dev" },
+  { label: "测试", value: "test" },
+];
+
+const statusOptions = [
+  { label: "运行中", value: "running" },
+  { label: "已停止", value: "stopped" },
+  { label: "维护中", value: "maintenance" },
+];
+
+const strategyOptions = [
+  { label: "轮询", value: "roundrobin" },
+  { label: "IP 哈希", value: "ip_hash" },
+];
+
+const toolbarFields: SearchFieldConfig[] = [
+  {
+    key: "env",
+    queryKey: "env",
+    label: "环境",
+    type: "multi-select",
+    width: "sm",
+    options: envOptions,
+  },
+  {
+    key: "status",
+    queryKey: "status",
+    label: "状态",
+    type: "multi-select",
+    width: "md",
+    maxCollapseTags: 2,
+    options: statusOptions,
+  },
+  {
+    key: "strategy",
+    queryKey: "strategy",
+    label: "策略",
+    section: "advanced",
+    type: "multi-select",
+    width: "sm",
+    options: strategyOptions,
+  },
+];
+
+function handleToolbarQuery(payload: SearchToolbarQueryPayload) {
+  handleQuery(payload);
 }
 
 function openAdd() {
-  editingNc.value = { status: "running", env: "prod", strategy: "roundrobin" };
+  editingNc.value = {
+    id: "",
+    status: "running",
+    env: "prod",
+    strategy: "roundrobin",
+    is_deleted: 0,
+    created_at: "",
+    updated_at: "",
+  };
   isEditing.value = false;
   drawerVisible.value = true;
 }
@@ -46,10 +116,17 @@ function openEdit(row: NginxConfig) {
 }
 
 async function handleSave() {
+  const payload: Partial<NginxConfig> = {
+    id: "",
+    is_deleted: 0,
+    created_at: "",
+    updated_at: "",
+    ...editingNc.value,
+  };
   saveLoading.value = true;
   try {
-    await saveNginxConfig(editingNc.value);
-    ElMessage.success(isEditing.value ? "更新成功" : "创建成功");
+    await saveNginxConfig(payload);
+    ElMessage.success(isEditing.value ? "鏇存柊鎴愬姛" : "鍒涘缓鎴愬姛");
     drawerVisible.value = false;
     fetchData();
   } catch {
@@ -59,38 +136,34 @@ async function handleSave() {
   }
 }
 
-function statusTagType(status: string) {
-  return (
-    ({ running: "success", stopped: "danger", maintenance: "warning" } as Record<string, string>)[
-      status
-    ] || "info"
-  );
+function statusTagType(status: string): "primary" | "success" | "warning" | "info" | "danger" {
+  const map: Record<string, "primary" | "success" | "warning" | "info" | "danger"> = {
+    running: "success",
+    stopped: "danger",
+    maintenance: "warning",
+  };
+  return map[status] || "info";
 }
 
 function statusLabel(status: string) {
-  return (
-    ({ running: "运行中", stopped: "已停止", maintenance: "维护中" } as Record<string, string>)[
-      status
-    ] || status
-  );
+  return ({ running: "运行中", stopped: "已停止", maintenance: "维护中" } as Record<string, string>)[status] || status;
 }
 
 function strategyLabel(strategy: string) {
-  return (
-    ({ roundrobin: "轮询", ip_hash: "IP哈希" } as Record<string, string>)[strategy] || strategy || "-"
-  );
+  return ({ roundrobin: "杞", ip_hash: "IP 鍝堝笇" } as Record<string, string>)[strategy] || strategy || "-";
 }
 
 function envLabel(env: string) {
-  return (
-    ({ prod: "生产", dev: "开发", test: "测试" } as Record<string, string>)[env] || env
-  );
+  return ({ prod: "生产", dev: "开发", test: "测试" } as Record<string, string>)[env] || env;
 }
 
-function envTagType(env: string) {
-  return (
-    ({ prod: "danger", dev: "", test: "warning" } as Record<string, string>)[env] || "info"
-  );
+function envTagType(env: string): "primary" | "success" | "warning" | "info" | "danger" {
+  const map: Record<string, "primary" | "success" | "warning" | "info" | "danger"> = {
+    prod: "danger",
+    dev: "info",
+    test: "warning",
+  };
+  return map[env] || "info";
 }
 
 onMounted(() => fetchData());
@@ -98,49 +171,20 @@ onMounted(() => fetchData());
 
 <template>
   <div class="resource-view">
-    <div class="filter-bar">
-      <el-input
-        v-model="searchText"
-        placeholder="搜索配置名称..."
-        clearable
-        style="width: 250px"
-        @clear="onSearch"
-        @keyup.enter="onSearch"
-      />
-      <el-select
-        placeholder="环境"
-        clearable
-        style="width: 100px"
-        @change="(v: string) => handleFilter('env', v)"
-      >
-        <el-option label="生产" value="prod" />
-        <el-option label="开发" value="dev" />
-        <el-option label="测试" value="test" />
-      </el-select>
-      <el-select
-        placeholder="状态"
-        clearable
-        style="width: 120px"
-        @change="(v: string) => handleFilter('status', v)"
-      >
-        <el-option label="运行中" value="running" />
-        <el-option label="已停止" value="stopped" />
-        <el-option label="维护中" value="maintenance" />
-      </el-select>
-      <el-select
-        placeholder="策略"
-        clearable
-        style="width: 120px"
-        @change="(v: string) => handleFilter('strategy', v)"
-      >
-        <el-option label="轮询" value="roundrobin" />
-        <el-option label="IP哈希" value="ip_hash" />
-      </el-select>
-      <el-button type="primary" @click="openAdd">新增配置</el-button>
-    </div>
-
-    <el-table :data="data" v-loading="loading" border stripe style="width: 100%">
-      <el-table-column prop="name" label="配置名称" min-width="180" />
+    <SearchToolbar
+      v-model:search-text="searchText"
+      v-model:filters="listFilters"
+      search-placeholder="搜索配置名称..."
+      :fields="toolbarFields"
+      @query="handleToolbarQuery"
+    >
+      <template #actions="{ hasActiveFilters, reset }">
+        <el-button :disabled="!hasActiveFilters" @click="reset">重置筛选</el-button>
+        <el-button type="primary" @click="openAdd">新增配置</el-button>
+      </template>
+    </SearchToolbar>
+    <el-table :data="data" v-loading="loading" border stripe class="w-full">
+      <el-table-column prop="name" label="配置名称" min-width="180" align="center" />
       <el-table-column prop="listen_port" label="监听端口" width="100" align="center">
         <template #default="{ row }">{{ row.listen_port || "-" }}</template>
       </el-table-column>
@@ -154,17 +198,13 @@ onMounted(() => fetchData());
       </el-table-column>
       <el-table-column prop="status" label="状态" width="100" align="center">
         <template #default="{ row }">
-          <el-tag :type="statusTagType(row.status)" size="small">{{
-            statusLabel(row.status)
-          }}</el-tag>
+          <el-tag :type="statusTagType(row.status)" size="small">{{ statusLabel(row.status) }}</el-tag>
         </template>
       </el-table-column>
       <el-table-column label="操作" width="150" fixed="right" align="center">
         <template #default="{ row }">
           <el-button text type="primary" size="small" @click="openEdit(row)">编辑</el-button>
-          <el-button text type="danger" size="small" @click="handleDelete(row.id, row.name)"
-            >删除</el-button
-          >
+          <el-button text type="danger" size="small" @click="handleDelete(row.id, row.name)">删除</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -181,65 +221,65 @@ onMounted(() => fetchData());
       />
     </div>
 
-    <el-drawer
+    <el-dialog
       v-model="drawerVisible"
       :title="isEditing ? '编辑负载均衡' : '新增负载均衡'"
-      size="500px"
+      width="700px"
+      align-center
+      destroy-on-close
     >
-      <el-form :model="editingNc" label-width="110px">
+      <el-form :model="editingNc" label-width="96px">
+        <el-divider content-position="left">基础信息</el-divider>
         <el-form-item label="配置名称" required>
           <el-input v-model="editingNc.name" placeholder="请输入配置名称" />
         </el-form-item>
         <el-form-item label="监听端口">
-          <el-input-number
-            v-model="editingNc.listen_port"
-            :min="1"
-            :max="65535"
-            style="width: 100%"
-          />
+          <el-input-number v-model="editingNc.listen_port" :min="1" :max="65535" class="w-full" />
         </el-form-item>
         <el-form-item label="负载策略">
-          <el-select v-model="editingNc.strategy" style="width: 100%">
+          <el-select v-model="editingNc.strategy" class="w-full">
             <el-option label="轮询 (roundrobin)" value="roundrobin" />
-            <el-option label="IP哈希 (ip_hash)" value="ip_hash" />
+            <el-option label="IP 哈希 (ip_hash)" value="ip_hash" />
           </el-select>
         </el-form-item>
+
+        <el-divider content-position="left">上游配置</el-divider>
         <el-form-item label="上游服务器">
           <el-input
             v-model="editingNc.upstream_servers"
             type="textarea"
             :rows="4"
-            placeholder='JSON数组，如 ["192.168.1.10:8080","192.168.1.11:8080"]'
+            placeholder='JSON 数组，如 ["192.168.1.10:8080", "192.168.1.11:8080"]'
           />
         </el-form-item>
+
+        <el-divider content-position="left">运维信息</el-divider>
         <el-form-item label="环境" required>
-          <el-select v-model="editingNc.env" style="width: 100%">
+          <el-select v-model="editingNc.env" class="w-full">
             <el-option label="生产" value="prod" />
             <el-option label="开发" value="dev" />
             <el-option label="测试" value="test" />
           </el-select>
         </el-form-item>
         <el-form-item label="状态" required>
-          <el-select v-model="editingNc.status" style="width: 100%">
+          <el-select v-model="editingNc.status" class="w-full">
             <el-option label="运行中" value="running" />
             <el-option label="已停止" value="stopped" />
             <el-option label="维护中" value="maintenance" />
           </el-select>
         </el-form-item>
         <el-form-item label="描述">
-          <el-input v-model="editingNc.description" type="textarea" :rows="3" />
+          <el-input v-model="editingNc.description" type="textarea" :rows="3" maxlength="300" show-word-limit />
         </el-form-item>
       </el-form>
-      <DeploymentPanel
-        v-if="isEditing && editingNc.id"
-        :resource-id="editingNc.id!"
-        resource-type="nginx"
-      />
+
+      <DeploymentPanel v-if="isEditing && editingNc.id" :resource-id="editingNc.id!" resource-type="nginx" />
+
       <template #footer>
         <el-button @click="drawerVisible = false">取消</el-button>
         <el-button type="primary" :loading="saveLoading" @click="handleSave">保存</el-button>
       </template>
-    </el-drawer>
+    </el-dialog>
   </div>
 </template>
 
@@ -249,9 +289,95 @@ onMounted(() => fetchData());
 }
 .filter-bar {
   display: flex;
+  flex-direction: column;
   gap: 12px;
   margin-bottom: 16px;
+  padding: 12px;
+  border: 1px solid var(--im-border-light);
+  border-radius: var(--im-radius-md);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--im-surface-1) 82%, transparent), var(--im-surface-0));
+}
+.filter-row {
+  display: grid;
+  gap: 12px;
   align-items: center;
+}
+.filter-row-primary {
+  grid-template-columns: minmax(0, 2.4fr) minmax(0, 1.2fr) minmax(0, 1.5fr) minmax(0, 1.5fr);
+}
+.filter-row-secondary {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+.filter-spacer {
+  min-width: 0;
+}
+.filter-field {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+}
+.filter-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  justify-self: end;
+  white-space: nowrap;
+}
+.filter-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--el-text-color-secondary);
+  white-space: nowrap;
+  text-align: right;
+}
+.search-filter,
+.env-filter,
+.status-filter,
+.strategy-filter {
+  width: 100%;
+  min-width: 0;
+}
+:deep(.env-filter .el-select__selection),
+:deep(.status-filter .el-select__selection),
+:deep(.strategy-filter .el-select__selection) {
+  flex-wrap: nowrap;
+  overflow: hidden;
+}
+:deep(.env-filter .el-select__selected-item),
+:deep(.status-filter .el-select__selected-item),
+:deep(.strategy-filter .el-select__selected-item) {
+  max-width: 100%;
+}
+@media (max-width: 1080px) {
+  .filter-row-primary {
+    grid-template-columns: minmax(0, 2.2fr) minmax(0, 1.1fr) minmax(0, 1.3fr) minmax(0, 1.3fr);
+  }
+}
+@media (max-width: 920px) {
+  .filter-row-primary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .search-field {
+    grid-column: 1 / -1;
+  }
+}
+@media (max-width: 768px) {
+  .filter-row-primary,
+  .filter-row-secondary {
+    grid-template-columns: 1fr;
+  }
+  .filter-actions {
+    width: 100%;
+    justify-self: start;
+    justify-content: flex-start;
+  }
+  .search-field {
+    grid-column: auto;
+  }
 }
 .pagination-wrapper {
   margin-top: 16px;
@@ -259,3 +385,4 @@ onMounted(() => fetchData());
   justify-content: flex-end;
 }
 </style>
+

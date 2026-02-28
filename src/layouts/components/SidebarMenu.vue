@@ -65,32 +65,58 @@ const menuItems: { path: string; name: string; icon: Component }[] = [
   display: flex;
   flex-direction: column;
   height: 100%;
+  background: var(--im-surface-0);
 }
 .sidebar-header {
   height: 56px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-bottom: 1px solid var(--el-border-color-light);
+  border-bottom: 1px solid var(--im-border-light);
   font-weight: 600;
 }
 .logo-text {
+  font-family: var(--im-font-display);
   font-size: 18px;
-  color: var(--el-color-primary);
+  color: var(--im-accent);
 }
 .logo-icon {
   font-size: 16px;
   font-weight: 700;
-  color: var(--el-color-primary);
+  color: var(--im-accent);
 }
 .el-menu {
   flex: 1;
   border-right: none;
+
+  :deep(.el-menu-item) {
+    margin: 2px 8px;
+    border-radius: var(--im-radius-sm);
+    transition: all var(--im-duration-base) var(--im-ease-standard);
+  }
+
+  :deep(.el-menu-item.is-active) {
+    background: var(--im-accent-dim);
+    color: var(--im-accent);
+    position: relative;
+  }
+
+  :deep(.el-menu-item.is-active::before) {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 3px;
+    height: 16px;
+    border-radius: 0 2px 2px 0;
+    background: var(--im-accent);
+  }
 }
 .sidebar-footer {
   padding: 8px;
   display: flex;
   justify-content: center;
-  border-top: 1px solid var(--el-border-color-light);
+  border-top: 1px solid var(--im-border-light);
 }
 </style>

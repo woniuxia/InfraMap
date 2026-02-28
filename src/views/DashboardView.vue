@@ -4,10 +4,12 @@ import type { DashboardStats, AuditLog } from "@/types";
 import { getDashboardStats } from "@/api/dashboard";
 import { listAuditLogs } from "@/api/audit-logs";
 import { Monitor, Menu, Connection, SetUp } from "@element-plus/icons-vue";
+import { useRouter } from "vue-router";
 
 const stats = ref<DashboardStats | null>(null);
 const recentLogs = ref<AuditLog[]>([]);
 const loading = ref(false);
+const router = useRouter();
 
 async function loadDashboard() {
   loading.value = true;
@@ -22,9 +24,9 @@ async function loadDashboard() {
   }
 }
 
-function actionTagType(action: string) {
+function actionTagType(action: string): "primary" | "success" | "warning" | "info" | "danger" {
   return (
-    ({ create: "success", update: "warning", delete: "danger" } as Record<string, string>)[
+    ({ create: "success", update: "warning", delete: "danger" } as Record<string, "success" | "warning" | "danger">)[
       action
     ] || "info"
   );
@@ -60,6 +62,10 @@ function formatTime(iso: string) {
   return d.toLocaleString("zh-CN", { hour12: false });
 }
 
+function goToCategory(name: "Hosts" | "Applications" | "Middlewares" | "NginxConfigs") {
+  router.push({ name });
+}
+
 onMounted(loadDashboard);
 </script>
 
@@ -67,8 +73,8 @@ onMounted(loadDashboard);
   <div class="dashboard-view" v-loading="loading">
     <el-row :gutter="16" class="stats-row">
       <el-col :span="6">
-        <el-card shadow="hover" class="stat-card">
-          <div class="stat-icon" style="background: var(--el-color-primary-light-9)">
+        <el-card shadow="hover" class="stat-card clickable" @click="goToCategory('Hosts')">
+          <div class="stat-icon stat-icon-primary">
             <el-icon :size="28" color="var(--el-color-primary)"><Monitor /></el-icon>
           </div>
           <div class="stat-info">
@@ -81,8 +87,8 @@ onMounted(loadDashboard);
         </el-card>
       </el-col>
       <el-col :span="6">
-        <el-card shadow="hover" class="stat-card">
-          <div class="stat-icon" style="background: var(--el-color-success-light-9)">
+        <el-card shadow="hover" class="stat-card clickable" @click="goToCategory('Applications')">
+          <div class="stat-icon stat-icon-success">
             <el-icon :size="28" color="var(--el-color-success)"><Menu /></el-icon>
           </div>
           <div class="stat-info">
@@ -95,8 +101,8 @@ onMounted(loadDashboard);
         </el-card>
       </el-col>
       <el-col :span="6">
-        <el-card shadow="hover" class="stat-card">
-          <div class="stat-icon" style="background: var(--el-color-warning-light-9)">
+        <el-card shadow="hover" class="stat-card clickable" @click="goToCategory('Middlewares')">
+          <div class="stat-icon stat-icon-warning">
             <el-icon :size="28" color="var(--el-color-warning)"><Connection /></el-icon>
           </div>
           <div class="stat-info">
@@ -106,8 +112,8 @@ onMounted(loadDashboard);
         </el-card>
       </el-col>
       <el-col :span="6">
-        <el-card shadow="hover" class="stat-card">
-          <div class="stat-icon" style="background: var(--el-color-danger-light-9)">
+        <el-card shadow="hover" class="stat-card clickable" @click="goToCategory('NginxConfigs')">
+          <div class="stat-icon stat-icon-danger">
             <el-icon :size="28" color="var(--el-color-danger)"><SetUp /></el-icon>
           </div>
           <div class="stat-info">
@@ -121,7 +127,7 @@ onMounted(loadDashboard);
       </el-col>
     </el-row>
 
-    <el-row :gutter="16" style="margin-top: 16px">
+    <el-row :gutter="16" class="section-row">
       <el-col :span="8">
         <el-card>
           <template #header>环境分布</template>
@@ -150,7 +156,7 @@ onMounted(loadDashboard);
       <el-col :span="16">
         <el-card>
           <template #header>
-            <div style="display: flex; justify-content: space-between; align-items: center">
+            <div class="card-header-row">
               <span>最近变更</span>
               <el-button text type="primary" @click="loadDashboard">刷新</el-button>
             </div>
@@ -190,16 +196,35 @@ onMounted(loadDashboard);
 .dashboard-view {
   padding: 0;
 }
+.section-row {
+  margin-top: 16px;
+}
 .stats-row {
   margin-bottom: 0;
 }
 .stat-card {
+  border-radius: var(--im-radius-md);
+  border-color: var(--im-border-light);
+  transition:
+    transform var(--im-duration-base) var(--im-ease-standard),
+    box-shadow var(--im-duration-base) var(--im-ease-standard),
+    border-color var(--im-duration-base) var(--im-ease-standard);
+
   :deep(.el-card__body) {
     display: flex;
     align-items: center;
     gap: 16px;
     padding: 20px;
   }
+
+  &:hover {
+    border-color: var(--im-border-active);
+    box-shadow: var(--im-shadow-md);
+    transform: translateY(-2px);
+  }
+}
+.clickable {
+  cursor: pointer;
 }
 .stat-icon {
   width: 56px;
@@ -210,22 +235,39 @@ onMounted(loadDashboard);
   justify-content: center;
   flex-shrink: 0;
 }
+.stat-icon-primary {
+  background: var(--el-color-primary-light-9);
+}
+.stat-icon-success {
+  background: rgba(65, 197, 138, 0.18);
+}
+.stat-icon-warning {
+  background: rgba(242, 182, 69, 0.2);
+}
+.stat-icon-danger {
+  background: rgba(239, 107, 115, 0.18);
+}
 .stat-info {
   flex: 1;
 }
 .stat-title {
   font-size: 13px;
-  color: var(--el-text-color-secondary);
+  color: var(--im-text-secondary);
   margin-bottom: 4px;
 }
 .stat-number {
   font-size: 28px;
   font-weight: 700;
-  color: var(--el-text-color-primary);
+  color: var(--im-text-primary);
   line-height: 1.2;
 }
 .stat-sub {
   margin-top: 4px;
+}
+.card-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 }
 .env-list {
   display: flex;
@@ -240,7 +282,7 @@ onMounted(loadDashboard);
 .env-label {
   width: 40px;
   font-size: 13px;
-  color: var(--el-text-color-regular);
+  color: var(--im-text-regular);
   flex-shrink: 0;
 }
 .env-item .el-progress {

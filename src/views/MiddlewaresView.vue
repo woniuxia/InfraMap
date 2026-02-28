@@ -1,9 +1,11 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { ref, onMounted } from "vue";
 import { ElMessage } from "element-plus";
 import type { Middleware } from "@/types";
+import type { SearchFieldConfig, SearchToolbarQueryPayload } from "@/types/searchToolbar";
 import { listMiddlewares, saveMiddleware, softDeleteMiddleware } from "@/api/middlewares";
 import { useResourceList } from "@/composables/useResourceList";
+import SearchToolbar from "@/components/filters/SearchToolbar.vue";
 import DeploymentPanel from "@/components/DeploymentPanel.vue";
 
 const {
@@ -12,8 +14,7 @@ const {
   total,
   queryParams,
   fetchData,
-  handleSearch,
-  handleFilter,
+  handleQuery,
   handlePageChange,
   handlePageSizeChange,
   handleDelete,
@@ -29,12 +30,66 @@ const editingMw = ref<Partial<Middleware>>({});
 const isEditing = ref(false);
 const saveLoading = ref(false);
 
-function onSearch() {
-  handleSearch(searchText.value);
+interface MiddlewareListFilters {
+  category: string[];
+  env: string[];
+}
+
+function createDefaultFilters(): MiddlewareListFilters {
+  return {
+    category: [],
+    env: [],
+  };
+}
+
+const listFilters = ref<MiddlewareListFilters>(createDefaultFilters());
+const categoryOptions = [
+  { label: "数据库", value: "database" },
+  { label: "消息队列", value: "message_queue" },
+  { label: "缓存", value: "cache" },
+  { label: "搜索引擎", value: "search_engine" },
+  { label: "配置中心", value: "config_center" },
+  { label: "其他", value: "other" },
+];
+
+const envOptions = [
+  { label: "生产", value: "prod" },
+  { label: "开发", value: "dev" },
+  { label: "测试", value: "test" },
+];
+
+const toolbarFields: SearchFieldConfig[] = [
+  {
+    key: "category",
+    queryKey: "category",
+    label: "分类",
+    type: "multi-select",
+    width: "md",
+    options: categoryOptions,
+  },
+  {
+    key: "env",
+    queryKey: "env",
+    label: "环境",
+    type: "multi-select",
+    width: "sm",
+    options: envOptions,
+  },
+];
+
+function handleToolbarQuery(payload: SearchToolbarQueryPayload) {
+  handleQuery(payload);
 }
 
 function openAdd() {
-  editingMw.value = { env: "prod", category: "database" };
+  editingMw.value = {
+    id: "",
+    env: "prod",
+    category: "database",
+    is_deleted: 0,
+    created_at: "",
+    updated_at: "",
+  };
   isEditing.value = false;
   drawerVisible.value = true;
 }
@@ -46,10 +101,17 @@ function openEdit(row: Middleware) {
 }
 
 async function handleSave() {
+  const payload: Partial<Middleware> = {
+    id: "",
+    is_deleted: 0,
+    created_at: "",
+    updated_at: "",
+    ...editingMw.value,
+  };
   saveLoading.value = true;
   try {
-    await saveMiddleware(editingMw.value);
-    ElMessage.success(isEditing.value ? "更新成功" : "创建成功");
+    await saveMiddleware(payload);
+    ElMessage.success(isEditing.value ? "鏇存柊鎴愬姛" : "鍒涘缓鎴愬姛");
     drawerVisible.value = false;
     fetchData();
   } catch {
@@ -73,15 +135,16 @@ function categoryLabel(category: string) {
 }
 
 function envLabel(env: string) {
-  return (
-    ({ prod: "生产", dev: "开发", test: "测试" } as Record<string, string>)[env] || env
-  );
+  return ({ prod: "生产", dev: "开发", test: "测试" } as Record<string, string>)[env] || env;
 }
 
-function envTagType(env: string) {
-  return (
-    ({ prod: "danger", dev: "", test: "warning" } as Record<string, string>)[env] || "info"
-  );
+function envTagType(env: string): "primary" | "success" | "warning" | "info" | "danger" {
+  const map: Record<string, "primary" | "success" | "warning" | "info" | "danger"> = {
+    prod: "danger",
+    dev: "info",
+    test: "warning",
+  };
+  return map[env] || "info";
 }
 
 onMounted(() => fetchData());
@@ -89,64 +152,37 @@ onMounted(() => fetchData());
 
 <template>
   <div class="resource-view">
-    <div class="filter-bar">
-      <el-input
-        v-model="searchText"
-        placeholder="搜索名称/地址..."
-        clearable
-        style="width: 250px"
-        @clear="onSearch"
-        @keyup.enter="onSearch"
-      />
-      <el-select
-        placeholder="分类"
-        clearable
-        style="width: 120px"
-        @change="(v: string) => handleFilter('category', v)"
-      >
-        <el-option label="数据库" value="database" />
-        <el-option label="消息队列" value="message_queue" />
-        <el-option label="缓存" value="cache" />
-        <el-option label="搜索引擎" value="search_engine" />
-        <el-option label="配置中心" value="config_center" />
-        <el-option label="其他" value="other" />
-      </el-select>
-      <el-select
-        placeholder="环境"
-        clearable
-        style="width: 100px"
-        @change="(v: string) => handleFilter('env', v)"
-      >
-        <el-option label="生产" value="prod" />
-        <el-option label="开发" value="dev" />
-        <el-option label="测试" value="test" />
-      </el-select>
-      <el-button type="primary" @click="openAdd">新增中间件</el-button>
-    </div>
-
-    <el-table :data="data" v-loading="loading" border stripe style="width: 100%">
-      <el-table-column prop="name" label="实例名称" min-width="150" />
-      <el-table-column prop="category" label="分类" width="100" align="center">
+    <SearchToolbar
+      v-model:search-text="searchText"
+      v-model:filters="listFilters"
+      search-placeholder="搜索名称/地址..."
+      :fields="toolbarFields"
+      @query="handleToolbarQuery"
+    >
+      <template #actions="{ hasActiveFilters, reset }">
+        <el-button :disabled="!hasActiveFilters" @click="reset">重置筛选</el-button>
+        <el-button type="primary" @click="openAdd">新增中间件</el-button>
+      </template>
+    </SearchToolbar>
+    <el-table :data="data" v-loading="loading" border stripe class="w-full">
+      <el-table-column prop="name" label="瀹炰緥鍚嶇О" min-width="150" align="center" />
+      <el-table-column prop="category" label="鍒嗙被" width="100" align="center">
         <template #default="{ row }">{{ categoryLabel(row.category) }}</template>
       </el-table-column>
-      <el-table-column prop="type" label="类型" width="100" />
-      <el-table-column label="地址" min-width="180">
-        <template #default="{ row }">
-          {{ row.address || "-" }}{{ row.port ? ":" + row.port : "" }}
-        </template>
+      <el-table-column prop="type" label="绫诲瀷" width="100" align="center" />
+      <el-table-column label="鍦板潃" min-width="180" align="center">
+        <template #default="{ row }"> {{ row.address || "-" }}{{ row.port ? ":" + row.port : "" }} </template>
       </el-table-column>
-      <el-table-column prop="version" label="版本" width="100" />
-      <el-table-column prop="env" label="环境" width="80" align="center">
+      <el-table-column prop="version" label="鐗堟湰" width="100" align="center" />
+      <el-table-column prop="env" label="鐜" width="80" align="center">
         <template #default="{ row }">
           <el-tag :type="envTagType(row.env)" size="small">{{ envLabel(row.env) }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="150" fixed="right" align="center">
+      <el-table-column label="鎿嶄綔" width="150" fixed="right" align="center">
         <template #default="{ row }">
-          <el-button text type="primary" size="small" @click="openEdit(row)">编辑</el-button>
-          <el-button text type="danger" size="small" @click="handleDelete(row.id, row.name)"
-            >删除</el-button
-          >
+          <el-button text type="primary" size="small" @click="openEdit(row)">缂栬緫</el-button>
+          <el-button text type="danger" size="small" @click="handleDelete(row.id, row.name)">鍒犻櫎</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -163,17 +199,20 @@ onMounted(() => fetchData());
       />
     </div>
 
-    <el-drawer
+    <el-dialog
       v-model="drawerVisible"
       :title="isEditing ? '编辑中间件' : '新增中间件'"
-      size="500px"
+      width="700px"
+      align-center
+      destroy-on-close
     >
-      <el-form :model="editingMw" label-width="100px">
+      <el-form :model="editingMw" label-width="96px">
+        <el-divider content-position="left">基础信息</el-divider>
         <el-form-item label="实例名称" required>
           <el-input v-model="editingMw.name" placeholder="请输入实例名称" />
         </el-form-item>
         <el-form-item label="分类" required>
-          <el-select v-model="editingMw.category" style="width: 100%">
+          <el-select v-model="editingMw.category" class="w-full">
             <el-option label="数据库" value="database" />
             <el-option label="消息队列" value="message_queue" />
             <el-option label="缓存" value="cache" />
@@ -189,32 +228,34 @@ onMounted(() => fetchData());
           <el-input v-model="editingMw.address" placeholder="如 192.168.1.100" />
         </el-form-item>
         <el-form-item label="端口">
-          <el-input-number v-model="editingMw.port" :min="1" :max="65535" style="width: 100%" />
+          <el-input-number v-model="editingMw.port" :min="1" :max="65535" class="w-full" />
         </el-form-item>
+
+        <el-divider content-position="left">实例信息</el-divider>
         <el-form-item label="版本">
           <el-input v-model="editingMw.version" placeholder="如 8.0.33" />
         </el-form-item>
         <el-form-item label="环境" required>
-          <el-select v-model="editingMw.env" style="width: 100%">
+          <el-select v-model="editingMw.env" class="w-full">
             <el-option label="生产" value="prod" />
             <el-option label="开发" value="dev" />
             <el-option label="测试" value="test" />
           </el-select>
         </el-form-item>
+
+        <el-divider content-position="left">运维信息</el-divider>
         <el-form-item label="描述">
-          <el-input v-model="editingMw.description" type="textarea" :rows="3" />
+          <el-input v-model="editingMw.description" type="textarea" :rows="3" maxlength="300" show-word-limit />
         </el-form-item>
       </el-form>
-      <DeploymentPanel
-        v-if="isEditing && editingMw.id"
-        :resource-id="editingMw.id!"
-        resource-type="middleware"
-      />
+
+      <DeploymentPanel v-if="isEditing && editingMw.id" :resource-id="editingMw.id!" resource-type="middleware" />
+
       <template #footer>
         <el-button @click="drawerVisible = false">取消</el-button>
         <el-button type="primary" :loading="saveLoading" @click="handleSave">保存</el-button>
       </template>
-    </el-drawer>
+    </el-dialog>
   </div>
 </template>
 
@@ -224,9 +265,92 @@ onMounted(() => fetchData());
 }
 .filter-bar {
   display: flex;
+  flex-direction: column;
   gap: 12px;
   margin-bottom: 16px;
+  padding: 12px;
+  border: 1px solid var(--im-border-light);
+  border-radius: var(--im-radius-md);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--im-surface-1) 82%, transparent), var(--im-surface-0));
+}
+.filter-row {
+  display: grid;
+  gap: 12px;
   align-items: center;
+}
+.filter-row-primary {
+  grid-template-columns: minmax(0, 2.8fr) minmax(0, 1.7fr) minmax(0, 1.3fr);
+}
+.filter-row-secondary {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+.filter-spacer {
+  min-width: 0;
+}
+.filter-field {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+}
+.filter-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  justify-self: end;
+  white-space: nowrap;
+}
+.filter-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--el-text-color-secondary);
+  white-space: nowrap;
+  text-align: right;
+}
+.search-filter,
+.category-filter,
+.env-filter {
+  width: 100%;
+  min-width: 0;
+}
+:deep(.category-filter .el-select__selection),
+:deep(.env-filter .el-select__selection) {
+  flex-wrap: nowrap;
+  overflow: hidden;
+}
+:deep(.category-filter .el-select__selected-item),
+:deep(.env-filter .el-select__selected-item) {
+  max-width: 100%;
+}
+@media (max-width: 1080px) {
+  .filter-row-primary {
+    grid-template-columns: minmax(0, 2.3fr) minmax(0, 1.5fr) minmax(0, 1.2fr);
+  }
+}
+@media (max-width: 920px) {
+  .filter-row-primary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .search-field {
+    grid-column: 1 / -1;
+  }
+}
+@media (max-width: 768px) {
+  .filter-row-primary,
+  .filter-row-secondary {
+    grid-template-columns: 1fr;
+  }
+  .filter-actions {
+    width: 100%;
+    justify-self: start;
+    justify-content: flex-start;
+  }
+  .search-field {
+    grid-column: auto;
+  }
 }
 .pagination-wrapper {
   margin-top: 16px;
@@ -234,3 +358,4 @@ onMounted(() => fetchData());
   justify-content: flex-end;
 }
 </style>
+

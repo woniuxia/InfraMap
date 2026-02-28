@@ -1,9 +1,11 @@
-<script setup lang="ts">
-import { ref, onMounted } from "vue";
+﻿<script setup lang="ts">
+import { ref, onMounted, nextTick } from "vue";
 import { ElMessage } from "element-plus";
 import type { Application } from "@/types";
+import type { SearchFieldConfig, SearchToolbarQueryPayload } from "@/types/searchToolbar";
 import { listApplications, saveApplication, softDeleteApplication } from "@/api/applications";
 import { useResourceList } from "@/composables/useResourceList";
+import SearchToolbar from "@/components/filters/SearchToolbar.vue";
 import DeploymentPanel from "@/components/DeploymentPanel.vue";
 import DependencyPanel from "@/components/DependencyPanel.vue";
 
@@ -13,15 +15,14 @@ const {
   total,
   queryParams,
   fetchData,
-  handleSearch,
-  handleFilter,
+  handleQuery,
   handlePageChange,
   handlePageSizeChange,
   handleDelete,
 } = useResourceList<Application>({
   listFn: listApplications,
   deleteFn: softDeleteApplication,
-  entityLabel: "应用服务",
+  entityLabel: "搴旂敤鏈嶅姟",
 });
 
 const searchText = ref("");
@@ -30,27 +31,183 @@ const editingApp = ref<Partial<Application>>({});
 const isEditing = ref(false);
 const saveLoading = ref(false);
 
-function onSearch() {
-  handleSearch(searchText.value);
+const techStackList = ref<string[]>([]);
+const techStackInputVisible = ref(false);
+const techStackInputValue = ref("");
+const techStackInputRef = ref<InstanceType<typeof import("element-plus")["ElInput"]>>();
+
+interface ApplicationListFilters {
+  type: string[];
+  env: string[];
+  status: string[];
+  deploy_mode: string[];
+}
+
+function createDefaultFilters(): ApplicationListFilters {
+  return {
+    type: [],
+    env: [],
+    status: [],
+    deploy_mode: [],
+  };
+}
+
+const listFilters = ref<ApplicationListFilters>(createDefaultFilters());
+const typeOptions = [
+  { label: "前端", value: "frontend" },
+  { label: "后端", value: "backend" },
+  { label: "网关", value: "gateway" },
+  { label: "批处理", value: "batch_job" },
+  { label: "微服务", value: "microservice" },
+  { label: "其他", value: "other" },
+];
+
+const envOptions = [
+  { label: "生产", value: "prod" },
+  { label: "开发", value: "dev" },
+  { label: "测试", value: "test" },
+];
+
+const statusOptions = [
+  { label: "运行中", value: "running" },
+  { label: "已停止", value: "stopped" },
+  { label: "维护中", value: "maintenance" },
+];
+
+const deployModeOptions = [
+  { label: "物理机", value: "physical" },
+  { label: "虚拟机", value: "vm" },
+  { label: "Docker", value: "docker" },
+  { label: "Kubernetes", value: "k8s" },
+  { label: "Serverless", value: "serverless" },
+  { label: "其他", value: "other" },
+];
+
+const toolbarFields: SearchFieldConfig[] = [
+  {
+    key: "type",
+    queryKey: "type",
+    label: "类型",
+    type: "multi-select",
+    width: "md",
+    options: typeOptions,
+  },
+  {
+    key: "env",
+    queryKey: "env",
+    label: "环境",
+    type: "multi-select",
+    width: "sm",
+    options: envOptions,
+  },
+  {
+    key: "status",
+    queryKey: "status",
+    label: "状态",
+    type: "multi-select",
+    width: "md",
+    maxCollapseTags: 2,
+    options: statusOptions,
+  },
+  {
+    key: "deploy_mode",
+    queryKey: "deploy_mode",
+    label: "部署方式",
+    section: "advanced",
+    type: "multi-select",
+    width: "md",
+    options: deployModeOptions,
+  },
+];
+
+function handleToolbarQuery(payload: SearchToolbarQueryPayload) {
+  handleQuery(payload);
+}
+
+function parseTechStack(value?: string): string[] {
+  if (!value) return [];
+  return value
+    .split(/[,，;；|/]/)
+    .map((x) => x.trim())
+    .filter(Boolean);
+}
+
+function techStackToText(list: string[]): string {
+  return list.join(", ");
+}
+
+function handleTechStackClose(tag: string) {
+  techStackList.value = techStackList.value.filter((t) => t !== tag);
+  editingApp.value.tech_stack = techStackToText(techStackList.value);
+}
+
+function showTechStackInput() {
+  techStackInputVisible.value = true;
+  nextTick(() => {
+    techStackInputRef.value?.input?.focus();
+  });
+}
+
+function handleTechStackInputConfirm() {
+  const value = techStackInputValue.value.trim();
+  if (value && !techStackList.value.includes(value)) {
+    techStackList.value.push(value);
+    editingApp.value.tech_stack = techStackToText(techStackList.value);
+  }
+  techStackInputVisible.value = false;
+  techStackInputValue.value = "";
+}
+
+function applyDefaultPortByType(type: Application["type"] | undefined) {
+  if (type === "frontend") {
+    editingApp.value.port = 80;
+    return;
+  }
+  if (type === "backend") {
+    editingApp.value.port = 8080;
+  }
 }
 
 function openAdd() {
-  editingApp.value = { status: "running", env: "prod", type: "backend" };
+  editingApp.value = {
+    id: "",
+    status: "running",
+    env: "prod",
+    type: "backend",
+    port: 8080,
+    is_deleted: 0,
+    created_at: "",
+    updated_at: "",
+  };
+  techStackList.value = [];
   isEditing.value = false;
   drawerVisible.value = true;
 }
 
 function openEdit(row: Application) {
   editingApp.value = { ...row };
+  techStackList.value = parseTechStack(row.tech_stack);
   isEditing.value = true;
   drawerVisible.value = true;
 }
 
+function handleTypeChange(type: Application["type"] | undefined) {
+  applyDefaultPortByType(type);
+}
+
 async function handleSave() {
+  const payload: Partial<Application> = {
+    id: "",
+    is_deleted: 0,
+    created_at: "",
+    updated_at: "",
+    ...editingApp.value,
+    tech_stack: techStackToText(techStackList.value),
+  };
   saveLoading.value = true;
   try {
-    await saveApplication(editingApp.value);
-    ElMessage.success(isEditing.value ? "更新成功" : "创建成功");
+    await saveApplication(payload);
+    ElMessage.success(isEditing.value ? "鏇存柊鎴愬姛" : "鍒涘缓鎴愬姛");
     drawerVisible.value = false;
     fetchData();
   } catch {
@@ -60,20 +217,17 @@ async function handleSave() {
   }
 }
 
-function statusTagType(status: string) {
-  return (
-    ({ running: "success", stopped: "danger", maintenance: "warning" } as Record<string, string>)[
-      status
-    ] || "info"
-  );
+function statusTagType(status: string): "primary" | "success" | "warning" | "info" | "danger" {
+  const map: Record<string, "primary" | "success" | "warning" | "info" | "danger"> = {
+    running: "success",
+    stopped: "danger",
+    maintenance: "warning",
+  };
+  return map[status] || "info";
 }
 
 function statusLabel(status: string) {
-  return (
-    ({ running: "运行中", stopped: "已停止", maintenance: "维护中" } as Record<string, string>)[
-      status
-    ] || status
-  );
+  return ({ running: "运行中", stopped: "已停止", maintenance: "维护中" } as Record<string, string>)[status] || status;
 }
 
 function typeLabel(type: string) {
@@ -90,15 +244,16 @@ function typeLabel(type: string) {
 }
 
 function envLabel(env: string) {
-  return (
-    ({ prod: "生产", dev: "开发", test: "测试" } as Record<string, string>)[env] || env
-  );
+  return ({ prod: "生产", dev: "开发", test: "测试" } as Record<string, string>)[env] || env;
 }
 
-function envTagType(env: string) {
-  return (
-    ({ prod: "danger", dev: "", test: "warning" } as Record<string, string>)[env] || "info"
-  );
+function envTagType(env: string): "primary" | "success" | "warning" | "info" | "danger" {
+  const map: Record<string, "primary" | "success" | "warning" | "info" | "danger"> = {
+    prod: "danger",
+    dev: "info",
+    test: "warning",
+  };
+  return map[env] || "info";
 }
 
 onMounted(() => fetchData());
@@ -106,81 +261,43 @@ onMounted(() => fetchData());
 
 <template>
   <div class="resource-view">
-    <div class="filter-bar">
-      <el-input
-        v-model="searchText"
-        placeholder="搜索服务名/地址..."
-        clearable
-        style="width: 250px"
-        @clear="onSearch"
-        @keyup.enter="onSearch"
-      />
-      <el-select
-        placeholder="类型"
-        clearable
-        style="width: 120px"
-        @change="(v: string) => handleFilter('type', v)"
-      >
-        <el-option label="前端" value="frontend" />
-        <el-option label="后端" value="backend" />
-        <el-option label="网关" value="gateway" />
-        <el-option label="批处理" value="batch_job" />
-        <el-option label="微服务" value="microservice" />
-        <el-option label="其他" value="other" />
-      </el-select>
-      <el-select
-        placeholder="环境"
-        clearable
-        style="width: 100px"
-        @change="(v: string) => handleFilter('env', v)"
-      >
-        <el-option label="生产" value="prod" />
-        <el-option label="开发" value="dev" />
-        <el-option label="测试" value="test" />
-      </el-select>
-      <el-select
-        placeholder="状态"
-        clearable
-        style="width: 120px"
-        @change="(v: string) => handleFilter('status', v)"
-      >
-        <el-option label="运行中" value="running" />
-        <el-option label="已停止" value="stopped" />
-        <el-option label="维护中" value="maintenance" />
-      </el-select>
-      <el-button type="primary" @click="openAdd">新增应用</el-button>
-    </div>
+    <SearchToolbar
+      v-model:search-text="searchText"
+      v-model:filters="listFilters"
+      search-placeholder="搜索服务名/地址/负责人/技术栈..."
+      :fields="toolbarFields"
+      @query="handleToolbarQuery"
+    >
+      <template #actions="{ hasActiveFilters, reset }">
+        <el-button :disabled="!hasActiveFilters" @click="reset">重置筛选</el-button>
+        <el-button type="primary" @click="openAdd">新增应用</el-button>
+      </template>
+    </SearchToolbar>
 
-    <el-table :data="data" v-loading="loading" border stripe style="width: 100%">
-      <el-table-column prop="name" label="服务名称" min-width="150" />
+    <el-table :data="data" v-loading="loading" border stripe class="w-full">
+      <el-table-column prop="name" label="服务名称" min-width="150" align="center" />
       <el-table-column prop="type" label="类型" width="100" align="center">
         <template #default="{ row }">{{ typeLabel(row.type) }}</template>
       </el-table-column>
-      <el-table-column label="地址" min-width="180">
-        <template #default="{ row }">
-          {{ row.address || "-" }}{{ row.port ? ":" + row.port : "" }}
-        </template>
+      <el-table-column label="地址" min-width="180" align="center">
+        <template #default="{ row }"> {{ row.address || "-" }}{{ row.port ? ":" + row.port : "" }} </template>
       </el-table-column>
       <el-table-column prop="env" label="环境" width="80" align="center">
         <template #default="{ row }">
           <el-tag :type="envTagType(row.env)" size="small">{{ envLabel(row.env) }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="tech_stack" label="技术栈" width="120" />
-      <el-table-column prop="owner" label="负责人" width="100" />
+      <el-table-column prop="tech_stack" label="技术栈" width="140" show-overflow-tooltip align="center" />
+      <el-table-column prop="owner" label="负责人" width="100" align="center" />
       <el-table-column prop="status" label="状态" width="100" align="center">
         <template #default="{ row }">
-          <el-tag :type="statusTagType(row.status)" size="small">{{
-            statusLabel(row.status)
-          }}</el-tag>
+          <el-tag :type="statusTagType(row.status)" size="small">{{ statusLabel(row.status) }}</el-tag>
         </template>
       </el-table-column>
       <el-table-column label="操作" width="150" fixed="right" align="center">
         <template #default="{ row }">
-          <el-button text type="primary" size="small" @click="openEdit(row)">编辑</el-button>
-          <el-button text type="danger" size="small" @click="handleDelete(row.id, row.name)"
-            >删除</el-button
-          >
+          <el-button text type="primary" size="small" @click="openEdit(row)">缂栬緫</el-button>
+          <el-button text type="danger" size="small" @click="handleDelete(row.id, row.name)">鍒犻櫎</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -197,17 +314,20 @@ onMounted(() => fetchData());
       />
     </div>
 
-    <el-drawer
+    <el-dialog
       v-model="drawerVisible"
       :title="isEditing ? '编辑应用' : '新增应用'"
-      size="500px"
+      width="700px"
+      align-center
+      destroy-on-close
     >
-      <el-form :model="editingApp" label-width="100px">
+      <el-form :model="editingApp" label-width="96px">
+        <el-divider content-position="left">基础信息</el-divider>
         <el-form-item label="服务名称" required>
           <el-input v-model="editingApp.name" placeholder="请输入服务名称" />
         </el-form-item>
         <el-form-item label="类型" required>
-          <el-select v-model="editingApp.type" style="width: 100%">
+          <el-select v-model="editingApp.type" class="w-full" @change="(v) => handleTypeChange(v as Application['type'])">
             <el-option label="前端" value="frontend" />
             <el-option label="后端" value="backend" />
             <el-option label="网关" value="gateway" />
@@ -217,56 +337,77 @@ onMounted(() => fetchData());
           </el-select>
         </el-form-item>
         <el-form-item label="访问地址">
-          <el-input v-model="editingApp.address" placeholder="如 192.168.1.100" />
+          <el-input v-model="editingApp.address" placeholder="如 api.example.com、https://app.example.com 或 192.168.1.100" />
         </el-form-item>
         <el-form-item label="端口">
-          <el-input-number v-model="editingApp.port" :min="1" :max="65535" style="width: 100%" />
+          <el-input-number v-model="editingApp.port" :min="1" :max="65535" class="w-full" />
         </el-form-item>
+
+        <el-divider content-position="left">部署信息</el-divider>
         <el-form-item label="技术栈">
-          <el-input v-model="editingApp.tech_stack" placeholder="如 Java/Spring Boot" />
+          <div class="tag-editor">
+            <el-tag
+              v-for="tag in techStackList"
+              :key="tag"
+              closable
+              :disable-transitions="false"
+              @close="handleTechStackClose(tag)"
+              class="tag-item"
+            >
+              {{ tag }}
+            </el-tag>
+            <el-input
+              v-if="techStackInputVisible"
+              ref="techStackInputRef"
+              v-model="techStackInputValue"
+              size="small"
+              class="w-140"
+              @keyup.enter="handleTechStackInputConfirm"
+              @blur="handleTechStackInputConfirm"
+            />
+            <el-button v-else size="small" @click="showTechStackInput">+ 添加技术栈</el-button>
+          </div>
         </el-form-item>
         <el-form-item label="部署方式">
-          <el-input v-model="editingApp.deploy_mode" placeholder="如 Docker/K8s/物理机" />
+          <el-select v-model="editingApp.deploy_mode" clearable placeholder="请选择部署方式" class="w-full">
+            <el-option v-for="item in deployModeOptions" :key="item.value" :label="item.label" :value="item.value" />
+          </el-select>
         </el-form-item>
         <el-form-item label="环境" required>
-          <el-select v-model="editingApp.env" style="width: 100%">
+          <el-select v-model="editingApp.env" class="w-full">
             <el-option label="生产" value="prod" />
             <el-option label="开发" value="dev" />
             <el-option label="测试" value="test" />
           </el-select>
         </el-form-item>
         <el-form-item label="Git仓库">
-          <el-input v-model="editingApp.git_repo" placeholder="Git仓库地址" />
+          <el-input v-model="editingApp.git_repo" placeholder="Git 仓库地址" />
         </el-form-item>
         <el-form-item label="负责人">
           <el-input v-model="editingApp.owner" placeholder="负责人姓名" />
         </el-form-item>
+
+        <el-divider content-position="left">运维信息</el-divider>
         <el-form-item label="状态" required>
-          <el-select v-model="editingApp.status" style="width: 100%">
+          <el-select v-model="editingApp.status" class="w-full">
             <el-option label="运行中" value="running" />
             <el-option label="已停止" value="stopped" />
             <el-option label="维护中" value="maintenance" />
           </el-select>
         </el-form-item>
         <el-form-item label="描述">
-          <el-input v-model="editingApp.description" type="textarea" :rows="3" />
+          <el-input v-model="editingApp.description" type="textarea" :rows="3" maxlength="300" show-word-limit />
         </el-form-item>
       </el-form>
-      <DeploymentPanel
-        v-if="isEditing && editingApp.id"
-        :resource-id="editingApp.id!"
-        resource-type="application"
-      />
-      <DependencyPanel
-        v-if="isEditing && editingApp.id"
-        :resource-id="editingApp.id!"
-        resource-type="application"
-      />
+
+      <DeploymentPanel v-if="isEditing && editingApp.id" :resource-id="editingApp.id!" resource-type="application" />
+      <DependencyPanel v-if="isEditing && editingApp.id" :resource-id="editingApp.id!" resource-type="application" />
+
       <template #footer>
-        <el-button @click="drawerVisible = false">取消</el-button>
-        <el-button type="primary" :loading="saveLoading" @click="handleSave">保存</el-button>
+        <el-button @click="drawerVisible = false">鍙栨秷</el-button>
+        <el-button type="primary" :loading="saveLoading" @click="handleSave">淇濆瓨</el-button>
       </template>
-    </el-drawer>
+    </el-dialog>
   </div>
 </template>
 
@@ -276,13 +417,154 @@ onMounted(() => fetchData());
 }
 .filter-bar {
   display: flex;
+  flex-direction: column;
   gap: 12px;
   margin-bottom: 16px;
+  padding: 12px;
+  border: 1px solid var(--im-border-light);
+  border-radius: var(--im-radius-md);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--im-surface-1) 82%, transparent), var(--im-surface-0));
+}
+.filter-row {
+  display: grid;
+  gap: 12px;
   align-items: center;
+}
+.filter-row-primary {
+  grid-template-columns: minmax(0, 2.8fr) minmax(0, 1.7fr) minmax(0, 1.4fr) minmax(0, 1.9fr);
+}
+.filter-row-secondary {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+.filter-field {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+}
+.deploy-field {
+  grid-template-columns: 64px minmax(0, 1fr);
+  max-width: 32%;
+  justify-self: start;
+}
+.search-field {
+  grid-template-columns: 52px minmax(0, 1fr);
+}
+.filter-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  justify-self: end;
+  white-space: nowrap;
+}
+.filter-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--el-text-color-secondary);
+  white-space: nowrap;
+  flex-shrink: 0;
+  text-align: right;
+}
+.search-filter {
+  width: 100%;
+}
+.type-filter {
+  width: 100%;
+  min-width: 0;
+}
+.env-filter {
+  width: 100%;
+  min-width: 0;
+}
+.status-filter {
+  width: 100%;
+  min-width: 0;
+}
+.deploy-filter {
+  width: 100%;
+  min-width: 0;
+}
+:deep(.type-filter .el-select__selection),
+:deep(.env-filter .el-select__selection),
+:deep(.status-filter .el-select__selection),
+:deep(.deploy-filter .el-select__selection) {
+  flex-wrap: nowrap;
+  overflow: hidden;
+}
+:deep(.type-filter .el-select__selected-item),
+:deep(.env-filter .el-select__selected-item),
+:deep(.status-filter .el-select__selected-item),
+:deep(.deploy-filter .el-select__selected-item) {
+  max-width: 100%;
+}
+@media (max-width: 1080px) {
+  .filter-row-primary {
+    grid-template-columns: minmax(0, 2.2fr) minmax(0, 1.3fr) minmax(0, 1.2fr) minmax(0, 1.5fr);
+  }
+  .deploy-field {
+    max-width: 32%;
+  }
+}
+@media (max-width: 920px) {
+  .filter-row-primary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .search-field {
+    grid-column: 1 / -1;
+  }
+}
+@media (max-width: 768px) {
+  .filter-row {
+    width: 100%;
+  }
+  .filter-row-primary,
+  .filter-row-secondary {
+    grid-template-columns: 1fr;
+  }
+  .filter-field {
+    width: 100%;
+  }
+  .filter-actions {
+    width: 100%;
+    justify-self: start;
+    justify-content: flex-start;
+  }
+  .filter-field,
+  .deploy-field {
+    grid-template-columns: 56px minmax(0, 1fr);
+  }
+  .deploy-field {
+    max-width: 100%;
+  }
+  .search-filter,
+  .type-filter,
+  .env-filter,
+  .status-filter,
+  .deploy-filter {
+    width: 100%;
+    min-width: 0;
+  }
+  .search-field {
+    grid-column: auto;
+  }
 }
 .pagination-wrapper {
   margin-top: 16px;
   display: flex;
   justify-content: flex-end;
 }
+.tag-editor {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+.tag-item {
+  margin-right: 6px;
+  margin-bottom: 4px;
+}
 </style>
+

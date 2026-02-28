@@ -9,6 +9,17 @@ pub struct QueryParams {
     pub filters: Option<HashMap<String, String>>,
 }
 
+impl Default for QueryParams {
+    fn default() -> Self {
+        Self {
+            page: None,
+            page_size: None,
+            search: None,
+            filters: None,
+        }
+    }
+}
+
 impl QueryParams {
     pub fn page(&self) -> u32 {
         self.page.unwrap_or(1)

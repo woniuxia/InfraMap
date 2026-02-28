@@ -27,18 +27,20 @@ const appStore = useAppStore();
   height: 100vh;
 }
 .app-sidebar {
-  transition: width 0.3s;
-  border-right: 1px solid var(--el-border-color-light);
+  transition: width var(--im-duration-slow) var(--im-ease-standard);
+  border-right: 1px solid var(--im-border-light);
+  background: var(--im-surface-0);
   overflow: hidden;
 }
 .app-header {
-  border-bottom: 1px solid var(--el-border-color-light);
+  border-bottom: 1px solid var(--im-border-light);
+  background: var(--im-surface-1);
   display: flex;
   align-items: center;
   padding: 0 16px;
 }
 .app-main {
-  background-color: var(--el-bg-color-page);
+  background-color: transparent;
   overflow: auto;
 }
 </style>

@@ -3,7 +3,10 @@ export interface Host {
   hostname: string;
   ip_address: string;
   os_type?: string;
-  cpu_info?: string;
+  cpu_model?: string;
+  cpu_cores?: number;
+  cpu_threads?: number;
+  cpu_freq?: string;
   ram_gb?: number;
   disk_gb?: number;
   status: "running" | "stopped" | "maintenance";
@@ -139,4 +142,98 @@ export interface DashboardStats {
   deployment_total: number;
   dependency_total: number;
   env_distribution: { env: string; count: number }[];
+}
+
+// Topology types
+export interface TopologyNode {
+  id: string;
+  name: string;
+  node_type: "application" | "middleware" | "nginx";
+  status?: string;
+  env?: string;
+  parent_id?: string;
+  extra?: Record<string, unknown>;
+}
+
+export interface TopologyEdge {
+  id: string;
+  source: string;
+  target: string;
+  edge_type: "http_call" | "tcp" | "mq_produce" | "mq_consume";
+  label?: string;
+}
+
+export interface TopologyCombo {
+  id: string;
+  label: string;
+  ip: string;
+  status: string;
+}
+
+export interface TopologyGraph {
+  nodes: TopologyNode[];
+  edges: TopologyEdge[];
+  combos: TopologyCombo[];
+}
+
+export interface PathResult {
+  paths: string[][];
+  truncated: boolean;
+}
+
+export interface AffectedNode {
+  id: string;
+  name: string;
+  node_type: string;
+  depth: number;
+}
+
+export interface ImpactResult {
+  affected_nodes: AffectedNode[];
+  total_count: number;
+  max_depth: number;
+}
+
+// Settings & Backup types
+export interface SystemSettings {
+  id: string;
+  auto_backup_enabled: boolean;
+  backup_interval_hours: number;
+  max_backups: number;
+  last_backup_time?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface UpdateSettingsInput {
+  auto_backup_enabled: boolean;
+  backup_interval_hours: number;
+  max_backups: number;
+}
+
+export interface BackupEntry {
+  filename: string;
+  file_size: number;
+  created_at: string;
+  is_auto: boolean;
+}
+
+export interface DbPreviewSummary {
+  hosts: number;
+  applications: number;
+  middlewares: number;
+  nginx_configs: number;
+  deployments: number;
+  dependencies: number;
+  schema_version: number;
+  is_compatible: boolean;
+}
+
+export interface ImportResult {
+  hosts_imported: number;
+  applications_imported: number;
+  middlewares_imported: number;
+  nginx_configs_imported: number;
+  deployments_imported: number;
+  dependencies_imported: number;
 }

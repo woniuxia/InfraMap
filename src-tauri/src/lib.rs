@@ -2,6 +2,10 @@ mod db;
 mod commands;
 mod models;
 mod validation;
+mod backup;
+
+#[cfg(test)]
+mod test_helpers;
 
 use db::{init_db_pool, run_migrations};
 use tauri::Manager;
@@ -10,6 +14,7 @@ use tauri::Manager;
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let app_data_dir = app.path().app_data_dir()
                 .expect("Failed to resolve app data directory");
@@ -26,7 +31,10 @@ pub fn run() {
             run_migrations(&pool)
                 .expect("Database migration failed");
 
-            app.manage(pool);
+            app.manage(pool.clone());
+            app.manage(backup::AppDataDir(app_data_dir.clone()));
+
+            backup::start_auto_backup_thread(pool, app_data_dir);
 
             Ok(())
         })
@@ -57,6 +65,18 @@ pub fn run() {
             commands::dependencies::soft_delete_dependency,
             commands::dashboard::get_dashboard_stats,
             commands::audit_logs::list_audit_logs,
+            commands::topology::get_topology_graph,
+            commands::topology::find_paths,
+            commands::topology::analyze_impact,
+            commands::settings::get_settings,
+            commands::settings::update_settings,
+            commands::backup::create_backup,
+            commands::backup::list_backups,
+            commands::backup::delete_backup,
+            commands::backup::preview_restore,
+            commands::backup::restore_backup,
+            commands::backup::export_json,
+            commands::backup::import_json,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
