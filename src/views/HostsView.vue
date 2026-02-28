@@ -1,4 +1,4 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import { ref, onMounted, nextTick } from "vue";
 import { ElMessage } from "element-plus";
 import type { FormInstance, FormRules } from "element-plus";
@@ -7,6 +7,7 @@ import type { SearchFieldConfig, SearchToolbarQueryPayload } from "@/types/searc
 import { listHosts, saveHost, softDeleteHost } from "@/api/hosts";
 import { useResourceList } from "@/composables/useResourceList";
 import SearchToolbar from "@/components/filters/SearchToolbar.vue";
+import { COMMON_DISK_OPTIONS_GB, COMMON_RAM_OPTIONS_GB } from "@/views/hostsHardwareOptions";
 
 const {
   loading,
@@ -32,17 +33,37 @@ const saveLoading = ref(false);
 const formRef = ref<FormInstance>();
 
 interface HostListFilters {
+  env: string[];
   status: string[];
 }
 
 function createDefaultFilters(): HostListFilters {
   return {
+    env: [],
     status: [],
   };
 }
 
 const listFilters = ref<HostListFilters>(createDefaultFilters());
+const envOptions = [
+  { label: "生产", value: "prod" },
+  { label: "开发", value: "dev" },
+  { label: "测试", value: "test" },
+];
+const statusOptions = [
+  { label: "运行中", value: "running" },
+  { label: "已停止", value: "stopped" },
+  { label: "维护中", value: "maintenance" },
+];
 const toolbarFields: SearchFieldConfig[] = [
+  {
+    key: "env",
+    queryKey: "env",
+    label: "环境",
+    type: "multi-select",
+    width: "sm",
+    options: envOptions,
+  },
   {
     key: "status",
     queryKey: "status",
@@ -50,11 +71,7 @@ const toolbarFields: SearchFieldConfig[] = [
     type: "multi-select",
     width: "md",
     maxCollapseTags: 2,
-    options: [
-      { label: "运行中", value: "running" },
-      { label: "已停止", value: "stopped" },
-      { label: "维护中", value: "maintenance" },
-    ],
+    options: statusOptions,
   },
 ];
 
@@ -69,12 +86,13 @@ const formRules: FormRules = {
     { required: true, message: "请输入 IP 地址", trigger: "blur" },
     { pattern: ipv4Pattern, message: "请输入有效的 IPv4 地址，如 192.168.1.100", trigger: "blur" },
   ],
+  env: [{ required: true, message: "请选择环境", trigger: "change" }],
   status: [
     { required: true, message: "请选择状态", trigger: "change" },
   ],
 };
 
-// 鎿嶄綔绯荤粺棰勮閫夐」
+// 操作系统预设选项
 const osOptions = [
   "CentOS 7",
   "CentOS 8",
@@ -136,7 +154,7 @@ function handleToolbarQuery(payload: SearchToolbarQueryPayload) {
 }
 
 function openAdd() {
-  editingHost.value = { status: "running", hostname: "", ip_address: "" };
+  editingHost.value = { status: "running", env: "prod", hostname: "", ip_address: "" };
   tagList.value = [];
   isEditing.value = false;
   dialogVisible.value = true;
@@ -156,7 +174,7 @@ async function handleSave() {
   saveLoading.value = true;
   try {
     await saveHost(editingHost.value);
-    ElMessage.success(isEditing.value ? "鏇存柊鎴愬姛" : "鍒涘缓鎴愬姛");
+    ElMessage.success(isEditing.value ? "更新成功" : "创建成功");
     dialogVisible.value = false;
     fetchData();
   } catch {
@@ -175,6 +193,19 @@ function statusTagType(status: string): "primary" | "success" | "warning" | "inf
   return map[status] || "info";
 }
 
+function envLabel(env: string) {
+  return ({ prod: "生产", dev: "开发", test: "测试" } as Record<string, string>)[env] || env;
+}
+
+function envTagType(env: string): "primary" | "success" | "warning" | "info" | "danger" {
+  const map: Record<string, "primary" | "success" | "warning" | "info" | "danger"> = {
+    prod: "danger",
+    dev: "info",
+    test: "warning",
+  };
+  return map[env] || "info";
+}
+
 function statusLabel(status: string) {
   return ({ running: "运行中", stopped: "已停止", maintenance: "维护中" } as Record<string, string>)[status] || status;
 }
@@ -189,6 +220,7 @@ onMounted(() => fetchData());
       v-model:filters="listFilters"
       search-placeholder="搜索主机名/IP..."
       :fields="toolbarFields"
+      :show-chips="false"
       @query="handleToolbarQuery"
     >
       <template #actions="{ hasActiveFilters, reset }">
@@ -199,6 +231,11 @@ onMounted(() => fetchData());
     <el-table :data="data" v-loading="loading" border stripe class="w-full">
       <el-table-column prop="hostname" label="主机名" min-width="150" align="center" />
       <el-table-column prop="ip_address" label="IP地址" width="150" align="center" />
+      <el-table-column prop="env" label="环境" width="90" align="center">
+        <template #default="{ row }">
+          <el-tag :type="envTagType(row.env)" size="small">{{ envLabel(row.env) }}</el-tag>
+        </template>
+      </el-table-column>
       <el-table-column prop="os_type" label="操作系统" width="120" align="center" />
       <el-table-column prop="ram_gb" label="内存(GB)" width="100" align="center" />
       <el-table-column prop="disk_gb" label="磁盘(GB)" width="100" align="center" />
@@ -245,6 +282,11 @@ onMounted(() => fetchData());
         </el-form-item>
         <el-form-item label="IP地址" prop="ip_address" required>
           <el-input v-model="editingHost.ip_address" placeholder="如 192.168.1.100" />
+        </el-form-item>
+        <el-form-item label="环境" prop="env" required>
+          <el-select v-model="editingHost.env" class="w-full">
+            <el-option v-for="option in envOptions" :key="option.value" :label="option.label" :value="option.value" />
+          </el-select>
         </el-form-item>
         <el-form-item label="操作系统">
           <el-select
@@ -310,6 +352,20 @@ onMounted(() => fetchData());
                 >
                   <template #suffix>GB</template>
                 </el-input-number>
+                <div class="quick-size-options">
+                  <el-button
+                    v-for="size in COMMON_RAM_OPTIONS_GB"
+                    :key="`ram-${size}`"
+                    size="small"
+                    text
+                    bg
+                    :type="editingHost.ram_gb === size ? 'primary' : undefined"
+                    class="quick-size-button"
+                    @click="editingHost.ram_gb = size"
+                  >
+                    {{ size }} GB
+                  </el-button>
+                </div>
               </div>
             </el-col>
             <el-col :span="12">
@@ -323,6 +379,20 @@ onMounted(() => fetchData());
                 >
                   <template #suffix>GB</template>
                 </el-input-number>
+                <div class="quick-size-options">
+                  <el-button
+                    v-for="size in COMMON_DISK_OPTIONS_GB"
+                    :key="`disk-${size}`"
+                    size="small"
+                    text
+                    bg
+                    :type="editingHost.disk_gb === size ? 'primary' : undefined"
+                    class="quick-size-button"
+                    @click="editingHost.disk_gb = size"
+                  >
+                    {{ size }} GB
+                  </el-button>
+                </div>
               </div>
             </el-col>
           </el-row>
@@ -470,7 +540,8 @@ onMounted(() => fetchData());
 }
 .inline-field {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
+  flex-direction: column;
   gap: 8px;
   width: 100%;
 }
@@ -482,8 +553,16 @@ onMounted(() => fetchData());
   white-space: nowrap;
 }
 .inline-input {
-  flex: 1;
   width: 100%;
 }
+.quick-size-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.quick-size-button {
+  margin: 0;
+}
 </style>
+
 

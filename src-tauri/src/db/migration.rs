@@ -2,15 +2,18 @@ use super::pool::DbPool;
 use super::schema::MIGRATIONS;
 
 pub fn run_migrations(pool: &DbPool) -> Result<(), String> {
-    let conn = pool.get().map_err(|e| format!("Failed to get connection: {}", e))?;
+    let conn = pool
+        .get()
+        .map_err(|e| format!("Failed to get connection: {}", e))?;
 
     // Ensure schema_version table exists
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS schema_version (
             version INTEGER NOT NULL,
             applied_at TEXT NOT NULL
-        );"
-    ).map_err(|e| format!("Failed to create schema_version table: {}", e))?;
+        );",
+    )
+    .map_err(|e| format!("Failed to create schema_version table: {}", e))?;
 
     // Get current version
     let current_version: i32 = conn
@@ -34,8 +37,12 @@ pub fn run_migrations(pool: &DbPool) -> Result<(), String> {
         }
 
         // Each migration in a transaction
-        conn.execute_batch("BEGIN TRANSACTION;")
-            .map_err(|e| format!("Failed to begin transaction for migration v{}: {}", version, e))?;
+        conn.execute_batch("BEGIN TRANSACTION;").map_err(|e| {
+            format!(
+                "Failed to begin transaction for migration v{}: {}",
+                version, e
+            )
+        })?;
 
         match conn.execute_batch(sql) {
             Ok(_) => {
@@ -43,7 +50,8 @@ pub fn run_migrations(pool: &DbPool) -> Result<(), String> {
                 conn.execute(
                     "INSERT INTO schema_version (version, applied_at) VALUES (?1, ?2)",
                     rusqlite::params![version, now],
-                ).map_err(|e| {
+                )
+                .map_err(|e| {
                     let _ = conn.execute_batch("ROLLBACK;");
                     format!("Failed to record migration v{}: {}", version, e)
                 })?;
@@ -52,7 +60,10 @@ pub fn run_migrations(pool: &DbPool) -> Result<(), String> {
             }
             Err(e) => {
                 let _ = conn.execute_batch("ROLLBACK;");
-                return Err(format!("Migration v{} failed: {}. Startup aborted.", version, e));
+                return Err(format!(
+                    "Migration v{} failed: {}. Startup aborted.",
+                    version, e
+                ));
             }
         }
     }

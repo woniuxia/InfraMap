@@ -13,25 +13,26 @@ fn row_to_host(row: &rusqlite::Row) -> rusqlite::Result<Host> {
         id: row.get(0)?,
         hostname: row.get(1)?,
         ip_address: row.get(2)?,
-        os_type: row.get(3)?,
-        cpu_model: row.get(4)?,
-        cpu_cores: row.get(5)?,
-        cpu_threads: row.get(6)?,
-        cpu_freq: row.get(7)?,
-        ram_gb: row.get(8)?,
-        disk_gb: row.get(9)?,
-        status: row.get(10)?,
-        tags: row.get(11)?,
-        description: row.get(12)?,
-        is_deleted: row.get(13)?,
-        deleted_at: row.get(14)?,
-        created_at: row.get(15)?,
-        updated_at: row.get(16)?,
+        env: row.get(3)?,
+        os_type: row.get(4)?,
+        cpu_model: row.get(5)?,
+        cpu_cores: row.get(6)?,
+        cpu_threads: row.get(7)?,
+        cpu_freq: row.get(8)?,
+        ram_gb: row.get(9)?,
+        disk_gb: row.get(10)?,
+        status: row.get(11)?,
+        tags: row.get(12)?,
+        description: row.get(13)?,
+        is_deleted: row.get(14)?,
+        deleted_at: row.get(15)?,
+        created_at: row.get(16)?,
+        updated_at: row.get(17)?,
     })
 }
 
 const SELECT_COLUMNS: &str =
-    "id, hostname, ip_address, os_type, cpu_model, cpu_cores, cpu_threads, cpu_freq, \
+    "id, hostname, ip_address, env, os_type, cpu_model, cpu_cores, cpu_threads, cpu_freq, \
      ram_gb, disk_gb, status, tags, description, is_deleted, deleted_at, created_at, updated_at";
 
 #[tauri::command]
@@ -42,7 +43,7 @@ pub fn list_hosts(pool: State<DbPool>, params: QueryParams) -> AppResult<PagedRe
         .map_err(|e| AppError::db_unavailable(command, format!("Pool error: {}", e)))?;
 
     let search_columns = &["hostname", "ip_address"];
-    let filter_columns = &["status", "os_type"];
+    let filter_columns = &["status", "os_type", "env"];
     let (where_clause, sql_params) = build_where_clause(&params, search_columns, filter_columns);
 
     let total = count_query(&conn, "hosts", &where_clause, &sql_params)
@@ -129,13 +130,14 @@ pub fn save_host(pool: State<DbPool>, data: Host) -> AppResult<()> {
                 data.id.clone()
             };
             conn.execute(
-                "INSERT INTO hosts (id, hostname, ip_address, os_type, cpu_model, cpu_cores, cpu_threads, cpu_freq,
+                "INSERT INTO hosts (id, hostname, ip_address, env, os_type, cpu_model, cpu_cores, cpu_threads, cpu_freq,
                                     ram_gb, disk_gb, status, tags, description, is_deleted, deleted_at, created_at, updated_at)
-                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,0,NULL,?14,?14)",
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,0,NULL,?15,?15)",
                 rusqlite::params![
                     id,
                     data.hostname,
                     data.ip_address,
+                    data.env,
                     data.os_type,
                     data.cpu_model,
                     data.cpu_cores,
@@ -155,13 +157,14 @@ pub fn save_host(pool: State<DbPool>, data: Host) -> AppResult<()> {
                 .map_err(|e| AppError::from_db_error(command, "写入审计日志", e))?;
         } else {
             conn.execute(
-                "UPDATE hosts SET hostname=?1, ip_address=?2, os_type=?3, cpu_model=?4, cpu_cores=?5,
-                                  cpu_threads=?6, cpu_freq=?7, ram_gb=?8, disk_gb=?9,
-                                  status=?10, tags=?11, description=?12, updated_at=?13
-                 WHERE id=?14 AND is_deleted=0",
+                "UPDATE hosts SET hostname=?1, ip_address=?2, env=?3, os_type=?4, cpu_model=?5, cpu_cores=?6,
+                                  cpu_threads=?7, cpu_freq=?8, ram_gb=?9, disk_gb=?10,
+                                  status=?11, tags=?12, description=?13, updated_at=?14
+                 WHERE id=?15 AND is_deleted=0",
                 rusqlite::params![
                     data.hostname,
                     data.ip_address,
+                    data.env,
                     data.os_type,
                     data.cpu_model,
                     data.cpu_cores,

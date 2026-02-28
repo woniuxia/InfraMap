@@ -1,3 +1,4 @@
+use std::collections::{HashMap, HashSet};
 use tauri::State;
 
 use crate::db::audit::insert_audit_log;
@@ -31,6 +32,103 @@ fn row_to_application(row: &rusqlite::Row) -> rusqlite::Result<Application> {
 
 const SELECT_COLUMNS: &str = "id, name, type, address, port, tech_stack, deploy_mode, \
      env, git_repo, owner, status, description, is_deleted, deleted_at, created_at, updated_at";
+
+fn parse_tech_stack_items(value: &str) -> Vec<String> {
+    value
+        .split(|ch| matches!(ch, ',' | ';' | '|' | '/' | '\u{FF0C}' | '\u{FF1B}'))
+        .map(|item| item.trim().to_string())
+        .filter(|item| !item.is_empty())
+        .collect()
+}
+
+fn collect_top_tech_stacks<I>(rows: I, limit: usize) -> Vec<String>
+where
+    I: IntoIterator<Item = String>,
+{
+    if limit == 0 {
+        return Vec::new();
+    }
+
+    let mut counts: HashMap<String, usize> = HashMap::new();
+    for row in rows {
+        let mut unique_per_row: HashSet<String> = HashSet::new();
+        for tech in parse_tech_stack_items(&row) {
+            if unique_per_row.insert(tech.clone()) {
+                *counts.entry(tech).or_insert(0) += 1;
+            }
+        }
+    }
+
+    let mut sorted: Vec<(String, usize)> = counts.into_iter().collect();
+    sorted.sort_by(|(name_a, count_a), (name_b, count_b)| {
+        count_b.cmp(count_a).then_with(|| name_a.cmp(name_b))
+    });
+
+    sorted
+        .into_iter()
+        .take(limit)
+        .map(|(name, _)| name)
+        .collect()
+}
+
+fn resolve_tech_stack_side(app_type: Option<&str>) -> &'static str {
+    match app_type.unwrap_or("").trim() {
+        "frontend" => "frontend",
+        _ => "backend",
+    }
+}
+
+#[tauri::command]
+pub fn list_top_application_tech_stacks(
+    pool: State<DbPool>,
+    limit: Option<u32>,
+    app_type: Option<String>,
+) -> AppResult<Vec<String>> {
+    let command = "list_top_application_tech_stacks";
+    let conn = pool
+        .get()
+        .map_err(|e| AppError::db_unavailable(command, format!("Pool error: {}", e)))?;
+
+    let side = resolve_tech_stack_side(app_type.as_deref());
+    let query_sql = match side {
+        "frontend" => {
+            "SELECT tech_stack
+             FROM applications
+             WHERE is_deleted = 0
+               AND type = 'frontend'
+               AND tech_stack IS NOT NULL
+               AND TRIM(tech_stack) <> ''"
+        }
+        _ => {
+            "SELECT tech_stack
+             FROM applications
+             WHERE is_deleted = 0
+               AND type <> 'frontend'
+               AND tech_stack IS NOT NULL
+               AND TRIM(tech_stack) <> ''"
+        }
+    };
+
+    let mut stmt = conn
+        .prepare(query_sql)
+        .map_err(|e| AppError::from_db_error(command, "query application tech stacks", e))?;
+
+    let rows = stmt
+        .query_map([], |row| row.get::<_, Option<String>>(0))
+        .map_err(|e| AppError::from_db_error(command, "read application tech stacks", e))?;
+
+    let mut tech_stack_rows: Vec<String> = Vec::new();
+    for row in rows {
+        let value =
+            row.map_err(|e| AppError::from_db_error(command, "decode application tech stacks", e))?;
+        if let Some(text) = value {
+            tech_stack_rows.push(text);
+        }
+    }
+
+    let top_limit = limit.unwrap_or(10).clamp(1, 100) as usize;
+    Ok(collect_top_tech_stacks(tech_stack_rows, top_limit))
+}
 
 #[tauri::command]
 pub fn list_applications(
@@ -235,5 +333,41 @@ pub fn soft_delete_application(pool: State<DbPool>, id: String) -> AppResult<()>
             let _ = conn.execute_batch("ROLLBACK;");
             Err(AppError::from_db_error(command, "删除应用", e))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{collect_top_tech_stacks, resolve_tech_stack_side};
+
+    #[test]
+    fn collect_top_tech_stacks_should_sort_by_count_desc_then_name_asc() {
+        let rows = vec![
+            "Vue, TypeScript, Pinia".to_string(),
+            "TypeScript; Rust".to_string(),
+            "Rust / Vue".to_string(),
+            "Vue\u{FF0C}Vue".to_string(),
+            "".to_string(),
+        ];
+
+        let result = collect_top_tech_stacks(rows, 3);
+        assert_eq!(result, vec!["Vue", "Rust", "TypeScript"]);
+    }
+
+    #[test]
+    fn collect_top_tech_stacks_should_respect_limit() {
+        let rows = vec!["A,B,C,D,E,F,G,H,I,J,K".to_string(), "A,B,C,D,E".to_string()];
+
+        let result = collect_top_tech_stacks(rows, 5);
+        assert_eq!(result.len(), 5);
+        assert_eq!(result, vec!["A", "B", "C", "D", "E"]);
+    }
+
+    #[test]
+    fn resolve_tech_stack_side_should_fallback_to_backend_for_unknown_values() {
+        assert_eq!(resolve_tech_stack_side(Some("frontend")), "frontend");
+        assert_eq!(resolve_tech_stack_side(Some("backend")), "backend");
+        assert_eq!(resolve_tech_stack_side(Some("gateway")), "backend");
+        assert_eq!(resolve_tech_stack_side(None), "backend");
     }
 }

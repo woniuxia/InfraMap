@@ -1,11 +1,17 @@
 use serde::{Deserialize, Serialize};
 
+fn default_env() -> String {
+    "prod".to_string()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Host {
     #[serde(default)]
     pub id: String,
     pub hostname: String,
     pub ip_address: String,
+    #[serde(default = "default_env")]
+    pub env: String,
     pub os_type: Option<String>,
     pub cpu_model: Option<String>,
     pub cpu_cores: Option<i64>,

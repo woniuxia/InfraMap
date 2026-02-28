@@ -2,6 +2,7 @@ export interface Host {
   id: string;
   hostname: string;
   ip_address: string;
+  env: "prod" | "dev" | "test";
   os_type?: string;
   cpu_model?: string;
   cpu_cores?: number;
@@ -86,7 +87,14 @@ export interface Dependency {
   source_type: string;
   target_id: string;
   target_type: string;
-  relation_type: "http_call" | "tcp" | "mq_produce" | "mq_consume";
+  relation_type:
+    | "http_call"
+    | "tcp"
+    | "mq_produce"
+    | "mq_consume"
+    | "grpc_call"
+    | "db_query"
+    | "cache_access";
   description?: string;
   is_deleted: number;
   deleted_at?: string;
@@ -159,7 +167,14 @@ export interface TopologyEdge {
   id: string;
   source: string;
   target: string;
-  edge_type: "http_call" | "tcp" | "mq_produce" | "mq_consume";
+  edge_type:
+    | "http_call"
+    | "tcp"
+    | "mq_produce"
+    | "mq_consume"
+    | "grpc_call"
+    | "db_query"
+    | "cache_access";
   label?: string;
 }
 

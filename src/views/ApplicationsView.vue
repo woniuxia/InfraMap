@@ -1,10 +1,17 @@
-﻿<script setup lang="ts">
-import { ref, onMounted, nextTick } from "vue";
+<script setup lang="ts">
+import { computed, ref, onMounted } from "vue";
 import { ElMessage } from "element-plus";
 import type { Application } from "@/types";
 import type { SearchFieldConfig, SearchToolbarQueryPayload } from "@/types/searchToolbar";
-import { listApplications, saveApplication, softDeleteApplication } from "@/api/applications";
+import {
+  listApplications,
+  listTopApplicationTechStacks,
+  saveApplication,
+  softDeleteApplication,
+} from "@/api/applications";
+import type { ApplicationTechStackSide } from "@/api/applications";
 import { useResourceList } from "@/composables/useResourceList";
+import { buildTechStackSuggestions, parseTechStack, techStackToText } from "@/utils/techStack";
 import SearchToolbar from "@/components/filters/SearchToolbar.vue";
 import DeploymentPanel from "@/components/DeploymentPanel.vue";
 import DependencyPanel from "@/components/DependencyPanel.vue";
@@ -22,7 +29,7 @@ const {
 } = useResourceList<Application>({
   listFn: listApplications,
   deleteFn: softDeleteApplication,
-  entityLabel: "搴旂敤鏈嶅姟",
+  entityLabel: "应用服务",
 });
 
 const searchText = ref("");
@@ -32,9 +39,13 @@ const isEditing = ref(false);
 const saveLoading = ref(false);
 
 const techStackList = ref<string[]>([]);
-const techStackInputVisible = ref(false);
-const techStackInputValue = ref("");
-const techStackInputRef = ref<InstanceType<typeof import("element-plus")["ElInput"]>>();
+const topTechStackOptions = ref<string[]>([]);
+const techStackSuggestions = computed(() =>
+  buildTechStackSuggestions(
+    topTechStackOptions.value.map((item) => ({ tech_stack: item })),
+    techStackList.value
+  )
+);
 
 interface ApplicationListFilters {
   type: string[];
@@ -124,38 +135,12 @@ function handleToolbarQuery(payload: SearchToolbarQueryPayload) {
   handleQuery(payload);
 }
 
-function parseTechStack(value?: string): string[] {
-  if (!value) return [];
-  return value
-    .split(/[,，;；|/]/)
-    .map((x) => x.trim())
-    .filter(Boolean);
+function handleTechStackChange(values: string[]) {
+  techStackList.value = buildTechStackSuggestions([], values);
 }
 
-function techStackToText(list: string[]): string {
-  return list.join(", ");
-}
-
-function handleTechStackClose(tag: string) {
-  techStackList.value = techStackList.value.filter((t) => t !== tag);
-  editingApp.value.tech_stack = techStackToText(techStackList.value);
-}
-
-function showTechStackInput() {
-  techStackInputVisible.value = true;
-  nextTick(() => {
-    techStackInputRef.value?.input?.focus();
-  });
-}
-
-function handleTechStackInputConfirm() {
-  const value = techStackInputValue.value.trim();
-  if (value && !techStackList.value.includes(value)) {
-    techStackList.value.push(value);
-    editingApp.value.tech_stack = techStackToText(techStackList.value);
-  }
-  techStackInputVisible.value = false;
-  techStackInputValue.value = "";
+function resolveTechStackSide(type: Application["type"] | undefined): ApplicationTechStackSide {
+  return type === "frontend" ? "frontend" : "backend";
 }
 
 function applyDefaultPortByType(type: Application["type"] | undefined) {
@@ -180,8 +165,10 @@ function openAdd() {
     updated_at: "",
   };
   techStackList.value = [];
+  topTechStackOptions.value = [];
   isEditing.value = false;
   drawerVisible.value = true;
+  fetchTopTechStackOptions(editingApp.value.type);
 }
 
 function openEdit(row: Application) {
@@ -189,10 +176,20 @@ function openEdit(row: Application) {
   techStackList.value = parseTechStack(row.tech_stack);
   isEditing.value = true;
   drawerVisible.value = true;
+  fetchTopTechStackOptions(editingApp.value.type);
 }
 
 function handleTypeChange(type: Application["type"] | undefined) {
   applyDefaultPortByType(type);
+  fetchTopTechStackOptions(type);
+}
+
+async function fetchTopTechStackOptions(type: Application["type"] | undefined) {
+  try {
+    topTechStackOptions.value = await listTopApplicationTechStacks(10, resolveTechStackSide(type));
+  } catch {
+    // error shown by tauriInvoke
+  }
 }
 
 async function handleSave() {
@@ -207,9 +204,10 @@ async function handleSave() {
   saveLoading.value = true;
   try {
     await saveApplication(payload);
-    ElMessage.success(isEditing.value ? "鏇存柊鎴愬姛" : "鍒涘缓鎴愬姛");
+    ElMessage.success(isEditing.value ? "更新成功" : "创建成功");
     drawerVisible.value = false;
     fetchData();
+    fetchTopTechStackOptions((payload.type as Application["type"] | undefined) ?? editingApp.value.type);
   } catch {
     // error shown by tauriInvoke
   } finally {
@@ -256,7 +254,10 @@ function envTagType(env: string): "primary" | "success" | "warning" | "info" | "
   return map[env] || "info";
 }
 
-onMounted(() => fetchData());
+onMounted(() => {
+  fetchData();
+  fetchTopTechStackOptions("backend");
+});
 </script>
 
 <template>
@@ -296,8 +297,8 @@ onMounted(() => fetchData());
       </el-table-column>
       <el-table-column label="操作" width="150" fixed="right" align="center">
         <template #default="{ row }">
-          <el-button text type="primary" size="small" @click="openEdit(row)">缂栬緫</el-button>
-          <el-button text type="danger" size="small" @click="handleDelete(row.id, row.name)">鍒犻櫎</el-button>
+          <el-button text type="primary" size="small" @click="openEdit(row)">编辑</el-button>
+          <el-button text type="danger" size="small" @click="handleDelete(row.id, row.name)">删除</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -345,28 +346,19 @@ onMounted(() => fetchData());
 
         <el-divider content-position="left">部署信息</el-divider>
         <el-form-item label="技术栈">
-          <div class="tag-editor">
-            <el-tag
-              v-for="tag in techStackList"
-              :key="tag"
-              closable
-              :disable-transitions="false"
-              @close="handleTechStackClose(tag)"
-              class="tag-item"
-            >
-              {{ tag }}
-            </el-tag>
-            <el-input
-              v-if="techStackInputVisible"
-              ref="techStackInputRef"
-              v-model="techStackInputValue"
-              size="small"
-              class="w-140"
-              @keyup.enter="handleTechStackInputConfirm"
-              @blur="handleTechStackInputConfirm"
-            />
-            <el-button v-else size="small" @click="showTechStackInput">+ 添加技术栈</el-button>
-          </div>
+          <el-select
+            v-model="techStackList"
+            class="w-full"
+            multiple
+            filterable
+            allow-create
+            default-first-option
+            :reserve-keyword="false"
+            placeholder="输入技术栈进行筛选，按回车可新增"
+            @change="(values) => handleTechStackChange(values as string[])"
+          >
+            <el-option v-for="item in techStackSuggestions" :key="item" :label="item" :value="item" />
+          </el-select>
         </el-form-item>
         <el-form-item label="部署方式">
           <el-select v-model="editingApp.deploy_mode" clearable placeholder="请选择部署方式" class="w-full">
@@ -400,12 +392,17 @@ onMounted(() => fetchData());
         </el-form-item>
       </el-form>
 
-      <DeploymentPanel v-if="isEditing && editingApp.id" :resource-id="editingApp.id!" resource-type="application" />
+      <DeploymentPanel
+        v-if="isEditing && editingApp.id"
+        :resource-id="editingApp.id!"
+        resource-type="application"
+        :default-port="editingApp.port"
+      />
       <DependencyPanel v-if="isEditing && editingApp.id" :resource-id="editingApp.id!" resource-type="application" />
 
       <template #footer>
-        <el-button @click="drawerVisible = false">鍙栨秷</el-button>
-        <el-button type="primary" :loading="saveLoading" @click="handleSave">淇濆瓨</el-button>
+        <el-button @click="drawerVisible = false">取消</el-button>
+        <el-button type="primary" :loading="saveLoading" @click="handleSave">保存</el-button>
       </template>
     </el-dialog>
   </div>
@@ -556,15 +553,6 @@ onMounted(() => fetchData());
   display: flex;
   justify-content: flex-end;
 }
-.tag-editor {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px;
-}
-.tag-item {
-  margin-right: 6px;
-  margin-bottom: 4px;
-}
 </style>
+
 

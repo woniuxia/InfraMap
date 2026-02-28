@@ -52,6 +52,19 @@ function resourceTypeLabel(type: string) {
   );
 }
 
+function resourceTypeTagType(type: string): "primary" | "success" | "warning" | "info" | "danger" {
+  return (
+    ({
+      host: "primary",
+      application: "success",
+      middleware: "warning",
+      nginx: "danger",
+      deployment: "info",
+      dependency: "info",
+    } as Record<string, "primary" | "success" | "warning" | "info" | "danger">)[type] || "info"
+  );
+}
+
 function envLabel(env: string) {
   return ({ prod: "生产", dev: "开发", test: "测试" } as Record<string, string>)[env] || env;
 }
@@ -170,9 +183,11 @@ onMounted(loadDashboard);
               </template>
             </el-table-column>
             <el-table-column prop="resource_type" label="资源类型" width="100" align="center">
-              <template #default="{ row }">{{
-                resourceTypeLabel(row.resource_type)
-              }}</template>
+              <template #default="{ row }">
+                <el-tag :type="resourceTypeTagType(row.resource_type)" size="small">{{
+                  resourceTypeLabel(row.resource_type)
+                }}</el-tag>
+              </template>
             </el-table-column>
             <el-table-column prop="resource_name" label="资源名称" min-width="150">
               <template #default="{ row }">{{ row.resource_name || row.resource_id }}</template>

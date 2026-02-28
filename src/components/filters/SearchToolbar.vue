@@ -23,6 +23,7 @@ interface Props {
   searchWidth?: SearchFieldWidth;
   debounceMs?: number;
   maxChipValues?: number;
+  showChips?: boolean;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -31,6 +32,7 @@ const props = withDefaults(defineProps<Props>(), {
   searchWidth: "lg",
   debounceMs: 400,
   maxChipValues: 2,
+  showChips: true,
 });
 
 const emit = defineEmits<{
@@ -253,7 +255,7 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <div class="im-search-ops">
+    <div class="im-search-ops" :class="{ 'im-search-ops--actions-only': !hasAdvancedFields }">
       <el-button v-if="hasAdvancedFields" text type="primary" @click="toggleAdvanced">
         {{ advancedToggleText }}
       </el-button>
@@ -306,7 +308,7 @@ onBeforeUnmount(() => {
       </div>
     </el-collapse-transition>
 
-    <div v-if="activeChips.length > 0" class="im-search-chip-row">
+    <div v-if="showChips && activeChips.length > 0" class="im-search-chip-row">
       <el-tag
         v-for="chip in activeChips"
         :key="chip.id"
@@ -365,6 +367,10 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+
+.im-search-ops--actions-only {
+  justify-content: flex-end;
 }
 
 .im-search-actions {

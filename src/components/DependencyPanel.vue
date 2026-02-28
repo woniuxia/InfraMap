@@ -82,6 +82,9 @@ function relationLabel(type: string) {
       tcp: "TCP连接",
       mq_produce: "MQ生产",
       mq_consume: "MQ消费",
+      grpc_call: "gRPC调用",
+      db_query: "数据库访问",
+      cache_access: "缓存访问",
     } as Record<string, string>)[type] || type
   );
 }
@@ -210,6 +213,9 @@ onMounted(() => {
             <el-option label="TCP连接" value="tcp" />
             <el-option label="MQ生产" value="mq_produce" />
             <el-option label="MQ消费" value="mq_consume" />
+            <el-option label="gRPC调用" value="grpc_call" />
+            <el-option label="数据库访问" value="db_query" />
+            <el-option label="缓存访问" value="cache_access" />
           </el-select>
         </el-form-item>
         <el-form-item label="描述">

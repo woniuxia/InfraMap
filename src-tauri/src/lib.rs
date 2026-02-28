@@ -46,6 +46,7 @@ pub fn run() {
             commands::hosts::save_host,
             commands::hosts::soft_delete_host,
             commands::applications::list_applications,
+            commands::applications::list_top_application_tech_stacks,
             commands::applications::get_application,
             commands::applications::save_application,
             commands::applications::soft_delete_application,

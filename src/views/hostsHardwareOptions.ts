@@ -1,0 +1,2 @@
+export const COMMON_RAM_OPTIONS_GB = [4, 8, 16, 32, 64, 128];
+export const COMMON_DISK_OPTIONS_GB = [128, 256, 512, 1024, 2048];

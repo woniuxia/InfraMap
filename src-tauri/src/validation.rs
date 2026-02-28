@@ -15,10 +15,18 @@ pub fn validate_required(value: &str, field_name: &str) -> Result<(), String> {
     }
 }
 
-pub fn validate_string_length(value: &str, min: usize, max: usize, field_name: &str) -> Result<(), String> {
+pub fn validate_string_length(
+    value: &str,
+    min: usize,
+    max: usize,
+    field_name: &str,
+) -> Result<(), String> {
     let len = value.chars().count();
     if len < min || len > max {
-        Err(format!("{} length must be {}-{}, got {}", field_name, min, max, len))
+        Err(format!(
+            "{} length must be {}-{}, got {}",
+            field_name, min, max, len
+        ))
     } else {
         Ok(())
     }
@@ -42,7 +50,10 @@ pub fn validate_enum(value: &str, allowed: &[&str], field_name: &str) -> Result<
     if allowed.contains(&value) {
         Ok(())
     } else {
-        Err(format!("{} must be one of {:?}, got '{}'", field_name, allowed, value))
+        Err(format!(
+            "{} must be one of {:?}, got '{}'",
+            field_name, allowed, value
+        ))
     }
 }
 
@@ -68,7 +79,12 @@ pub fn validate_host(host: &Host) -> Result<(), String> {
     validate_string_length(&host.hostname, 1, 200, "hostname")?;
     validate_required(&host.ip_address, "ip_address")?;
     validate_ipv4(&host.ip_address)?;
-    validate_enum(&host.status, &["running", "stopped", "maintenance"], "status")?;
+    validate_enum(&host.env, &["prod", "dev", "test"], "env")?;
+    validate_enum(
+        &host.status,
+        &["running", "stopped", "maintenance"],
+        "status",
+    )?;
     if let Some(ref tags) = host.tags {
         if !tags.is_empty() {
             validate_json_array(tags, "tags")?;
@@ -94,11 +110,22 @@ pub fn validate_application(app: &Application) -> Result<(), String> {
     validate_string_length(&app.name, 1, 200, "name")?;
     validate_enum(
         &app.app_type,
-        &["frontend", "backend", "gateway", "batch_job", "microservice", "other"],
+        &[
+            "frontend",
+            "backend",
+            "gateway",
+            "batch_job",
+            "microservice",
+            "other",
+        ],
         "type",
     )?;
     validate_enum(&app.env, &["prod", "dev", "test"], "env")?;
-    validate_enum(&app.status, &["running", "stopped", "maintenance"], "status")?;
+    validate_enum(
+        &app.status,
+        &["running", "stopped", "maintenance"],
+        "status",
+    )?;
     if let Some(port) = app.port {
         validate_port(port)?;
     }
@@ -110,7 +137,14 @@ pub fn validate_middleware(mw: &Middleware) -> Result<(), String> {
     validate_string_length(&mw.name, 1, 200, "name")?;
     validate_enum(
         &mw.category,
-        &["database", "message_queue", "cache", "search_engine", "config_center", "other"],
+        &[
+            "database",
+            "message_queue",
+            "cache",
+            "search_engine",
+            "config_center",
+            "other",
+        ],
         "category",
     )?;
     validate_required(&mw.mw_type, "type")?;
@@ -164,7 +198,15 @@ pub fn validate_dependency(dep: &Dependency) -> Result<(), String> {
     validate_required(&dep.target_type, "target_type")?;
     validate_enum(
         &dep.relation_type,
-        &["http_call", "tcp", "mq_produce", "mq_consume"],
+        &[
+            "http_call",
+            "tcp",
+            "mq_produce",
+            "mq_consume",
+            "grpc_call",
+            "db_query",
+            "cache_access",
+        ],
         "relation_type",
     )?;
     Ok(())
@@ -283,6 +325,7 @@ mod tests {
             id: "h1".into(),
             hostname: "server1".into(),
             ip_address: "192.168.1.1".into(),
+            env: "prod".into(),
             os_type: None,
             cpu_model: None,
             cpu_cores: None,
@@ -316,6 +359,13 @@ mod tests {
     fn test_validate_host_invalid_status() {
         let mut host = make_test_host();
         host.status = "unknown".into();
+        assert!(validate_host(&host).is_err());
+    }
+
+    #[test]
+    fn test_validate_host_invalid_env() {
+        let mut host = make_test_host();
+        host.env = "staging".into();
         assert!(validate_host(&host).is_err());
     }
 
@@ -495,9 +545,22 @@ mod tests {
     }
 
     #[test]
+    fn test_validate_dependency_new_relation_types() {
+        let mut dep = make_test_dependency();
+        dep.relation_type = "grpc_call".into();
+        assert!(validate_dependency(&dep).is_ok());
+
+        dep.relation_type = "db_query".into();
+        assert!(validate_dependency(&dep).is_ok());
+
+        dep.relation_type = "cache_access".into();
+        assert!(validate_dependency(&dep).is_ok());
+    }
+
+    #[test]
     fn test_validate_dependency_invalid_relation_type() {
         let mut dep = make_test_dependency();
-        dep.relation_type = "grpc".into();
+        dep.relation_type = "invalid_relation".into();
         assert!(validate_dependency(&dep).is_err());
     }
 }

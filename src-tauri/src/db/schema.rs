@@ -1,5 +1,7 @@
 pub const MIGRATIONS: &[(i32, &str)] = &[
-    (1, r#"
+    (
+        1,
+        r#"
         CREATE TABLE IF NOT EXISTS hosts (
             id TEXT PRIMARY KEY,
             hostname TEXT NOT NULL,
@@ -140,8 +142,11 @@ pub const MIGRATIONS: &[(i32, &str)] = &[
         -- Indexes: audit_logs
         CREATE INDEX idx_audit_logs_created_at ON audit_logs(created_at);
         CREATE INDEX idx_audit_logs_resource ON audit_logs(resource_type, resource_id);
-    "#),
-    (2, r#"
+    "#,
+    ),
+    (
+        2,
+        r#"
         CREATE TABLE IF NOT EXISTS system_settings (
             id TEXT PRIMARY KEY,
             auto_backup_enabled INTEGER NOT NULL DEFAULT 0,
@@ -154,11 +159,54 @@ pub const MIGRATIONS: &[(i32, &str)] = &[
 
         INSERT OR IGNORE INTO system_settings (id, auto_backup_enabled, backup_interval_hours, max_backups, created_at, updated_at)
         VALUES ('default', 0, 24, 10, datetime('now'), datetime('now'));
-    "#),
-    (3, r#"
+    "#,
+    ),
+    (
+        3,
+        r#"
         ALTER TABLE hosts ADD COLUMN cpu_model TEXT;
         ALTER TABLE hosts ADD COLUMN cpu_cores INTEGER;
         ALTER TABLE hosts ADD COLUMN cpu_threads INTEGER;
         ALTER TABLE hosts ADD COLUMN cpu_freq TEXT;
-    "#),
+    "#,
+    ),
+    (
+        4,
+        r#"
+        ALTER TABLE hosts ADD COLUMN env TEXT NOT NULL DEFAULT 'prod';
+        CREATE INDEX IF NOT EXISTS idx_hosts_env ON hosts(env) WHERE is_deleted = 0;
+    "#,
+    ),
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::MIGRATIONS;
+    use rusqlite::Connection;
+
+    fn apply_all_migrations(conn: &Connection) {
+        for (version, sql) in MIGRATIONS.iter() {
+            conn.execute_batch(sql)
+                .unwrap_or_else(|e| panic!("Migration v{} failed: {}", version, e));
+        }
+    }
+
+    #[test]
+    fn hosts_table_should_have_env_column_after_migrations() {
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        apply_all_migrations(&conn);
+
+        let mut stmt = conn
+            .prepare("PRAGMA table_info(hosts)")
+            .expect("prepare table info query");
+        let rows = stmt
+            .query_map([], |row| row.get::<_, String>(1))
+            .expect("query table info");
+        let columns: Vec<String> = rows.filter_map(|r| r.ok()).collect();
+
+        assert!(
+            columns.iter().any(|col| col == "env"),
+            "hosts table should contain env column"
+        );
+    }
+}

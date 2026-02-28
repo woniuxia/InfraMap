@@ -1,4 +1,4 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import { ref, onMounted } from "vue";
 import { ElMessage } from "element-plus";
 import type { NginxConfig } from "@/types";
@@ -21,7 +21,7 @@ const {
 } = useResourceList<NginxConfig>({
   listFn: listNginxConfigs,
   deleteFn: softDeleteNginxConfig,
-  entityLabel: "璐熻浇鍧囪　",
+  entityLabel: "负载均衡",
 });
 
 const searchText = ref("");
@@ -126,7 +126,7 @@ async function handleSave() {
   saveLoading.value = true;
   try {
     await saveNginxConfig(payload);
-    ElMessage.success(isEditing.value ? "鏇存柊鎴愬姛" : "鍒涘缓鎴愬姛");
+    ElMessage.success(isEditing.value ? "更新成功" : "创建成功");
     drawerVisible.value = false;
     fetchData();
   } catch {
@@ -150,7 +150,7 @@ function statusLabel(status: string) {
 }
 
 function strategyLabel(strategy: string) {
-  return ({ roundrobin: "杞", ip_hash: "IP 鍝堝笇" } as Record<string, string>)[strategy] || strategy || "-";
+  return ({ roundrobin: "轮询", ip_hash: "IP 哈希" } as Record<string, string>)[strategy] || strategy || "-";
 }
 
 function envLabel(env: string) {
@@ -385,4 +385,5 @@ onMounted(() => fetchData());
   justify-content: flex-end;
 }
 </style>
+
 

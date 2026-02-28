@@ -8,6 +8,7 @@ import { listHosts } from "@/api/hosts";
 const props = defineProps<{
   resourceId: string;
   resourceType: "application" | "middleware" | "nginx";
+  defaultPort?: number;
 }>();
 
 const deployments = ref<Deployment[]>([]);
@@ -49,7 +50,7 @@ function hostName(hostId: string) {
 }
 
 function openAdd() {
-  newDeploy.value = { host_id: "", port: undefined };
+  newDeploy.value = { host_id: "", port: props.defaultPort };
   addVisible.value = true;
 }
 
@@ -126,8 +127,8 @@ onMounted(() => {
       :image-size="40"
     />
 
-    <el-dialog v-model="addVisible" title="添加部署关系" width="400px" append-to-body>
-      <el-form :model="newDeploy" label-width="90px">
+    <el-dialog v-model="addVisible" title="添加部署关系" width="360px" append-to-body>
+      <el-form :model="newDeploy" label-width="110px">
         <el-form-item label="目标服务器" required>
           <el-select v-model="newDeploy.host_id" filterable placeholder="选择服务器" class="w-full">
             <el-option
