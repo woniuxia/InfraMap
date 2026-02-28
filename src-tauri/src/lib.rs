@@ -1,8 +1,9 @@
-mod db;
+mod backup;
 mod commands;
+mod db;
+mod error;
 mod models;
 mod validation;
-mod backup;
 
 #[cfg(test)]
 mod test_helpers;
@@ -16,20 +17,19 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
-            let app_data_dir = app.path().app_data_dir()
+            let app_data_dir = app
+                .path()
+                .app_data_dir()
                 .expect("Failed to resolve app data directory");
-            std::fs::create_dir_all(&app_data_dir)
-                .expect("Failed to create app data directory");
+            std::fs::create_dir_all(&app_data_dir).expect("Failed to create app data directory");
 
             let db_path = app_data_dir.join("inframap.db");
-            let db_path_str = db_path.to_str()
-                .expect("Invalid database path");
+            let db_path_str = db_path.to_str().expect("Invalid database path");
 
-            let pool = init_db_pool(db_path_str)
-                .expect("Failed to initialize database connection pool");
+            let pool =
+                init_db_pool(db_path_str).expect("Failed to initialize database connection pool");
 
-            run_migrations(&pool)
-                .expect("Database migration failed");
+            run_migrations(&pool).expect("Database migration failed");
 
             app.manage(pool.clone());
             app.manage(backup::AppDataDir(app_data_dir.clone()));

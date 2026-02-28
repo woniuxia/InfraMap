@@ -1,27 +1,30 @@
-use std::collections::{HashMap, HashSet, VecDeque};
-use rusqlite::Connection;
-use tauri::State;
 use crate::db::DbPool;
+use crate::error::{AppError, AppResult};
 use crate::models::topology::{
-    TopologyNode, TopologyEdge, TopologyCombo, TopologyGraph,
-    PathResult, AffectedNode, ImpactResult,
+    AffectedNode, ImpactResult, PathResult, TopologyCombo, TopologyEdge, TopologyGraph,
+    TopologyNode,
 };
+use rusqlite::Connection;
+use std::collections::{HashMap, HashSet, VecDeque};
+use tauri::State;
 
 pub fn get_topology_graph_inner(conn: &Connection) -> Result<TopologyGraph, String> {
     // 1. Query all non-deleted hosts -> TopologyCombo
     let mut combos: Vec<TopologyCombo> = Vec::new();
     {
-        let mut stmt = conn.prepare(
-            "SELECT id, hostname, ip_address, status FROM hosts WHERE is_deleted = 0"
-        ).map_err(|e| e.to_string())?;
-        let rows = stmt.query_map([], |row| {
-            Ok(TopologyCombo {
-                id: row.get(0)?,
-                label: row.get(1)?,
-                ip: row.get(2)?,
-                status: row.get(3)?,
+        let mut stmt = conn
+            .prepare("SELECT id, hostname, ip_address, status FROM hosts WHERE is_deleted = 0")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(TopologyCombo {
+                    id: row.get(0)?,
+                    label: row.get(1)?,
+                    ip: row.get(2)?,
+                    status: row.get(3)?,
+                })
             })
-        }).map_err(|e| e.to_string())?;
+            .map_err(|e| e.to_string())?;
         for row in rows {
             combos.push(row.map_err(|e| e.to_string())?);
         }
@@ -31,44 +34,54 @@ pub fn get_topology_graph_inner(conn: &Connection) -> Result<TopologyGraph, Stri
     let mut nodes: Vec<TopologyNode> = Vec::new();
     let mut node_index: HashMap<String, usize> = HashMap::new();
     {
-        let mut stmt = conn.prepare(
-            "SELECT id, name, type, address, port, tech_stack, env, status \
-             FROM applications WHERE is_deleted = 0"
-        ).map_err(|e| e.to_string())?;
-        let rows = stmt.query_map([], |row| {
-            let id: String = row.get(0)?;
-            let name: String = row.get(1)?;
-            let app_type: Option<String> = row.get(2)?;
-            let address: Option<String> = row.get(3)?;
-            let port: Option<i64> = row.get(4)?;
-            let tech_stack: Option<String> = row.get(5)?;
-            let env: Option<String> = row.get(6)?;
-            let status: Option<String> = row.get(7)?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, name, type, address, port, tech_stack, env, status \
+             FROM applications WHERE is_deleted = 0",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |row| {
+                let id: String = row.get(0)?;
+                let name: String = row.get(1)?;
+                let app_type: Option<String> = row.get(2)?;
+                let address: Option<String> = row.get(3)?;
+                let port: Option<i64> = row.get(4)?;
+                let tech_stack: Option<String> = row.get(5)?;
+                let env: Option<String> = row.get(6)?;
+                let status: Option<String> = row.get(7)?;
 
-            let mut extra = serde_json::Map::new();
-            if let Some(ref t) = app_type {
-                extra.insert("type".to_string(), serde_json::Value::String(t.clone()));
-            }
-            if let Some(ref ts) = tech_stack {
-                extra.insert("tech_stack".to_string(), serde_json::Value::String(ts.clone()));
-            }
-            if let Some(ref addr) = address {
-                extra.insert("address".to_string(), serde_json::Value::String(addr.clone()));
-            }
-            if let Some(p) = port {
-                extra.insert("port".to_string(), serde_json::json!(p));
-            }
+                let mut extra = serde_json::Map::new();
+                if let Some(ref t) = app_type {
+                    extra.insert("type".to_string(), serde_json::Value::String(t.clone()));
+                }
+                if let Some(ref ts) = tech_stack {
+                    extra.insert(
+                        "tech_stack".to_string(),
+                        serde_json::Value::String(ts.clone()),
+                    );
+                }
+                if let Some(ref addr) = address {
+                    extra.insert(
+                        "address".to_string(),
+                        serde_json::Value::String(addr.clone()),
+                    );
+                }
+                if let Some(p) = port {
+                    extra.insert("port".to_string(), serde_json::json!(p));
+                }
 
-            Ok(TopologyNode {
-                id,
-                name,
-                node_type: "application".to_string(),
-                status,
-                env,
-                parent_id: None,
-                extra: Some(serde_json::Value::Object(extra)),
+                Ok(TopologyNode {
+                    id,
+                    name,
+                    node_type: "application".to_string(),
+                    status,
+                    env,
+                    parent_id: None,
+                    extra: Some(serde_json::Value::Object(extra)),
+                })
             })
-        }).map_err(|e| e.to_string())?;
+            .map_err(|e| e.to_string())?;
         for row in rows {
             let node = row.map_err(|e| e.to_string())?;
             node_index.insert(node.id.clone(), nodes.len());
@@ -78,47 +91,54 @@ pub fn get_topology_graph_inner(conn: &Connection) -> Result<TopologyGraph, Stri
 
     // 3. Query middlewares -> TopologyNode
     {
-        let mut stmt = conn.prepare(
-            "SELECT id, name, category, type, address, port, version, env \
-             FROM middlewares WHERE is_deleted = 0"
-        ).map_err(|e| e.to_string())?;
-        let rows = stmt.query_map([], |row| {
-            let id: String = row.get(0)?;
-            let name: String = row.get(1)?;
-            let category: Option<String> = row.get(2)?;
-            let mw_type: Option<String> = row.get(3)?;
-            let address: Option<String> = row.get(4)?;
-            let port: Option<i64> = row.get(5)?;
-            let version: Option<String> = row.get(6)?;
-            let env: Option<String> = row.get(7)?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, name, category, type, address, port, version, env \
+             FROM middlewares WHERE is_deleted = 0",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |row| {
+                let id: String = row.get(0)?;
+                let name: String = row.get(1)?;
+                let category: Option<String> = row.get(2)?;
+                let mw_type: Option<String> = row.get(3)?;
+                let address: Option<String> = row.get(4)?;
+                let port: Option<i64> = row.get(5)?;
+                let version: Option<String> = row.get(6)?;
+                let env: Option<String> = row.get(7)?;
 
-            let mut extra = serde_json::Map::new();
-            if let Some(ref c) = category {
-                extra.insert("category".to_string(), serde_json::Value::String(c.clone()));
-            }
-            if let Some(ref t) = mw_type {
-                extra.insert("type".to_string(), serde_json::Value::String(t.clone()));
-            }
-            if let Some(ref addr) = address {
-                extra.insert("address".to_string(), serde_json::Value::String(addr.clone()));
-            }
-            if let Some(p) = port {
-                extra.insert("port".to_string(), serde_json::json!(p));
-            }
-            if let Some(ref v) = version {
-                extra.insert("version".to_string(), serde_json::Value::String(v.clone()));
-            }
+                let mut extra = serde_json::Map::new();
+                if let Some(ref c) = category {
+                    extra.insert("category".to_string(), serde_json::Value::String(c.clone()));
+                }
+                if let Some(ref t) = mw_type {
+                    extra.insert("type".to_string(), serde_json::Value::String(t.clone()));
+                }
+                if let Some(ref addr) = address {
+                    extra.insert(
+                        "address".to_string(),
+                        serde_json::Value::String(addr.clone()),
+                    );
+                }
+                if let Some(p) = port {
+                    extra.insert("port".to_string(), serde_json::json!(p));
+                }
+                if let Some(ref v) = version {
+                    extra.insert("version".to_string(), serde_json::Value::String(v.clone()));
+                }
 
-            Ok(TopologyNode {
-                id,
-                name,
-                node_type: "middleware".to_string(),
-                status: None,
-                env,
-                parent_id: None,
-                extra: Some(serde_json::Value::Object(extra)),
+                Ok(TopologyNode {
+                    id,
+                    name,
+                    node_type: "middleware".to_string(),
+                    status: None,
+                    env,
+                    parent_id: None,
+                    extra: Some(serde_json::Value::Object(extra)),
+                })
             })
-        }).map_err(|e| e.to_string())?;
+            .map_err(|e| e.to_string())?;
         for row in rows {
             let node = row.map_err(|e| e.to_string())?;
             node_index.insert(node.id.clone(), nodes.len());
@@ -128,36 +148,40 @@ pub fn get_topology_graph_inner(conn: &Connection) -> Result<TopologyGraph, Stri
 
     // 4. Query nginx_configs -> TopologyNode
     {
-        let mut stmt = conn.prepare(
-            "SELECT id, name, listen_port, strategy, env, status \
-             FROM nginx_configs WHERE is_deleted = 0"
-        ).map_err(|e| e.to_string())?;
-        let rows = stmt.query_map([], |row| {
-            let id: String = row.get(0)?;
-            let name: String = row.get(1)?;
-            let listen_port: Option<i64> = row.get(2)?;
-            let strategy: Option<String> = row.get(3)?;
-            let env: Option<String> = row.get(4)?;
-            let status: Option<String> = row.get(5)?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, name, listen_port, strategy, env, status \
+             FROM nginx_configs WHERE is_deleted = 0",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |row| {
+                let id: String = row.get(0)?;
+                let name: String = row.get(1)?;
+                let listen_port: Option<i64> = row.get(2)?;
+                let strategy: Option<String> = row.get(3)?;
+                let env: Option<String> = row.get(4)?;
+                let status: Option<String> = row.get(5)?;
 
-            let mut extra = serde_json::Map::new();
-            if let Some(p) = listen_port {
-                extra.insert("listen_port".to_string(), serde_json::json!(p));
-            }
-            if let Some(ref s) = strategy {
-                extra.insert("strategy".to_string(), serde_json::Value::String(s.clone()));
-            }
+                let mut extra = serde_json::Map::new();
+                if let Some(p) = listen_port {
+                    extra.insert("listen_port".to_string(), serde_json::json!(p));
+                }
+                if let Some(ref s) = strategy {
+                    extra.insert("strategy".to_string(), serde_json::Value::String(s.clone()));
+                }
 
-            Ok(TopologyNode {
-                id,
-                name,
-                node_type: "nginx".to_string(),
-                status,
-                env,
-                parent_id: None,
-                extra: Some(serde_json::Value::Object(extra)),
+                Ok(TopologyNode {
+                    id,
+                    name,
+                    node_type: "nginx".to_string(),
+                    status,
+                    env,
+                    parent_id: None,
+                    extra: Some(serde_json::Value::Object(extra)),
+                })
             })
-        }).map_err(|e| e.to_string())?;
+            .map_err(|e| e.to_string())?;
         for row in rows {
             let node = row.map_err(|e| e.to_string())?;
             node_index.insert(node.id.clone(), nodes.len());
@@ -167,12 +191,14 @@ pub fn get_topology_graph_inner(conn: &Connection) -> Result<TopologyGraph, Stri
 
     // 5. Query deployments -> set parent_id (combo membership)
     {
-        let mut stmt = conn.prepare(
-            "SELECT resource_id, host_id FROM deployments WHERE is_deleted = 0"
-        ).map_err(|e| e.to_string())?;
-        let rows = stmt.query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        }).map_err(|e| e.to_string())?;
+        let mut stmt = conn
+            .prepare("SELECT resource_id, host_id FROM deployments WHERE is_deleted = 0")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|e| e.to_string())?;
         for row in rows {
             let (resource_id, host_id) = row.map_err(|e| e.to_string())?;
             if let Some(&idx) = node_index.get(&resource_id) {
@@ -184,25 +210,33 @@ pub fn get_topology_graph_inner(conn: &Connection) -> Result<TopologyGraph, Stri
     // 6. Query dependencies -> TopologyEdge
     let mut edges: Vec<TopologyEdge> = Vec::new();
     {
-        let mut stmt = conn.prepare(
-            "SELECT id, source_id, target_id, relation_type, description \
-             FROM dependencies WHERE is_deleted = 0"
-        ).map_err(|e| e.to_string())?;
-        let rows = stmt.query_map([], |row| {
-            Ok(TopologyEdge {
-                id: row.get(0)?,
-                source: row.get(1)?,
-                target: row.get(2)?,
-                edge_type: row.get(3)?,
-                label: row.get(4)?,
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, source_id, target_id, relation_type, description \
+             FROM dependencies WHERE is_deleted = 0",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(TopologyEdge {
+                    id: row.get(0)?,
+                    source: row.get(1)?,
+                    target: row.get(2)?,
+                    edge_type: row.get(3)?,
+                    label: row.get(4)?,
+                })
             })
-        }).map_err(|e| e.to_string())?;
+            .map_err(|e| e.to_string())?;
         for row in rows {
             edges.push(row.map_err(|e| e.to_string())?);
         }
     }
 
-    Ok(TopologyGraph { nodes, edges, combos })
+    Ok(TopologyGraph {
+        nodes,
+        edges,
+        combos,
+    })
 }
 
 pub fn find_paths_inner(
@@ -216,12 +250,14 @@ pub fn find_paths_inner(
     // Build adjacency list from dependencies
     let mut adj: HashMap<String, Vec<String>> = HashMap::new();
     {
-        let mut stmt = conn.prepare(
-            "SELECT source_id, target_id FROM dependencies WHERE is_deleted = 0"
-        ).map_err(|e| e.to_string())?;
-        let rows = stmt.query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        }).map_err(|e| e.to_string())?;
+        let mut stmt = conn
+            .prepare("SELECT source_id, target_id FROM dependencies WHERE is_deleted = 0")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|e| e.to_string())?;
         for row in rows {
             let (src, tgt) = row.map_err(|e| e.to_string())?;
             adj.entry(src).or_default().push(tgt);
@@ -263,19 +299,18 @@ pub fn find_paths_inner(
     Ok(PathResult { paths, truncated })
 }
 
-pub fn analyze_impact_inner(
-    conn: &Connection,
-    node_id: &str,
-) -> Result<ImpactResult, String> {
+pub fn analyze_impact_inner(conn: &Connection, node_id: &str) -> Result<ImpactResult, String> {
     // Build reverse adjacency list (target -> sources, i.e. who depends on target)
     let mut reverse_adj: HashMap<String, Vec<String>> = HashMap::new();
     {
-        let mut stmt = conn.prepare(
-            "SELECT source_id, target_id FROM dependencies WHERE is_deleted = 0"
-        ).map_err(|e| e.to_string())?;
-        let rows = stmt.query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        }).map_err(|e| e.to_string())?;
+        let mut stmt = conn
+            .prepare("SELECT source_id, target_id FROM dependencies WHERE is_deleted = 0")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|e| e.to_string())?;
         for row in rows {
             let (src, tgt) = row.map_err(|e| e.to_string())?;
             reverse_adj.entry(tgt).or_default().push(src);
@@ -292,9 +327,15 @@ pub fn analyze_impact_inner(
              UNION ALL \
              SELECT id, name, 'nginx' AS node_type FROM nginx_configs WHERE is_deleted = 0"
         ).map_err(|e| e.to_string())?;
-        let rows = stmt.query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
-        }).map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })
+            .map_err(|e| e.to_string())?;
         for row in rows {
             let (id, name, node_type) = row.map_err(|e| e.to_string())?;
             name_map.insert(id, (name, node_type));
@@ -323,7 +364,8 @@ pub fn analyze_impact_inner(
                     max_depth = next_depth;
                 }
 
-                let (name, node_type) = name_map.get(dep_id)
+                let (name, node_type) = name_map
+                    .get(dep_id)
                     .cloned()
                     .unwrap_or_else(|| (dep_id.clone(), "unknown".to_string()));
 
@@ -349,9 +391,13 @@ pub fn analyze_impact_inner(
 }
 
 #[tauri::command]
-pub fn get_topology_graph(pool: State<DbPool>) -> Result<TopologyGraph, String> {
-    let conn = pool.get().map_err(|e| format!("Pool error: {}", e))?;
+pub fn get_topology_graph(pool: State<DbPool>) -> AppResult<TopologyGraph> {
+    let command = "get_topology_graph";
+    let conn = pool
+        .get()
+        .map_err(|e| AppError::db_unavailable(command, format!("Pool error: {}", e)))?;
     get_topology_graph_inner(&conn)
+        .map_err(|e| AppError::from_db_error(command, "build topology graph", e))
 }
 
 #[tauri::command]
@@ -360,18 +406,23 @@ pub fn find_paths(
     source_id: String,
     target_id: String,
     max_results: Option<usize>,
-) -> Result<PathResult, String> {
-    let conn = pool.get().map_err(|e| format!("Pool error: {}", e))?;
+) -> AppResult<PathResult> {
+    let command = "find_paths";
+    let conn = pool
+        .get()
+        .map_err(|e| AppError::db_unavailable(command, format!("Pool error: {}", e)))?;
     find_paths_inner(&conn, &source_id, &target_id, max_results.unwrap_or(10))
+        .map_err(|e| AppError::from_db_error(command, "find dependency paths", e))
 }
 
 #[tauri::command]
-pub fn analyze_impact(
-    pool: State<DbPool>,
-    node_id: String,
-) -> Result<ImpactResult, String> {
-    let conn = pool.get().map_err(|e| format!("Pool error: {}", e))?;
+pub fn analyze_impact(pool: State<DbPool>, node_id: String) -> AppResult<ImpactResult> {
+    let command = "analyze_impact";
+    let conn = pool
+        .get()
+        .map_err(|e| AppError::db_unavailable(command, format!("Pool error: {}", e)))?;
     analyze_impact_inner(&conn, &node_id)
+        .map_err(|e| AppError::from_db_error(command, "analyze impact", e))
 }
 
 #[cfg(test)]
@@ -386,9 +437,33 @@ mod tests {
         insert_test_application(conn, "C", "App-C", "prod");
         insert_test_application(conn, "D", "App-D", "prod");
 
-        insert_test_dependency(conn, "e1", "A", "application", "B", "application", "http_call");
-        insert_test_dependency(conn, "e2", "B", "application", "C", "application", "http_call");
-        insert_test_dependency(conn, "e3", "C", "application", "D", "application", "http_call");
+        insert_test_dependency(
+            conn,
+            "e1",
+            "A",
+            "application",
+            "B",
+            "application",
+            "http_call",
+        );
+        insert_test_dependency(
+            conn,
+            "e2",
+            "B",
+            "application",
+            "C",
+            "application",
+            "http_call",
+        );
+        insert_test_dependency(
+            conn,
+            "e3",
+            "C",
+            "application",
+            "D",
+            "application",
+            "http_call",
+        );
         insert_test_dependency(conn, "e4", "A", "application", "C", "application", "tcp");
     }
 

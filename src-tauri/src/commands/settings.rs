@@ -1,11 +1,17 @@
 use tauri::State;
-use crate::db::DbPool;
+
 use crate::db::audit::insert_audit_log;
+use crate::db::DbPool;
+use crate::error::{AppError, AppResult};
 use crate::models::settings::{SystemSettings, UpdateSettingsInput};
 
 #[tauri::command]
-pub fn get_settings(pool: State<DbPool>) -> Result<SystemSettings, String> {
-    let conn = pool.get().map_err(|e| format!("Pool error: {}", e))?;
+pub fn get_settings(pool: State<DbPool>) -> AppResult<SystemSettings> {
+    let command = "get_settings";
+    let conn = pool
+        .get()
+        .map_err(|e| AppError::db_unavailable(command, format!("Pool error: {}", e)))?;
+
     conn.query_row(
         "SELECT id, auto_backup_enabled, backup_interval_hours, max_backups, last_backup_time, created_at, updated_at
          FROM system_settings WHERE id = 'default'",
@@ -22,19 +28,30 @@ pub fn get_settings(pool: State<DbPool>) -> Result<SystemSettings, String> {
             })
         },
     )
-    .map_err(|e| format!("Failed to read settings: {}", e))
+    .map_err(|e| AppError::from_db_error(command, "读取系统设置", e))
 }
 
 #[tauri::command]
-pub fn update_settings(pool: State<DbPool>, data: UpdateSettingsInput) -> Result<(), String> {
+pub fn update_settings(pool: State<DbPool>, data: UpdateSettingsInput) -> AppResult<()> {
+    let command = "update_settings";
+
     if data.backup_interval_hours < 1 || data.backup_interval_hours > 720 {
-        return Err("备份间隔必须在 1-720 小时之间".into());
+        return Err(AppError::validation(
+            command,
+            "backup_interval_hours must be within 1..=720",
+        ));
     }
     if data.max_backups < 1 || data.max_backups > 100 {
-        return Err("最大备份数必须在 1-100 之间".into());
+        return Err(AppError::validation(
+            command,
+            "max_backups must be within 1..=100",
+        ));
     }
 
-    let conn = pool.get().map_err(|e| format!("Pool error: {}", e))?;
+    let conn = pool
+        .get()
+        .map_err(|e| AppError::db_unavailable(command, format!("Pool error: {}", e)))?;
+
     let now = chrono::Utc::now().to_rfc3339();
     let enabled_int: i64 = if data.auto_backup_enabled { 1 } else { 0 };
 
@@ -43,9 +60,17 @@ pub fn update_settings(pool: State<DbPool>, data: UpdateSettingsInput) -> Result
          WHERE id = 'default'",
         rusqlite::params![enabled_int, data.backup_interval_hours, data.max_backups, now],
     )
-    .map_err(|e| format!("Failed to update settings: {}", e))?;
+    .map_err(|e| AppError::from_db_error(command, "更新系统设置", e))?;
 
-    insert_audit_log(&conn, "update", "system_settings", "default", Some("系统设置"), None)?;
+    insert_audit_log(
+        &conn,
+        "update",
+        "system_settings",
+        "default",
+        Some("系统设置"),
+        None,
+    )
+    .map_err(|e| AppError::from_db_error(command, "写入审计日志", e))?;
 
     Ok(())
 }
