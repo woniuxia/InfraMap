@@ -147,7 +147,7 @@ pub fn preview_restore(
         middlewares: count("middlewares"),
         nginx_configs: count("nginx_configs"),
         deployments: count("deployments"),
-        dependencies: count("dependencies"),
+        call_relations: count("call_relations"),
         schema_version,
         is_compatible: schema_version <= current_max_version,
     })
@@ -224,7 +224,7 @@ pub fn export_json(pool: State<DbPool>, filepath: String) -> AppResult<()> {
         "middlewares",
         "nginx_configs",
         "deployments",
-        "dependencies",
+        "call_relations",
     ];
     let mut table_data: Vec<Vec<serde_json::Value>> = Vec::new();
 
@@ -247,7 +247,7 @@ pub fn export_json(pool: State<DbPool>, filepath: String) -> AppResult<()> {
             middlewares: table_data.remove(0),
             nginx_configs: table_data.remove(0),
             deployments: table_data.remove(0),
-            dependencies: table_data.remove(0),
+            call_relations: table_data.remove(0),
         },
     };
 
@@ -291,7 +291,7 @@ pub fn import_json(
 
     let result: AppResult<ImportResult> = (|| {
         let clear_tables = [
-            "dependencies",
+            "call_relations",
             "deployments",
             "nginx_configs",
             "middlewares",
@@ -319,8 +319,8 @@ pub fn import_json(
             .map_err(|e| AppError::from_backup_error(command, "导入 nginx_configs", e))?;
         let dep_count = import_table_rows(&conn, "deployments", &export.data.deployments)
             .map_err(|e| AppError::from_backup_error(command, "导入 deployments", e))?;
-        let deps_count = import_table_rows(&conn, "dependencies", &export.data.dependencies)
-            .map_err(|e| AppError::from_backup_error(command, "导入 dependencies", e))?;
+        let deps_count = import_table_rows(&conn, "call_relations", &export.data.call_relations)
+            .map_err(|e| AppError::from_backup_error(command, "导入 call_relations", e))?;
 
         Ok(ImportResult {
             hosts_imported: hosts_count,
@@ -329,7 +329,7 @@ pub fn import_json(
             middlewares_imported: mw_count,
             nginx_configs_imported: nginx_count,
             deployments_imported: dep_count,
-            dependencies_imported: deps_count,
+            call_relations_imported: deps_count,
         })
     })();
 

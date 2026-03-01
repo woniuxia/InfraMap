@@ -6,6 +6,7 @@ import type {
   BusinessApplicationServices,
   PagedResult,
   QueryParams,
+  ReplaceServicesResult,
 } from "@/types";
 
 export function listBusinessApplications(
@@ -37,8 +38,8 @@ export function attachServicesToBusinessApplication(
   applicationIds: string[]
 ): Promise<AttachServicesResult> {
   return tauriInvoke<AttachServicesResult>("attach_services_to_business_application", {
-    business_application_id: businessApplicationId,
-    application_ids: applicationIds,
+    businessApplicationId,
+    applicationIds,
   });
 }
 
@@ -47,8 +48,18 @@ export function detachServiceFromBusinessApplication(
   applicationId: string
 ): Promise<void> {
   return tauriInvoke<void>("detach_service_from_business_application", {
-    business_application_id: businessApplicationId,
-    application_id: applicationId,
+    businessApplicationId,
+    applicationId,
+  });
+}
+
+export function replaceServicesByBusinessApplication(
+  businessApplicationId: string,
+  applicationIds: string[]
+): Promise<ReplaceServicesResult> {
+  return tauriInvoke<ReplaceServicesResult>("replace_services_by_business_application", {
+    businessApplicationId,
+    applicationIds,
   });
 }
 
@@ -56,6 +67,6 @@ export function listServicesByBusinessApplication(
   businessApplicationId: string
 ): Promise<BusinessApplicationServices> {
   return tauriInvoke<BusinessApplicationServices>("list_services_by_business_application", {
-    business_application_id: businessApplicationId,
+    businessApplicationId,
   });
 }

@@ -92,6 +92,12 @@ export interface AttachServicesResult {
   skipped_count: number;
 }
 
+export interface ReplaceServicesResult {
+  attached_count: number;
+  detached_count: number;
+  unchanged_count: number;
+}
+
 export interface BusinessApplicationServices {
   frontend: Application[];
   backend: Application[];
@@ -153,20 +159,26 @@ export interface ResourceDeployContext {
   matched_host_name?: string | null;
 }
 
-export interface Dependency {
+export type CallRelationType =
+  | "http_call"
+  | "tcp"
+  | "mq_produce"
+  | "mq_consume"
+  | "grpc_call"
+  | "db_query"
+  | "cache_access";
+
+export type CallDirection = "upstream" | "downstream";
+
+export interface CallRelation {
   id: string;
-  source_id: string;
-  source_type: string;
-  target_id: string;
-  target_type: string;
-  relation_type:
-    | "http_call"
-    | "tcp"
-    | "mq_produce"
-    | "mq_consume"
-    | "grpc_call"
-    | "db_query"
-    | "cache_access";
+  pair_key: string;
+  owner_id: string;
+  owner_type: "application" | "middleware" | "nginx";
+  peer_id: string;
+  peer_type: "application" | "middleware" | "nginx";
+  direction: CallDirection;
+  relation_type: CallRelationType;
   description?: string;
   is_deleted: number;
   deleted_at?: string;
@@ -174,25 +186,24 @@ export interface Dependency {
   updated_at: string;
 }
 
-export type RelationDirection = "upstream" | "downstream" | "bidirectional";
-
-export interface SaveDependencyBatchItem {
-  target_id: string;
-  target_type: "application" | "middleware" | "nginx";
-  relation_type: Dependency["relation_type"];
-  direction: RelationDirection;
+export interface ReplaceCallRelationItem {
+  peer_id: string;
+  peer_type: "application" | "middleware" | "nginx";
+  direction: CallDirection;
+  relation_type: CallRelationType;
   description?: string;
 }
 
-export interface SaveDependenciesBatchParams {
+export interface ReplaceResourceCallRelationsParams {
   resource_id: string;
   resource_type: "application" | "middleware" | "nginx";
-  items: SaveDependencyBatchItem[];
+  items: ReplaceCallRelationItem[];
 }
 
-export interface SaveDependenciesBatchResult {
+export interface ReplaceResourceCallRelationsResult {
   created_count: number;
-  skipped_count: number;
+  deleted_count: number;
+  deduplicated_count: number;
 }
 
 export interface AuditLog {
@@ -332,7 +343,7 @@ export interface DbPreviewSummary {
   middlewares: number;
   nginx_configs: number;
   deployments: number;
-  dependencies: number;
+  call_relations: number;
   schema_version: number;
   is_compatible: boolean;
 }
@@ -344,5 +355,5 @@ export interface ImportResult {
   middlewares_imported: number;
   nginx_configs_imported: number;
   deployments_imported: number;
-  dependencies_imported: number;
+  call_relations_imported: number;
 }

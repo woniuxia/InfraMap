@@ -33,7 +33,7 @@ pub struct DbPreviewSummary {
     pub middlewares: u64,
     pub nginx_configs: u64,
     pub deployments: u64,
-    pub dependencies: u64,
+    pub call_relations: u64,
     pub schema_version: i32,
     pub is_compatible: bool,
 }
@@ -60,7 +60,7 @@ pub struct ExportPayload {
     pub middlewares: Vec<serde_json::Value>,
     pub nginx_configs: Vec<serde_json::Value>,
     pub deployments: Vec<serde_json::Value>,
-    pub dependencies: Vec<serde_json::Value>,
+    pub call_relations: Vec<serde_json::Value>,
 }
 
 #[derive(Debug, Serialize)]
@@ -71,5 +71,5 @@ pub struct ImportResult {
     pub middlewares_imported: u64,
     pub nginx_configs_imported: u64,
     pub deployments_imported: u64,
-    pub dependencies_imported: u64,
+    pub call_relations_imported: u64,
 }

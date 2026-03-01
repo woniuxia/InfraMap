@@ -4,10 +4,12 @@ import { ElMessage } from "element-plus";
 import type { Middleware } from "@/types";
 import type { SearchFieldConfig, SearchToolbarQueryPayload } from "@/types/searchToolbar";
 import { listMiddlewares, saveMiddleware, softDeleteMiddleware } from "@/api/middlewares";
+import { replaceResourceCallRelations } from "@/api/call-relations";
 import { useResourceList } from "@/composables/useResourceList";
 import { getMiddlewareDefaultPort, getMiddlewareTypeOptions } from "@/utils/middlewareCatalog";
 import { buildMiddlewareCopyDraft } from "@/utils/resourceCopy";
 import SearchToolbar from "@/components/filters/SearchToolbar.vue";
+import CallRelationsEditor from "@/components/CallRelationsEditor.vue";
 import DeploymentPanel from "@/components/DeploymentPanel.vue";
 
 const {
@@ -32,6 +34,7 @@ const editingMw = ref<Partial<Middleware>>({});
 const isEditing = ref(false);
 const saveLoading = ref(false);
 const autoFilledPort = ref<number | undefined>(undefined);
+const callRelationsEditorRef = ref<InstanceType<typeof CallRelationsEditor> | null>(null);
 
 interface MiddlewareListFilters {
   category: string[];
@@ -121,6 +124,11 @@ function openCopy(row: Middleware) {
 }
 
 async function handleSave() {
+  const draftItems = callRelationsEditorRef.value?.getDraftItems();
+  if (draftItems === null) {
+    return;
+  }
+
   const payload: Partial<Middleware> = {
     id: "",
     is_deleted: 0,
@@ -130,7 +138,16 @@ async function handleSave() {
   };
   saveLoading.value = true;
   try {
-    await saveMiddleware(payload);
+    const middlewareId = await saveMiddleware(payload);
+    try {
+      await replaceResourceCallRelations({
+        resource_id: middlewareId,
+        resource_type: "middleware",
+        items: draftItems ?? [],
+      });
+    } catch {
+      ElMessage.warning("中间件已保存，调用关系保存失败，请重新编辑后重试。");
+    }
     ElMessage.success(isEditing.value ? "更新成功" : "创建成功");
     drawerVisible.value = false;
     fetchData();
@@ -283,6 +300,12 @@ watch(
           <el-input v-model="editingMw.description" type="textarea" :rows="3" maxlength="300" show-word-limit />
         </el-form-item>
       </el-form>
+
+      <CallRelationsEditor
+        ref="callRelationsEditorRef"
+        :resource-id="isEditing ? editingMw.id : undefined"
+        resource-type="middleware"
+      />
 
       <DeploymentPanel v-if="isEditing && editingMw.id" :resource-id="editingMw.id!" resource-type="middleware" />
 

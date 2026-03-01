@@ -94,7 +94,7 @@ pub fn get_nginx_config(pool: State<DbPool>, id: String) -> AppResult<NginxConfi
 }
 
 #[tauri::command]
-pub fn save_nginx_config(pool: State<DbPool>, data: NginxConfig) -> AppResult<()> {
+pub fn save_nginx_config(pool: State<DbPool>, data: NginxConfig) -> AppResult<String> {
     let command = "save_nginx_config";
 
     validate_nginx_config(&data).map_err(|e| AppError::validation(command, e))?;
@@ -118,7 +118,7 @@ pub fn save_nginx_config(pool: State<DbPool>, data: NginxConfig) -> AppResult<()
     conn.execute_batch("BEGIN TRANSACTION;")
         .map_err(|e| AppError::from_db_error(command, "开启事务", e))?;
 
-    let result: AppResult<()> = (|| {
+    let result: AppResult<String> = (|| {
         if is_new {
             let id = if data.id.is_empty() {
                 uuid::Uuid::new_v4().to_string()
@@ -145,6 +145,7 @@ pub fn save_nginx_config(pool: State<DbPool>, data: NginxConfig) -> AppResult<()
             .map_err(|e| AppError::from_db_error(command, "创建网关配置", e))?;
             insert_audit_log(&conn, "create", "nginx", &id, Some(&data.name), None)
                 .map_err(|e| AppError::from_db_error(command, "写入审计日志", e))?;
+            Ok(id)
         } else {
             conn.execute(
                 "UPDATE nginx_configs SET name=?1, address=?2, listen_port=?3, strategy=?4, upstream_servers=?5,
@@ -166,15 +167,15 @@ pub fn save_nginx_config(pool: State<DbPool>, data: NginxConfig) -> AppResult<()
             .map_err(|e| AppError::from_db_error(command, "更新网关配置", e))?;
             insert_audit_log(&conn, "update", "nginx", &data.id, Some(&data.name), None)
                 .map_err(|e| AppError::from_db_error(command, "写入审计日志", e))?;
+            Ok(data.id)
         }
-        Ok(())
     })();
 
     match result {
-        Ok(()) => {
+        Ok(id) => {
             conn.execute_batch("COMMIT;")
                 .map_err(|e| AppError::from_db_error(command, "提交事务", e))?;
-            Ok(())
+            Ok(id)
         }
         Err(error) => {
             let _ = conn.execute_batch("ROLLBACK;");

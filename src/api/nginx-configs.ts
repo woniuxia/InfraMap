@@ -9,8 +9,8 @@ export function getNginxConfig(id: string): Promise<NginxConfig> {
   return tauriInvoke<NginxConfig>('get_nginx_config', { id })
 }
 
-export function saveNginxConfig(data: Partial<NginxConfig>): Promise<void> {
-  return tauriInvoke<void>('save_nginx_config', { data })
+export function saveNginxConfig(data: Partial<NginxConfig>): Promise<string> {
+  return tauriInvoke<string>('save_nginx_config', { data })
 }
 
 export function softDeleteNginxConfig(id: string): Promise<void> {

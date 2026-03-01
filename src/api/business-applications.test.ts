@@ -4,6 +4,7 @@ import {
   attachServicesToBusinessApplication,
   detachServiceFromBusinessApplication,
   listBusinessApplications,
+  replaceServicesByBusinessApplication,
   listServicesByBusinessApplication,
   listUnassignedApplicationServices,
   saveBusinessApplication,
@@ -89,8 +90,8 @@ describe("business-applications API", () => {
   it("attachServicesToBusinessApplication should invoke attach_services_to_business_application", async () => {
     __setMockHandler("attach_services_to_business_application", (_cmd, args) => {
       expect(args).toEqual({
-        business_application_id: "ba-1",
-        application_ids: ["app-a", "app-b"],
+        businessApplicationId: "ba-1",
+        applicationIds: ["app-a", "app-b"],
       });
       return { attached_count: 2, skipped_count: 0 };
     });
@@ -102,8 +103,8 @@ describe("business-applications API", () => {
   it("detachServiceFromBusinessApplication should invoke detach_service_from_business_application", async () => {
     __setMockHandler("detach_service_from_business_application", (_cmd, args) => {
       expect(args).toEqual({
-        business_application_id: "ba-1",
-        application_id: "app-a",
+        businessApplicationId: "ba-1",
+        applicationId: "app-a",
       });
       return undefined;
     });
@@ -113,11 +114,24 @@ describe("business-applications API", () => {
 
   it("listServicesByBusinessApplication should invoke list_services_by_business_application", async () => {
     __setMockHandler("list_services_by_business_application", (_cmd, args) => {
-      expect(args).toEqual({ business_application_id: "ba-1" });
+      expect(args).toEqual({ businessApplicationId: "ba-1" });
       return { frontend: [], backend: [] };
     });
 
     const result = await listServicesByBusinessApplication("ba-1");
     expect(result).toEqual({ frontend: [], backend: [] });
+  });
+
+  it("replaceServicesByBusinessApplication should invoke replace_services_by_business_application", async () => {
+    __setMockHandler("replace_services_by_business_application", (_cmd, args) => {
+      expect(args).toEqual({
+        businessApplicationId: "ba-1",
+        applicationIds: ["app-a", "app-b"],
+      });
+      return { attached_count: 1, detached_count: 1, unchanged_count: 0 };
+    });
+
+    const result = await replaceServicesByBusinessApplication("ba-1", ["app-a", "app-b"]);
+    expect(result).toEqual({ attached_count: 1, detached_count: 1, unchanged_count: 0 });
   });
 });

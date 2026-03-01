@@ -6,13 +6,13 @@ export function getTopologyGraph(): Promise<TopologyGraph> {
 }
 
 export function findPaths(
-  source_id: string,
-  target_id: string,
-  max_results?: number
+  sourceId: string,
+  targetId: string,
+  maxResults?: number
 ): Promise<PathResult> {
-  return tauriInvoke<PathResult>('find_paths', { source_id, target_id, max_results })
+  return tauriInvoke<PathResult>('find_paths', { sourceId, targetId, maxResults })
 }
 
-export function analyzeImpact(node_id: string): Promise<ImpactResult> {
-  return tauriInvoke<ImpactResult>('analyze_impact', { node_id })
+export function analyzeImpact(nodeId: string): Promise<ImpactResult> {
+  return tauriInvoke<ImpactResult>('analyze_impact', { nodeId })
 }

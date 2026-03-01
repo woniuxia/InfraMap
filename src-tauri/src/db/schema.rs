@@ -390,6 +390,44 @@ pub const MIGRATIONS: &[(i32, &str)] = &[
         ALTER TABLE hosts DROP COLUMN ip_address;
     "#,
     ),
+    (
+        14,
+        r#"
+        CREATE TABLE IF NOT EXISTS call_relations (
+            id TEXT PRIMARY KEY,
+            pair_key TEXT NOT NULL,
+            owner_id TEXT NOT NULL,
+            owner_type TEXT NOT NULL,
+            peer_id TEXT NOT NULL,
+            peer_type TEXT NOT NULL,
+            direction TEXT NOT NULL,
+            relation_type TEXT NOT NULL,
+            description TEXT,
+            is_deleted INTEGER NOT NULL DEFAULT 0,
+            deleted_at TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS uk_call_relations_owner_peer_direction_type
+        ON call_relations(owner_id, owner_type, peer_id, peer_type, direction, relation_type)
+        WHERE is_deleted = 0;
+        CREATE INDEX IF NOT EXISTS idx_call_relations_owner
+        ON call_relations(owner_id, owner_type) WHERE is_deleted = 0;
+        CREATE INDEX IF NOT EXISTS idx_call_relations_peer
+        ON call_relations(peer_id, peer_type) WHERE is_deleted = 0;
+        CREATE INDEX IF NOT EXISTS idx_call_relations_pair
+        ON call_relations(pair_key) WHERE is_deleted = 0;
+        CREATE INDEX IF NOT EXISTS idx_call_relations_relation_type
+        ON call_relations(relation_type) WHERE is_deleted = 0;
+
+        DROP INDEX IF EXISTS uk_dependencies_source_target;
+        DROP INDEX IF EXISTS idx_dependencies_source;
+        DROP INDEX IF EXISTS idx_dependencies_target;
+        DROP INDEX IF EXISTS idx_dependencies_relation_type;
+        DROP TABLE IF EXISTS dependencies;
+    "#,
+    ),
 ];
 
 const TAXONOMY_TERMS_REQUIRED_COLUMNS: [&str; 8] = [
@@ -1145,6 +1183,38 @@ mod tests {
             columns.iter().any(|col| col == "resource_type"),
             "taxonomy_term_stats should have resource_type column"
         );
+    }
+
+    #[test]
+    fn call_relations_table_should_exist_after_migrations() {
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        apply_all_migrations(&conn);
+
+        let exists: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='call_relations'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("query sqlite_master");
+
+        assert_eq!(exists, 1, "call_relations table should exist");
+    }
+
+    #[test]
+    fn dependencies_table_should_be_dropped_after_migrations() {
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        apply_all_migrations(&conn);
+
+        let exists: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='dependencies'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("query sqlite_master");
+
+        assert_eq!(exists, 0, "legacy dependencies table should be dropped");
     }
 
     #[test]

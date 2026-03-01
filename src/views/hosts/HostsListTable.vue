@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ref } from "vue";
 import type { Host } from "@/types";
 import {
   buildHardwareSummary,
@@ -28,8 +29,15 @@ const emit = defineEmits<{
   "page-size-change": [size: number];
 }>();
 
+const expandedRowKeys = ref<string[]>([]);
+
 function ipSummary(row: Host) {
   return summarizeIpDisplay(row.ip_display);
+}
+
+function ipDisplayText(row: Host): string {
+  const ips = ipSummary(row).all;
+  return ips.length > 0 ? ips.join(", ") : "-";
 }
 
 function detailTags(row: Host) {
@@ -39,11 +47,36 @@ function detailTags(row: Host) {
 function hasDetailDescription(row: Host): boolean {
   return Boolean(row.description && row.description.trim().length > 0);
 }
+
+function isExpanded(rowId: string): boolean {
+  return expandedRowKeys.value.includes(rowId);
+}
+
+function toggleHostDetail(row: Host) {
+  if (isExpanded(row.id)) {
+    expandedRowKeys.value = expandedRowKeys.value.filter((id) => id !== row.id);
+    return;
+  }
+  expandedRowKeys.value = [...expandedRowKeys.value, row.id];
+}
+
+function handleExpandChange(_row: Host, expandedRows: Host[]) {
+  expandedRowKeys.value = expandedRows.map((row) => row.id);
+}
 </script>
 
 <template>
   <div>
-    <el-table :data="props.data" v-loading="props.loading" border stripe class="w-full im-table-fixed-ops">
+    <el-table
+      :data="props.data"
+      v-loading="props.loading"
+      border
+      stripe
+      row-key="id"
+      :expand-row-keys="expandedRowKeys"
+      class="w-full im-table-fixed-ops"
+      @expand-change="handleExpandChange"
+    >
       <el-table-column type="expand" width="56">
         <template #default="{ row }">
           <div class="host-expand">
@@ -98,15 +131,21 @@ function hasDetailDescription(row: Host): boolean {
           </div>
         </template>
       </el-table-column>
-      <el-table-column prop="hostname" label="主机名" min-width="180" align="center" />
+      <el-table-column prop="hostname" label="主机名" min-width="180" align="center">
+        <template #default="{ row }">
+          <button
+            type="button"
+            class="host-name-toggle"
+            :aria-expanded="isExpanded(row.id)"
+            @click.stop="toggleHostDetail(row)"
+          >
+            {{ row.hostname }}
+          </button>
+        </template>
+      </el-table-column>
       <el-table-column label="IP地址" min-width="240" align="center">
         <template #default="{ row }">
-          <span class="ip-summary-text">
-            {{ ipSummary(row).primary }}
-            <span v-if="ipSummary(row).extraCount > 0" class="ip-summary-extra">
-              +{{ ipSummary(row).extraCount }}
-            </span>
-          </span>
+          <span class="ip-summary-text">{{ ipDisplayText(row) }}</span>
         </template>
       </el-table-column>
       <el-table-column prop="env" label="环境" width="90" align="center">
@@ -158,21 +197,54 @@ function hasDetailDescription(row: Host): boolean {
   justify-content: flex-end;
 }
 
+.host-name-toggle {
+  min-height: 32px;
+  width: 100%;
+  border: 0;
+  padding: 4px 8px;
+  background: transparent;
+  color: var(--im-text-regular);
+  cursor: pointer;
+  text-align: center;
+  line-height: 1.4;
+  font: inherit;
+  transition:
+    color var(--im-duration-fast) var(--im-ease-standard),
+    background-color var(--im-duration-fast) var(--im-ease-standard);
+}
+
+.host-name-toggle:hover {
+  color: var(--im-accent-light);
+  background-color: var(--im-accent-soft);
+}
+
+.host-name-toggle:active {
+  color: var(--im-accent);
+  background-color: var(--im-accent-dim);
+}
+
+.host-name-toggle:focus-visible {
+  outline: 2px solid var(--im-accent-dim);
+  outline-offset: 2px;
+  border-radius: var(--im-radius-sm);
+}
+
 .ip-summary-text {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
+  display: inline;
+  white-space: normal;
+  word-break: break-all;
+  line-height: 1.5;
   font-family: var(--im-font-mono);
   font-size: 13px;
 }
 
-.ip-summary-extra {
-  color: var(--im-text-secondary);
-  font-size: 12px;
+:deep(.im-table-fixed-ops .el-table__expanded-cell) {
+  --im-host-expand-trigger-col-width: 56px;
+  padding: 12px 16px 12px var(--im-host-expand-trigger-col-width) !important;
 }
 
 .host-expand {
-  padding: 12px 16px;
+  padding: 12px 14px;
   background:
     linear-gradient(
       180deg,

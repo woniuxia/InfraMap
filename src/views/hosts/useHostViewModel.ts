@@ -5,7 +5,7 @@ import type { Host, IpAddress } from "@/types";
 import type { SearchFieldConfig, SearchToolbarQueryPayload } from "@/types/searchToolbar";
 import { listHosts, saveHost, softDeleteHost } from "@/api/hosts";
 import { listIpAddresses, saveIpAddress } from "@/api/ip-addresses";
-import { listTaxonomyTerms } from "@/api/taxonomy";
+import { listHostTagTerms } from "@/api/taxonomy";
 import { bindHostIp, listHostIpBindings, unbindHostIp } from "@/api/host-ip-bindings";
 import { useResourceList } from "@/composables/useResourceList";
 import { buildHostCopyDraft } from "@/utils/resourceCopy";
@@ -13,6 +13,7 @@ import {
   COMMON_CPU_CORES_OPTIONS,
   COMMON_CPU_FREQ_OPTIONS,
   COMMON_CPU_THREADS_OPTIONS,
+  DEFAULT_HOST_HARDWARE,
   COMMON_DISK_OPTIONS_GB,
   COMMON_RAM_OPTIONS_GB,
   normalizeCpuFreqValue,
@@ -256,6 +257,16 @@ export function useHostViewModel() {
     return `host-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
   }
 
+  function createAddHostDraft(): Partial<Host> {
+    return {
+      id: "",
+      status: "running",
+      env: "prod",
+      hostname: "",
+      ...DEFAULT_HOST_HARDWARE,
+    };
+  }
+
   function formatIpOptionLabel(ip: IpAddress) {
     const vipLabel = ip.is_vip ? "VIP" : "普通";
     return `${ip.ip_address} [${envLabel(ip.env)} | ${vipLabel}]`;
@@ -268,13 +279,7 @@ export function useHostViewModel() {
 
   async function loadTagOptions() {
     try {
-      const tags = await listTaxonomyTerms({
-        resource_type: "host",
-        field_key: "tags",
-        limit: 200,
-        sort_by: "recent",
-        recency_scope: "global",
-      });
+      const tags = await listHostTagTerms(200);
       tagFilterOptions.value = tags.map((item) => ({ label: item, value: item }));
     } catch {
       // error shown by tauriInvoke
@@ -426,7 +431,7 @@ export function useHostViewModel() {
   }
 
   async function openAdd() {
-    editingHost.value = { id: "", status: "running", env: "prod", hostname: "" };
+    editingHost.value = createAddHostDraft();
     tagList.value = [];
     allowCrossEnv.value = false;
     bindingSearchKeyword.value = "";

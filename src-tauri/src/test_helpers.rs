@@ -110,10 +110,45 @@ pub fn insert_test_dependency(
     relation_type: &str,
 ) {
     let now = chrono::Utc::now().to_rfc3339();
+    let source_ref = format!("{}:{}", source_type, source_id);
+    let target_ref = format!("{}:{}", target_type, target_id);
+    let pair_key = if source_ref <= target_ref {
+        format!("{}|{}|{}", source_ref, target_ref, relation_type)
+    } else {
+        format!("{}|{}|{}", target_ref, source_ref, relation_type)
+    };
+
     conn.execute(
-        "INSERT INTO dependencies (id, source_id, source_type, target_id, target_type, relation_type, is_deleted, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, ?7, ?8)",
-        rusqlite::params![id, source_id, source_type, target_id, target_type, relation_type, now, now],
+        "INSERT INTO call_relations (id, pair_key, owner_id, owner_type, peer_id, peer_type, direction, relation_type, is_deleted, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'upstream', ?7, 0, ?8, ?9)",
+        rusqlite::params![
+            format!("{}-a", id),
+            pair_key,
+            source_id,
+            source_type,
+            target_id,
+            target_type,
+            relation_type,
+            now,
+            now
+        ],
+    )
+    .unwrap_or_else(|e| panic!("insert_test_dependency upstream failed: {}", e));
+
+    conn.execute(
+        "INSERT INTO call_relations (id, pair_key, owner_id, owner_type, peer_id, peer_type, direction, relation_type, is_deleted, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'downstream', ?7, 0, ?8, ?9)",
+        rusqlite::params![
+            format!("{}-b", id),
+            pair_key,
+            target_id,
+            target_type,
+            source_id,
+            source_type,
+            relation_type,
+            now,
+            now
+        ],
     ).unwrap_or_else(|e| panic!("insert_test_dependency failed: {}", e));
 }
 

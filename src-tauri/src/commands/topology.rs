@@ -220,13 +220,14 @@ pub fn get_topology_graph_inner(conn: &Connection) -> Result<TopologyGraph, Stri
         }
     }
 
-    // 6. Query dependencies -> TopologyEdge
+    // 6. Query call_relations (upstream view) -> TopologyEdge
     let mut edges: Vec<TopologyEdge> = Vec::new();
     {
         let mut stmt = conn
             .prepare(
-                "SELECT id, source_id, target_id, relation_type, description \
-             FROM dependencies WHERE is_deleted = 0",
+                "SELECT id, owner_id, peer_id, relation_type, description
+                 FROM call_relations
+                 WHERE is_deleted = 0 AND direction = 'upstream'",
             )
             .map_err(|e| e.to_string())?;
         let rows = stmt
@@ -260,11 +261,15 @@ pub fn find_paths_inner(
 ) -> Result<PathResult, String> {
     let max_depth: usize = 10;
 
-    // Build adjacency list from dependencies
+    // Build adjacency list from call_relations (upstream rows only)
     let mut adj: HashMap<String, Vec<String>> = HashMap::new();
     {
         let mut stmt = conn
-            .prepare("SELECT source_id, target_id FROM dependencies WHERE is_deleted = 0")
+            .prepare(
+                "SELECT owner_id, peer_id
+                 FROM call_relations
+                 WHERE is_deleted = 0 AND direction = 'upstream'",
+            )
             .map_err(|e| e.to_string())?;
         let rows = stmt
             .query_map([], |row| {
@@ -317,7 +322,11 @@ pub fn analyze_impact_inner(conn: &Connection, node_id: &str) -> Result<ImpactRe
     let mut reverse_adj: HashMap<String, Vec<String>> = HashMap::new();
     {
         let mut stmt = conn
-            .prepare("SELECT source_id, target_id FROM dependencies WHERE is_deleted = 0")
+            .prepare(
+                "SELECT owner_id, peer_id
+                 FROM call_relations
+                 WHERE is_deleted = 0 AND direction = 'upstream'",
+            )
             .map_err(|e| e.to_string())?;
         let rows = stmt
             .query_map([], |row| {

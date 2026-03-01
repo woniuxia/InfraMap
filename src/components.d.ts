@@ -11,8 +11,8 @@ export {}
 /* prettier-ignore */
 declare module 'vue' {
   export interface GlobalComponents {
+    CallRelationsEditor: typeof import('./components/CallRelationsEditor.vue')['default']
     CopyableTextCell: typeof import('./components/table/CopyableTextCell.vue')['default']
-    DependencyPanel: typeof import('./components/DependencyPanel.vue')['default']
     DeploymentPanel: typeof import('./components/DeploymentPanel.vue')['default']
     ElAlert: typeof import('element-plus/es')['ElAlert']
     ElAside: typeof import('element-plus/es')['ElAside']

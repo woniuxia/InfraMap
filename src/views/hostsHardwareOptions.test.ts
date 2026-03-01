@@ -5,6 +5,7 @@ import {
   COMMON_CPU_THREADS_OPTIONS,
   COMMON_DISK_OPTIONS_GB,
   COMMON_RAM_OPTIONS_GB,
+  DEFAULT_HOST_HARDWARE,
   normalizeCpuFreqValue,
   normalizePositiveIntegerValue,
 } from "@/views/hostsHardwareOptions";
@@ -35,6 +36,16 @@ describe("hosts hardware options", () => {
       "2.8",
       "3.0",
     ]);
+  });
+
+  it("uses the expected default host hardware values", () => {
+    expect(DEFAULT_HOST_HARDWARE).toEqual({
+      cpu_cores: 8,
+      cpu_threads: 16,
+      cpu_freq: "2.4",
+      ram_gb: 16,
+      disk_gb: 512,
+    });
   });
 
   it("normalizes positive integer values from number and string", () => {

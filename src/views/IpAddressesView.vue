@@ -9,7 +9,7 @@ import {
   saveIpAddress,
   softDeleteIpAddress,
 } from "@/api/ip-addresses";
-import { listTaxonomyTerms } from "@/api/taxonomy";
+import { listIpTagTerms } from "@/api/taxonomy";
 import type { IpAddress } from "@/types";
 import type { SearchFieldConfig, SearchToolbarQueryPayload } from "@/types/searchToolbar";
 import { useResourceList } from "@/composables/useResourceList";
@@ -181,13 +181,7 @@ function handleToolbarQuery(payload: SearchToolbarQueryPayload) {
 
 async function loadTagFilterOptions() {
   try {
-    const tags = await listTaxonomyTerms({
-      resource_type: "ip_address",
-      field_key: "tags",
-      limit: 200,
-      sort_by: "recent",
-      recency_scope: "global",
-    });
+    const tags = await listIpTagTerms(200);
     tagFilterOptions.value = tags.map((item) => ({ label: item, value: item }));
   } catch {
     // error shown by tauriInvoke

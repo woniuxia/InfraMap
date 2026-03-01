@@ -24,7 +24,7 @@ export function getResourceDeployContext(
   resourceId: string
 ): Promise<ResourceDeployContext> {
   return tauriInvoke<ResourceDeployContext>('get_resource_deploy_context', {
-    resource_type: resourceType,
-    resource_id: resourceId,
+    resourceType,
+    resourceId,
   })
 }

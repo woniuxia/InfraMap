@@ -4,9 +4,11 @@ import { ElMessage } from "element-plus";
 import type { NginxConfig } from "@/types";
 import type { SearchFieldConfig, SearchToolbarQueryPayload } from "@/types/searchToolbar";
 import { listNginxConfigs, saveNginxConfig, softDeleteNginxConfig } from "@/api/nginx-configs";
+import { replaceResourceCallRelations } from "@/api/call-relations";
 import { useResourceList } from "@/composables/useResourceList";
 import { buildNginxCopyDraft } from "@/utils/resourceCopy";
 import SearchToolbar from "@/components/filters/SearchToolbar.vue";
+import CallRelationsEditor from "@/components/CallRelationsEditor.vue";
 import DeploymentPanel from "@/components/DeploymentPanel.vue";
 
 const {
@@ -30,6 +32,7 @@ const drawerVisible = ref(false);
 const editingNc = ref<Partial<NginxConfig>>({});
 const isEditing = ref(false);
 const saveLoading = ref(false);
+const callRelationsEditorRef = ref<InstanceType<typeof CallRelationsEditor> | null>(null);
 
 interface NginxListFilters {
   env: string[];
@@ -85,7 +88,6 @@ const toolbarFields: SearchFieldConfig[] = [
     key: "strategy",
     queryKey: "strategy",
     label: "策略",
-    section: "advanced",
     type: "multi-select",
     width: "sm",
     options: strategyOptions,
@@ -124,6 +126,11 @@ function openCopy(row: NginxConfig) {
 }
 
 async function handleSave() {
+  const draftItems = callRelationsEditorRef.value?.getDraftItems();
+  if (draftItems === null) {
+    return;
+  }
+
   const payload: Partial<NginxConfig> = {
     id: "",
     is_deleted: 0,
@@ -133,7 +140,16 @@ async function handleSave() {
   };
   saveLoading.value = true;
   try {
-    await saveNginxConfig(payload);
+    const nginxId = await saveNginxConfig(payload);
+    try {
+      await replaceResourceCallRelations({
+        resource_id: nginxId,
+        resource_type: "nginx",
+        items: draftItems ?? [],
+      });
+    } catch {
+      ElMessage.warning("负载均衡已保存，调用关系保存失败，请重新编辑后重试。");
+    }
     ElMessage.success(isEditing.value ? "更新成功" : "创建成功");
     drawerVisible.value = false;
     fetchData();
@@ -285,6 +301,12 @@ onMounted(() => fetchData());
           <el-input v-model="editingNc.description" type="textarea" :rows="3" maxlength="300" show-word-limit />
         </el-form-item>
       </el-form>
+
+      <CallRelationsEditor
+        ref="callRelationsEditorRef"
+        :resource-id="isEditing ? editingNc.id : undefined"
+        resource-type="nginx"
+      />
 
       <DeploymentPanel v-if="isEditing && editingNc.id" :resource-id="editingNc.id!" resource-type="nginx" />
 

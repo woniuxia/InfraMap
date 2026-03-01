@@ -1,6 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { __clearMockHandlers, __setMockHandler } from "@/__mocks__/tauri";
-import { listResourceTerms, listTaxonomyTerms, saveResourceTerms } from "@/api/taxonomy";
+import {
+  listApplicationOwnerTerms,
+  listApplicationTechStackTerms,
+  listHostTagTerms,
+  listIpTagTerms,
+  listResourceTerms,
+  listTaxonomyTerms,
+  saveResourceTerms,
+} from "@/api/taxonomy";
 
 vi.mock("element-plus", () => ({
   ElMessage: {
@@ -59,6 +67,74 @@ describe("taxonomy API", () => {
       field_key: "owner",
     });
     expect(result).toEqual(["alice"]);
+  });
+
+  it("listHostTagTerms should use host tags with resource_type scope", async () => {
+    __setMockHandler("list_taxonomy_terms", (_cmd, args) => {
+      expect(args).toEqual({
+        resourceType: "host",
+        fieldKey: "tags",
+        limit: 200,
+        sortBy: "recent",
+        recencyScope: "resource_type",
+        appType: undefined,
+      });
+      return ["core", "edge"];
+    });
+
+    const result = await listHostTagTerms();
+    expect(result).toEqual(["core", "edge"]);
+  });
+
+  it("listIpTagTerms should use ip tags with resource_type scope", async () => {
+    __setMockHandler("list_taxonomy_terms", (_cmd, args) => {
+      expect(args).toEqual({
+        resourceType: "ip_address",
+        fieldKey: "tags",
+        limit: 200,
+        sortBy: "recent",
+        recencyScope: "resource_type",
+        appType: undefined,
+      });
+      return ["vip", "gateway"];
+    });
+
+    const result = await listIpTagTerms();
+    expect(result).toEqual(["vip", "gateway"]);
+  });
+
+  it("listApplicationOwnerTerms should use application owner with global scope", async () => {
+    __setMockHandler("list_taxonomy_terms", (_cmd, args) => {
+      expect(args).toEqual({
+        resourceType: "application",
+        fieldKey: "owner",
+        limit: 100,
+        sortBy: "recent",
+        recencyScope: "global",
+        appType: undefined,
+      });
+      return ["alice"];
+    });
+
+    const result = await listApplicationOwnerTerms();
+    expect(result).toEqual(["alice"]);
+  });
+
+  it("listApplicationTechStackTerms should pass app_type with global scope", async () => {
+    __setMockHandler("list_taxonomy_terms", (_cmd, args) => {
+      expect(args).toEqual({
+        resourceType: "application",
+        fieldKey: "tech_stack",
+        limit: 10,
+        sortBy: "recent",
+        recencyScope: "global",
+        appType: "frontend",
+      });
+      return ["Vue"];
+    });
+
+    const result = await listApplicationTechStackTerms({ app_type: "frontend" });
+    expect(result).toEqual(["Vue"]);
   });
 
   it("saveResourceTerms should invoke save_resource_terms_command", async () => {

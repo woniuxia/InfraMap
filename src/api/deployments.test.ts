@@ -70,8 +70,8 @@ describe("deployments API", () => {
   it("getResourceDeployContext should invoke unified backend command", async () => {
     __setMockHandler("get_resource_deploy_context", (_cmd, args) => {
       expect(args).toEqual({
-        resource_type: "middleware",
-        resource_id: "mw-1",
+        resourceType: "middleware",
+        resourceId: "mw-1",
       });
       return {
         resource_type: "middleware",

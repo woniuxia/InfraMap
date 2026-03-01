@@ -1,3 +1,4 @@
+use std::collections::{HashMap, HashSet};
 use tauri::State;
 
 use crate::db::audit::insert_audit_log;
@@ -13,6 +14,13 @@ use crate::validation::{validate_business_application, validate_required};
 pub struct AttachServicesResult {
     pub attached_count: u64,
     pub skipped_count: u64,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct ReplaceServicesResult {
+    pub attached_count: u64,
+    pub detached_count: u64,
+    pub unchanged_count: u64,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -353,6 +361,186 @@ fn attach_services_to_business_application_inner(
     }
 }
 
+fn normalize_application_ids(application_ids: &[String]) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut normalized = Vec::new();
+
+    for raw_id in application_ids {
+        let id = raw_id.trim();
+        if id.is_empty() {
+            continue;
+        }
+        if seen.insert(id.to_string()) {
+            normalized.push(id.to_string());
+        }
+    }
+
+    normalized
+}
+
+fn replace_services_by_business_application_inner(
+    command: &str,
+    conn: &rusqlite::Connection,
+    business_application_id: &str,
+    application_ids: &[String],
+) -> AppResult<ReplaceServicesResult> {
+    validate_required(business_application_id, "business_application_id")
+        .map_err(|e| AppError::validation(command, e))?;
+    let target_ids = normalize_application_ids(application_ids);
+
+    let ba_exists: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM business_applications WHERE id = ?1 AND is_deleted = 0",
+            rusqlite::params![business_application_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| AppError::from_db_error(command, "查询业务应用", e))?;
+    if ba_exists == 0 {
+        return Err(AppError::not_found(
+            command,
+            "业务应用不存在或已删除。",
+            None,
+        ));
+    }
+
+    let mut current_ids = HashSet::new();
+    let mut current_order = Vec::new();
+    let mut app_names: HashMap<String, String> = HashMap::new();
+    let mut current_stmt = conn
+        .prepare(
+            "SELECT id, name
+             FROM applications
+             WHERE is_deleted = 0 AND business_application_id = ?1
+             ORDER BY created_at DESC",
+        )
+        .map_err(|e| AppError::from_db_error(command, "查询当前挂载服务", e))?;
+    let current_rows = current_stmt
+        .query_map(rusqlite::params![business_application_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .map_err(|e| AppError::from_db_error(command, "读取当前挂载服务", e))?;
+    for row in current_rows {
+        let (application_id, application_name) =
+            row.map_err(|e| AppError::from_db_error(command, "读取当前挂载服务", e))?;
+        current_ids.insert(application_id.clone());
+        current_order.push(application_id.clone());
+        app_names.insert(application_id, application_name);
+    }
+
+    for application_id in &target_ids {
+        let (name, current_ba_id) = conn
+            .query_row(
+                "SELECT name, business_application_id
+                 FROM applications
+                 WHERE id = ?1 AND is_deleted = 0",
+                rusqlite::params![application_id],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
+            )
+            .map_err(|e| {
+                AppError::not_found(command, "应用服务不存在或已删除。", Some(e.to_string()))
+            })?;
+
+        if let Some(current_id) = current_ba_id
+            .as_deref()
+            .map(|value| value.trim())
+            .filter(|value| !value.is_empty())
+        {
+            if current_id != business_application_id {
+                return Err(AppError::conflict(
+                    command,
+                    "服务已归属其他业务应用，请先解绑后再挂载。",
+                    Some(format!(
+                        "application_id={}, application_name={}, current_business_application_id={}",
+                        application_id, name, current_id
+                    )),
+                ));
+            }
+        }
+
+        app_names.insert(application_id.clone(), name);
+    }
+
+    let target_set: HashSet<String> = target_ids.iter().cloned().collect();
+    let attach_ids: Vec<String> = target_ids
+        .iter()
+        .filter(|application_id| !current_ids.contains(application_id.as_str()))
+        .cloned()
+        .collect();
+    let detach_ids: Vec<String> = current_order
+        .into_iter()
+        .filter(|application_id| !target_set.contains(application_id))
+        .collect();
+    let unchanged_count = current_ids.intersection(&target_set).count() as u64;
+
+    let now = chrono::Utc::now().to_rfc3339();
+    conn.execute_batch("BEGIN TRANSACTION;")
+        .map_err(|e| AppError::from_db_error(command, "开启事务", e))?;
+
+    let result: AppResult<ReplaceServicesResult> = (|| {
+        for application_id in &detach_ids {
+            conn.execute(
+                "UPDATE applications
+                 SET business_application_id = NULL, updated_at = ?1
+                 WHERE id = ?2 AND is_deleted = 0",
+                rusqlite::params![now, application_id],
+            )
+            .map_err(|e| AppError::from_db_error(command, "解绑应用服务", e))?;
+            insert_audit_log(
+                conn,
+                "update",
+                "application",
+                application_id,
+                app_names.get(application_id).map(|value| value.as_str()),
+                Some(&format!(
+                    "unbind business_application_id={}",
+                    business_application_id
+                )),
+            )
+            .map_err(|e| AppError::from_db_error(command, "写入审计日志", e))?;
+        }
+
+        for application_id in &attach_ids {
+            conn.execute(
+                "UPDATE applications
+                 SET business_application_id = ?1, updated_at = ?2
+                 WHERE id = ?3 AND is_deleted = 0",
+                rusqlite::params![business_application_id, now, application_id],
+            )
+            .map_err(|e| AppError::from_db_error(command, "绑定应用服务", e))?;
+            insert_audit_log(
+                conn,
+                "update",
+                "application",
+                application_id,
+                app_names.get(application_id).map(|value| value.as_str()),
+                Some(&format!(
+                    "bind business_application_id={}",
+                    business_application_id
+                )),
+            )
+            .map_err(|e| AppError::from_db_error(command, "写入审计日志", e))?;
+        }
+
+        Ok(ReplaceServicesResult {
+            attached_count: attach_ids.len() as u64,
+            detached_count: detach_ids.len() as u64,
+            unchanged_count,
+        })
+    })();
+
+    match result {
+        Ok(summary) => {
+            conn.execute_batch("COMMIT;")
+                .map_err(|e| AppError::from_db_error(command, "提交事务", e))?;
+            Ok(summary)
+        }
+        Err(error) => {
+            let _ = conn.execute_batch("ROLLBACK;");
+            Err(error)
+        }
+    }
+}
+
 fn detach_service_from_business_application_inner(
     command: &str,
     conn: &rusqlite::Connection,
@@ -636,6 +824,24 @@ pub fn detach_service_from_business_application(
 }
 
 #[tauri::command]
+pub fn replace_services_by_business_application(
+    pool: State<DbPool>,
+    business_application_id: String,
+    application_ids: Vec<String>,
+) -> AppResult<ReplaceServicesResult> {
+    let command = "replace_services_by_business_application";
+    let conn = pool
+        .get()
+        .map_err(|e| AppError::db_unavailable(command, format!("Pool error: {}", e)))?;
+    replace_services_by_business_application_inner(
+        command,
+        &conn,
+        &business_application_id,
+        &application_ids,
+    )
+}
+
+#[tauri::command]
 pub fn list_services_by_business_application(
     pool: State<DbPool>,
     business_application_id: String,
@@ -689,8 +895,9 @@ mod tests {
     use super::{
         attach_services_to_business_application_inner,
         detach_service_from_business_application_inner,
-        list_services_by_business_application_inner, save_business_application_inner,
-        AttachServicesResult,
+        list_services_by_business_application_inner,
+        replace_services_by_business_application_inner, save_business_application_inner,
+        AttachServicesResult, ReplaceServicesResult,
     };
     use crate::error::AppErrorCode;
     use crate::models::business_application::BusinessApplication;
@@ -821,5 +1028,175 @@ mod tests {
 
         assert_eq!(services.frontend.len(), 1);
         assert_eq!(services.backend.len(), 1);
+    }
+
+    #[test]
+    fn replace_services_should_attach_new_services() {
+        let conn = setup_test_db();
+        insert_business_application(&conn, "ba-1", "支付中心");
+        insert_test_application(&conn, "app-a", "web-a", "prod");
+        insert_test_application(&conn, "app-b", "api-b", "prod");
+
+        let result = replace_services_by_business_application_inner(
+            "test",
+            &conn,
+            "ba-1",
+            &["app-a".into(), "app-b".into()],
+        )
+        .expect("replace should pass");
+        assert_eq!(
+            result,
+            ReplaceServicesResult {
+                attached_count: 2,
+                detached_count: 0,
+                unchanged_count: 0
+            }
+        );
+    }
+
+    #[test]
+    fn replace_services_should_detach_removed_services() {
+        let conn = setup_test_db();
+        insert_business_application(&conn, "ba-1", "支付中心");
+        insert_test_application(&conn, "app-a", "web-a", "prod");
+        insert_test_application(&conn, "app-b", "api-b", "prod");
+        insert_test_application(&conn, "app-c", "api-c", "prod");
+        conn.execute(
+            "UPDATE applications SET business_application_id = 'ba-1' WHERE id IN ('app-a', 'app-b')",
+            [],
+        )
+        .expect("seed bind");
+
+        let result = replace_services_by_business_application_inner(
+            "test",
+            &conn,
+            "ba-1",
+            &["app-b".into(), "app-c".into()],
+        )
+        .expect("replace should pass");
+        assert_eq!(
+            result,
+            ReplaceServicesResult {
+                attached_count: 1,
+                detached_count: 1,
+                unchanged_count: 1
+            }
+        );
+
+        let app_a_binding: Option<String> = conn
+            .query_row(
+                "SELECT business_application_id FROM applications WHERE id = 'app-a'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("query app-a binding");
+        let app_b_binding: Option<String> = conn
+            .query_row(
+                "SELECT business_application_id FROM applications WHERE id = 'app-b'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("query app-b binding");
+        let app_c_binding: Option<String> = conn
+            .query_row(
+                "SELECT business_application_id FROM applications WHERE id = 'app-c'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("query app-c binding");
+
+        assert!(app_a_binding.is_none());
+        assert_eq!(app_b_binding.as_deref(), Some("ba-1"));
+        assert_eq!(app_c_binding.as_deref(), Some("ba-1"));
+    }
+
+    #[test]
+    fn replace_services_should_keep_unchanged_services() {
+        let conn = setup_test_db();
+        insert_business_application(&conn, "ba-1", "支付中心");
+        insert_test_application(&conn, "app-a", "web-a", "prod");
+        conn.execute(
+            "UPDATE applications SET business_application_id = 'ba-1' WHERE id = 'app-a'",
+            [],
+        )
+        .expect("seed bind");
+
+        let result = replace_services_by_business_application_inner(
+            "test",
+            &conn,
+            "ba-1",
+            &["app-a".into(), "app-a".into()],
+        )
+        .expect("replace should pass");
+        assert_eq!(
+            result,
+            ReplaceServicesResult {
+                attached_count: 0,
+                detached_count: 0,
+                unchanged_count: 1
+            }
+        );
+    }
+
+    #[test]
+    fn replace_services_should_reject_services_belonging_to_other_business_application() {
+        let conn = setup_test_db();
+        insert_business_application(&conn, "ba-1", "支付中心");
+        insert_business_application(&conn, "ba-2", "订单中心");
+        insert_test_application(&conn, "app-a", "web-a", "prod");
+        conn.execute(
+            "UPDATE applications SET business_application_id = 'ba-2' WHERE id = 'app-a'",
+            [],
+        )
+        .expect("seed bind");
+
+        let err = replace_services_by_business_application_inner(
+            "test",
+            &conn,
+            "ba-1",
+            &["app-a".into()],
+        )
+        .expect_err("should reject");
+        assert_eq!(err.code, AppErrorCode::Conflict);
+    }
+
+    #[test]
+    fn replace_services_should_not_change_data_when_conflict_occurs() {
+        let conn = setup_test_db();
+        insert_business_application(&conn, "ba-1", "支付中心");
+        insert_business_application(&conn, "ba-2", "订单中心");
+        insert_test_application(&conn, "app-a", "web-a", "prod");
+        insert_test_application(&conn, "app-b", "api-b", "prod");
+        conn.execute(
+            "UPDATE applications SET business_application_id = 'ba-2' WHERE id = 'app-b'",
+            [],
+        )
+        .expect("seed bind");
+
+        let err = replace_services_by_business_application_inner(
+            "test",
+            &conn,
+            "ba-1",
+            &["app-a".into(), "app-b".into()],
+        )
+        .expect_err("should reject");
+        assert_eq!(err.code, AppErrorCode::Conflict);
+
+        let app_a_binding: Option<String> = conn
+            .query_row(
+                "SELECT business_application_id FROM applications WHERE id = 'app-a'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("query app-a binding");
+        let app_b_binding: Option<String> = conn
+            .query_row(
+                "SELECT business_application_id FROM applications WHERE id = 'app-b'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("query app-b binding");
+        assert!(app_a_binding.is_none());
+        assert_eq!(app_b_binding.as_deref(), Some("ba-2"));
     }
 }

@@ -68,7 +68,13 @@ pub fn get_dashboard_stats(pool: State<DbPool>) -> AppResult<DashboardStats> {
         .map_err(|e| AppError::from_db_error(command, "统计网关异常数量", e))?;
     let deployment_total = count_active(&conn, "deployments")
         .map_err(|e| AppError::from_db_error(command, "统计部署总数", e))?;
-    let dependency_total = count_active(&conn, "dependencies")
+    let dependency_total: u64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM call_relations WHERE is_deleted = 0 AND direction = 'upstream'",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .map(|count| count as u64)
         .map_err(|e| AppError::from_db_error(command, "统计依赖总数", e))?;
     let env_distribution = query_env_distribution(&conn)
         .map_err(|e| AppError::from_db_error(command, "统计环境分布", e))?;

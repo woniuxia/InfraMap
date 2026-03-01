@@ -93,7 +93,7 @@ pub fn get_middleware(pool: State<DbPool>, id: String) -> AppResult<Middleware> 
 }
 
 #[tauri::command]
-pub fn save_middleware(pool: State<DbPool>, data: Middleware) -> AppResult<()> {
+pub fn save_middleware(pool: State<DbPool>, data: Middleware) -> AppResult<String> {
     let command = "save_middleware";
 
     validate_middleware(&data).map_err(|e| AppError::validation(command, e))?;
@@ -117,7 +117,7 @@ pub fn save_middleware(pool: State<DbPool>, data: Middleware) -> AppResult<()> {
     conn.execute_batch("BEGIN TRANSACTION;")
         .map_err(|e| AppError::from_db_error(command, "开启事务", e))?;
 
-    let result: AppResult<()> = (|| {
+    let result: AppResult<String> = (|| {
         if is_new {
             let id = if data.id.is_empty() {
                 uuid::Uuid::new_v4().to_string()
@@ -144,6 +144,7 @@ pub fn save_middleware(pool: State<DbPool>, data: Middleware) -> AppResult<()> {
             .map_err(|e| AppError::from_db_error(command, "创建中间件", e))?;
             insert_audit_log(&conn, "create", "middleware", &id, Some(&data.name), None)
                 .map_err(|e| AppError::from_db_error(command, "写入审计日志", e))?;
+            Ok(id)
         } else {
             conn.execute(
                 "UPDATE middlewares SET name=?1, category=?2, type=?3, address=?4, port=?5, version=?6,
@@ -172,15 +173,15 @@ pub fn save_middleware(pool: State<DbPool>, data: Middleware) -> AppResult<()> {
                 None,
             )
             .map_err(|e| AppError::from_db_error(command, "写入审计日志", e))?;
+            Ok(data.id)
         }
-        Ok(())
     })();
 
     match result {
-        Ok(()) => {
+        Ok(id) => {
             conn.execute_batch("COMMIT;")
                 .map_err(|e| AppError::from_db_error(command, "提交事务", e))?;
-            Ok(())
+            Ok(id)
         }
         Err(error) => {
             let _ = conn.execute_batch("ROLLBACK;");

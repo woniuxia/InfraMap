@@ -43,6 +43,55 @@ export function listTaxonomyTerms(params: ListTaxonomyTermsParams): Promise<stri
   });
 }
 
+export function listHostTagTerms(limit = 200): Promise<string[]> {
+  return listTaxonomyTerms({
+    resource_type: "host",
+    field_key: "tags",
+    limit,
+    sort_by: "recent",
+    recency_scope: "resource_type",
+  });
+}
+
+export function listIpTagTerms(limit = 200): Promise<string[]> {
+  return listTaxonomyTerms({
+    resource_type: "ip_address",
+    field_key: "tags",
+    limit,
+    sort_by: "recent",
+    recency_scope: "resource_type",
+  });
+}
+
+export function listApplicationOwnerTerms(limit = 100): Promise<string[]> {
+  return listTaxonomyTerms({
+    resource_type: "application",
+    field_key: "owner",
+    limit,
+    sort_by: "recent",
+    recency_scope: "global",
+  });
+}
+
+export interface ListApplicationTechStackTermsParams {
+  app_type: TaxonomyAppType;
+  limit?: number;
+}
+
+export function listApplicationTechStackTerms(
+  params: ListApplicationTechStackTermsParams
+): Promise<string[]> {
+  const { app_type, limit = 10 } = params;
+  return listTaxonomyTerms({
+    resource_type: "application",
+    field_key: "tech_stack",
+    limit,
+    sort_by: "recent",
+    recency_scope: "global",
+    app_type,
+  });
+}
+
 export function saveResourceTerms(params: SaveResourceTermsParams): Promise<void> {
   const { resource_type, resource_id, field_key, values } = params;
   return tauriInvoke<void>("save_resource_terms_command", {
