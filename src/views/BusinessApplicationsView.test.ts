@@ -10,6 +10,11 @@ import {
   softDeleteBusinessApplication,
 } from "@/api/business-applications";
 import { listApplications } from "@/api/applications";
+import {
+  listBusinessApplicationOwnerTerms,
+  listResourceTerms,
+  saveResourceTerms,
+} from "@/api/taxonomy";
 
 const { messageSuccess } = vi.hoisted(() => ({
   messageSuccess: vi.fn(),
@@ -30,7 +35,7 @@ vi.mock("@/api/business-applications", () => ({
       {
         id: "ba-1",
         name: "支付中心",
-        owner: "alice",
+        owners: ["alice", "bob"],
         env: "prod",
         status: "active",
         is_deleted: 0,
@@ -78,6 +83,12 @@ vi.mock("@/api/applications", () => ({
     page: 1,
     page_size: 500,
   })),
+}));
+
+vi.mock("@/api/taxonomy", () => ({
+  listBusinessApplicationOwnerTerms: vi.fn(async () => ["alice", "bob"]),
+  listResourceTerms: vi.fn(async () => ["alice", "bob"]),
+  saveResourceTerms: vi.fn(async () => undefined),
 }));
 
 const SearchToolbarStub = defineComponent({
@@ -133,6 +144,16 @@ const ElSelectStub = defineComponent({
 const ElOptionStub = defineComponent({
   name: "ElOption",
   template: `<div><slot /></div>`,
+});
+
+const ElOptionGroupStub = defineComponent({
+  name: "ElOptionGroup",
+  template: `<div><slot /></div>`,
+});
+
+const ElTagStub = defineComponent({
+  name: "ElTag",
+  template: `<span><slot /></span>`,
 });
 
 const PassThroughStub = defineComponent({
@@ -197,6 +218,8 @@ function mountView() {
         ElInput: ElInputStub,
         ElSelect: ElSelectStub,
         ElOption: ElOptionStub,
+        ElOptionGroup: ElOptionGroupStub,
+        ElTag: ElTagStub,
         ElForm: PassThroughStub,
         ElFormItem: PassThroughStub,
         ElTable: ElTableStub,
@@ -223,6 +246,8 @@ describe("BusinessApplicationsView", () => {
     await flushPromises();
     await flushPromises();
 
+    expect(wrapper.text()).toContain("alice");
+    expect(wrapper.text()).toContain("bob");
     expect(wrapper.text()).toContain("前端服务");
     expect(wrapper.text()).toContain("后端服务");
     expect(wrapper.text()).toContain("portal-web");
@@ -249,8 +274,18 @@ describe("BusinessApplicationsView", () => {
     await saveButton!.trigger("click");
     await flushPromises();
 
+    const savePayload = vi.mocked(saveBusinessApplication).mock.calls[0]?.[0] ?? {};
+    expect(Object.prototype.hasOwnProperty.call(savePayload, "owner")).toBe(false);
     expect(listApplications).toHaveBeenCalled();
     expect(saveBusinessApplication).toHaveBeenCalled();
+    expect(saveResourceTerms).toHaveBeenCalledWith({
+      resource_type: "business_application",
+      resource_id: "ba-1",
+      field_key: "owner",
+      values: [],
+    });
+    expect(listBusinessApplicationOwnerTerms).toHaveBeenCalled();
+    expect(listResourceTerms).not.toHaveBeenCalled();
     expect(replaceServicesByBusinessApplication).toHaveBeenCalledWith("ba-1", []);
     expect(listBusinessApplications).toHaveBeenCalled();
     expect(listServicesByBusinessApplication).toHaveBeenCalledWith("ba-1");

@@ -11,6 +11,11 @@ import {
   saveBusinessApplication,
   softDeleteBusinessApplication,
 } from "@/api/business-applications";
+import {
+  listBusinessApplicationOwnerTerms,
+  listResourceTerms,
+  saveResourceTerms,
+} from "@/api/taxonomy";
 import { useResourceList } from "@/composables/useResourceList";
 import SearchToolbar from "@/components/filters/SearchToolbar.vue";
 
@@ -31,7 +36,7 @@ const {
 });
 
 const searchText = ref("");
-const listFilters = ref<{ status: string[]; env: string[] }>({ status: [], env: [] });
+const listFilters = ref<{ status: string[]; env: string[]; owner: string[] }>({ status: [], env: [], owner: [] });
 interface ServiceCellItem {
   id: string;
   name: string;
@@ -49,6 +54,8 @@ const editingBusiness = ref<Partial<BusinessApplication>>({});
 const serviceOptionsLoading = ref(false);
 const serviceOptions = ref<Application[]>([]);
 const selectedServiceIds = ref<string[]>([]);
+const ownerList = ref<string[]>([]);
+const ownerOptions = ref<string[]>([]);
 
 const envOptions = [
   { label: "生产", value: "prod" },
@@ -59,7 +66,8 @@ const statusOptions = [
   { label: "激活", value: "active" },
   { label: "停用", value: "inactive" },
 ];
-const toolbarFields: SearchFieldConfig[] = [
+const ownerFilterOptions = computed(() => ownerOptions.value.map((item) => ({ label: item, value: item })));
+const toolbarFields = computed<SearchFieldConfig[]>(() => [
   {
     key: "status",
     queryKey: "status",
@@ -76,7 +84,15 @@ const toolbarFields: SearchFieldConfig[] = [
     width: "sm",
     options: envOptions,
   },
-];
+  {
+    key: "owner",
+    queryKey: "owner",
+    label: "负责人",
+    type: "multi-select",
+    width: "md",
+    options: ownerFilterOptions.value,
+  },
+]);
 
 const selectedServiceIdSet = computed(() => new Set(selectedServiceIds.value));
 const editableServiceOptions = computed(() => {
@@ -86,7 +102,10 @@ const editableServiceOptions = computed(() => {
     (item) => item.env === businessEnv || selectedServiceIdSet.value.has(item.id)
   );
 });
+const frontendServiceOptions = computed(() => editableServiceOptions.value.filter((item) => item.type === "frontend"));
+const backendServiceOptions = computed(() => editableServiceOptions.value.filter((item) => item.type !== "frontend"));
 const selectedServiceSummary = computed(() => `已选择 ${selectedServiceIds.value.length} 个服务`);
+const ownerSuggestions = computed(() => normalizeOwners([...ownerOptions.value, ...ownerList.value]));
 
 function handleToolbarQuery(payload: SearchToolbarQueryPayload) {
   handleQuery(payload);
@@ -113,6 +132,24 @@ function serviceTypeLabel(type: string) {
       other: "其他",
     } as Record<string, string>)[type] || type
   );
+}
+
+function normalizeOwners(values: string[]) {
+  return Array.from(
+    new Set(
+      values
+        .map((item) => item.trim())
+        .filter((item) => item.length > 0)
+    )
+  );
+}
+
+function handleOwnerChange(values: string[]) {
+  ownerList.value = normalizeOwners(values);
+}
+
+function ownersForRow(row: BusinessApplication) {
+  return normalizeOwners(row.owners ?? []);
 }
 
 function serviceAddressLabel(service: Application) {
@@ -177,15 +214,28 @@ function isServiceOptionLocked(service: Application) {
 }
 
 function serviceOptionLabel(service: Application) {
-  return [
-    service.name,
-    serviceTypeLabel(service.type),
-    envLabel(service.env),
-    serviceAddressLabel(service),
-    service.tech_stack ?? "",
-  ]
-    .filter((item) => item && String(item).trim().length > 0)
-    .join(" ");
+  return `${service.name?.trim() || "-"}（${serviceTypeLabel(service.type)}）`;
+}
+
+async function fetchOwnerOptions() {
+  try {
+    ownerOptions.value = await listBusinessApplicationOwnerTerms(100);
+  } catch {
+    // error shown by tauriInvoke
+  }
+}
+
+async function loadBusinessOwnerTerms(resourceId: string) {
+  try {
+    const owners = await listResourceTerms({
+      resource_type: "business_application",
+      resource_id: resourceId,
+      field_key: "owner",
+    });
+    ownerList.value = normalizeOwners(owners);
+  } catch {
+    // error shown by tauriInvoke
+  }
 }
 
 function normalizeSelectedServiceIds(ids: string[]) {
@@ -244,14 +294,16 @@ async function openAdd() {
   };
   isEditing.value = false;
   selectedServiceIds.value = [];
+  ownerList.value = [];
   drawerVisible.value = true;
-  await loadServiceOptions();
+  await Promise.all([loadServiceOptions(), fetchOwnerOptions()]);
 }
 
 async function openEdit(row: BusinessApplication) {
   editingBusiness.value = { ...row };
   isEditing.value = true;
   selectedServiceIds.value = [];
+  ownerList.value = ownersForRow(row);
   drawerVisible.value = true;
   serviceOptionsLoading.value = true;
   try {
@@ -274,25 +326,39 @@ async function openEdit(row: BusinessApplication) {
     serviceOptions.value = mergedOptions;
     selectedServiceIds.value = attachedServices.map((service) => service.id);
     syncSelectedServiceIds();
+    await loadBusinessOwnerTerms(row.id);
   } catch {
     // error shown by tauriInvoke
   } finally {
     serviceOptionsLoading.value = false;
   }
+  await fetchOwnerOptions();
 }
 
 async function handleSave() {
   const editingBeforeSave = isEditing.value;
+  const normalizedOwners = normalizeOwners(ownerList.value);
+  const { owners: _ignoredOwners, ...businessDraft } = editingBusiness.value;
   const payload: Partial<BusinessApplication> = {
     id: "",
     is_deleted: 0,
     created_at: "",
     updated_at: "",
-    ...editingBusiness.value,
+    ...businessDraft,
   };
   saveLoading.value = true;
   try {
     const id = await saveBusinessApplication(payload);
+    try {
+      await saveResourceTerms({
+        resource_type: "business_application",
+        resource_id: id,
+        field_key: "owner",
+        values: normalizedOwners,
+      });
+    } catch {
+      ElMessage.warning("业务应用已保存，负责人标签保存失败，请重新编辑后重试。");
+    }
     editingBusiness.value.id = id;
     isEditing.value = true;
     const normalizedIds = normalizeSelectedServiceIds(selectedServiceIds.value);
@@ -303,6 +369,7 @@ async function handleSave() {
     );
     drawerVisible.value = false;
     await fetchData();
+    await fetchOwnerOptions();
   } catch {
     // error shown by tauriInvoke
   } finally {
@@ -323,7 +390,9 @@ watch(
   { immediate: true }
 );
 
-onMounted(fetchData);
+onMounted(async () => {
+  await Promise.all([fetchData(), fetchOwnerOptions()]);
+});
 </script>
 
 <template>
@@ -332,7 +401,7 @@ onMounted(fetchData);
       <SearchToolbar
         v-model:search-text="searchText"
         v-model:filters="listFilters"
-        search-placeholder="搜索业务应用名称/负责人..."
+        search-placeholder="搜索业务应用名称/编码/描述..."
         :fields="toolbarFields"
         @query="handleToolbarQuery"
       >
@@ -350,7 +419,16 @@ onMounted(fetchData);
         row-key="id"
       >
         <el-table-column prop="name" label="业务应用" min-width="140" />
-        <el-table-column prop="owner" label="负责人" min-width="100" />
+        <el-table-column label="负责人" min-width="160" align="center">
+          <template #default="{ row }">
+            <div v-if="ownersForRow(row).length > 0" class="owner-tags">
+              <el-tag v-for="owner in ownersForRow(row)" :key="`${row.id}-${owner}`" size="small" effect="plain">
+                {{ owner }}
+              </el-tag>
+            </div>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
         <el-table-column label="环境" width="80" align="center">
           <template #default="{ row }">{{ envLabel(row.env) }}</template>
         </el-table-column>
@@ -409,7 +487,19 @@ onMounted(fetchData);
           <el-input v-model="editingBusiness.code" placeholder="如 PAY、ORDER" />
         </el-form-item>
         <el-form-item label="负责人">
-          <el-input v-model="editingBusiness.owner" placeholder="负责人姓名" />
+          <el-select
+            v-model="ownerList"
+            class="w-full"
+            multiple
+            filterable
+            allow-create
+            default-first-option
+            :reserve-keyword="false"
+            placeholder="输入负责人姓名进行筛选，按回车可新增"
+            @change="(values) => handleOwnerChange(values as string[])"
+          >
+            <el-option v-for="item in ownerSuggestions" :key="item" :label="item" :value="item" />
+          </el-select>
         </el-form-item>
         <el-form-item label="环境">
           <el-select
@@ -438,29 +528,48 @@ onMounted(fetchData);
             class="w-full"
             multiple
             filterable
-            collapse-tags
-            collapse-tags-tooltip
             clearable
             :loading="serviceOptionsLoading"
             placeholder="请选择要挂载的应用服务"
           >
-            <el-option
-              v-for="item in editableServiceOptions"
-              :key="item.id"
-              :value="item.id"
-              :label="serviceOptionLabel(item)"
-              :disabled="isServiceOptionLocked(item)"
-            >
-              <div class="service-option">
-                <span class="service-option__name">{{ item.name }}</span>
-                <span class="service-option__meta">
-                  {{ serviceTypeLabel(item.type) }} | {{ envLabel(item.env) }} | {{ serviceAddressLabel(item) }}
-                </span>
-                <span v-if="isServiceOptionLocked(item)" class="service-option__lock">
-                  已归属 {{ item.business_application_name || item.business_application_id }}
-                </span>
-              </div>
-            </el-option>
+            <el-option-group v-if="frontendServiceOptions.length > 0" label="前端服务">
+              <el-option
+                v-for="item in frontendServiceOptions"
+                :key="item.id"
+                :value="item.id"
+                :label="serviceOptionLabel(item)"
+                :disabled="isServiceOptionLocked(item)"
+              >
+                <div class="service-option">
+                  <span class="service-option__name">{{ item.name }}</span>
+                  <span class="service-option__meta">
+                    {{ serviceTypeLabel(item.type) }} | {{ envLabel(item.env) }} | {{ serviceAddressLabel(item) }}
+                  </span>
+                  <span v-if="isServiceOptionLocked(item)" class="service-option__lock">
+                    已归属 {{ item.business_application_name || item.business_application_id }}
+                  </span>
+                </div>
+              </el-option>
+            </el-option-group>
+            <el-option-group v-if="backendServiceOptions.length > 0" label="后端服务">
+              <el-option
+                v-for="item in backendServiceOptions"
+                :key="item.id"
+                :value="item.id"
+                :label="serviceOptionLabel(item)"
+                :disabled="isServiceOptionLocked(item)"
+              >
+                <div class="service-option">
+                  <span class="service-option__name">{{ item.name }}</span>
+                  <span class="service-option__meta">
+                    {{ serviceTypeLabel(item.type) }} | {{ envLabel(item.env) }} | {{ serviceAddressLabel(item) }}
+                  </span>
+                  <span v-if="isServiceOptionLocked(item)" class="service-option__lock">
+                    已归属 {{ item.business_application_name || item.business_application_id }}
+                  </span>
+                </div>
+              </el-option>
+            </el-option-group>
           </el-select>
           <div class="service-hint">
             {{ selectedServiceSummary }}，保存后将按当前选择覆盖业务应用的挂载关系。
@@ -543,5 +652,12 @@ onMounted(fetchData);
 .service-option__lock {
   color: var(--im-danger);
   font-size: 12px;
+}
+
+.owner-tags {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px;
 }
 </style>

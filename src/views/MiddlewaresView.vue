@@ -6,7 +6,13 @@ import type { SearchFieldConfig, SearchToolbarQueryPayload } from "@/types/searc
 import { listMiddlewares, saveMiddleware, softDeleteMiddleware } from "@/api/middlewares";
 import { replaceResourceCallRelations } from "@/api/call-relations";
 import { useResourceList } from "@/composables/useResourceList";
-import { getMiddlewareDefaultPort, getMiddlewareTypeOptions } from "@/utils/middlewareCatalog";
+import {
+  MIDDLEWARE_CATEGORY_OPTIONS,
+  getMiddlewareCategoryLabel,
+  getMiddlewareDefaultPort,
+  getMiddlewareIconByType,
+  getMiddlewareTypeOptionsWithIcon,
+} from "@/utils/middlewareCatalog";
 import { buildMiddlewareCopyDraft } from "@/utils/resourceCopy";
 import SearchToolbar from "@/components/filters/SearchToolbar.vue";
 import CallRelationsEditor from "@/components/CallRelationsEditor.vue";
@@ -49,21 +55,10 @@ function createDefaultFilters(): MiddlewareListFilters {
 }
 
 const listFilters = ref<MiddlewareListFilters>(createDefaultFilters());
-const categoryLabels: Record<Middleware["category"], string> = {
-  database: "数据库",
-  message_queue: "消息队列",
-  cache: "缓存",
-  search_engine: "搜索引擎",
-  config_center: "配置中心",
-  other: "其他",
-};
+const categoryOptions = MIDDLEWARE_CATEGORY_OPTIONS;
 
-const categoryOptions = (Object.entries(categoryLabels) as Array<[Middleware["category"], string]>).map(
-  ([value, label]) => ({ label, value })
-);
-
-const middlewareTypeOptions = computed(() =>
-  getMiddlewareTypeOptions(editingMw.value.category, editingMw.value.type)
+const middlewareTypeOptionsWithIcon = computed(() =>
+  getMiddlewareTypeOptionsWithIcon(editingMw.value.category, editingMw.value.type)
 );
 
 const envOptions = [
@@ -159,7 +154,39 @@ async function handleSave() {
 }
 
 function categoryLabel(category: string) {
-  return categoryLabels[category as Middleware["category"]] || category;
+  return getMiddlewareCategoryLabel(category);
+}
+
+function middlewareTypeLabel(type?: string): string {
+  const normalized = (type ?? "").trim();
+  return normalized || "-";
+}
+
+function middlewareTypeIconSrc(row: Pick<Middleware, "category" | "type">): string {
+  return getMiddlewareIconByType(row.type, row.category).src;
+}
+
+function middlewareTypeIconAlt(row: Pick<Middleware, "category" | "type">): string {
+  return getMiddlewareIconByType(row.type, row.category).alt;
+}
+
+function middlewareTypeSlotValue(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (typeof value === "number") return String(value);
+  return "";
+}
+
+function middlewareTypeLabelBySlot(label: unknown, value: unknown): string {
+  if (typeof label === "string" && label.trim().length > 0) return label;
+  return middlewareTypeLabel(middlewareTypeSlotValue(value));
+}
+
+function middlewareTypeIconSrcBySlot(value: unknown): string {
+  return getMiddlewareIconByType(middlewareTypeSlotValue(value), editingMw.value.category).src;
+}
+
+function middlewareTypeIconAltBySlot(value: unknown): string {
+  return getMiddlewareIconByType(middlewareTypeSlotValue(value), editingMw.value.category).alt;
 }
 
 function envLabel(env: string) {
@@ -210,7 +237,18 @@ watch(
       <el-table-column prop="category" label="分类" width="100" align="center">
         <template #default="{ row }">{{ categoryLabel(row.category) }}</template>
       </el-table-column>
-      <el-table-column prop="type" label="类型" width="100" align="center" />
+      <el-table-column prop="type" label="类型" width="140" align="center">
+        <template #default="{ row }">
+          <div class="middleware-type-cell">
+            <img
+              :src="middlewareTypeIconSrc(row)"
+              :alt="middlewareTypeIconAlt(row)"
+              class="middleware-type-icon"
+            />
+            <span>{{ middlewareTypeLabel(row.type) }}</span>
+          </div>
+        </template>
+      </el-table-column>
       <el-table-column label="地址" min-width="180" align="center">
         <template #default="{ row }"> {{ row.address || "-" }}{{ row.port ? ":" + row.port : "" }} </template>
       </el-table-column>
@@ -273,7 +311,27 @@ watch(
             clearable
             placeholder="可选择常用类型或手动输入"
           >
-            <el-option v-for="option in middlewareTypeOptions" :key="option" :label="option" :value="option" />
+            <template #label="{ label, value }">
+              <div class="middleware-type-option middleware-type-selected">
+                <img
+                  :src="middlewareTypeIconSrcBySlot(value)"
+                  :alt="middlewareTypeIconAltBySlot(value)"
+                  class="middleware-type-option-icon"
+                />
+                <span>{{ middlewareTypeLabelBySlot(label, value) }}</span>
+              </div>
+            </template>
+            <el-option
+              v-for="option in middlewareTypeOptionsWithIcon"
+              :key="option.value"
+              :label="option.label"
+              :value="option.value"
+            >
+              <div class="middleware-type-option">
+                <img :src="option.icon.src" :alt="option.icon.alt" class="middleware-type-option-icon" />
+                <span>{{ option.label }}</span>
+              </div>
+            </el-option>
           </el-select>
         </el-form-item>
         <el-form-item label="连接地址" required>
@@ -414,6 +472,40 @@ watch(
   margin-top: 16px;
   display: flex;
   justify-content: flex-end;
+}
+.middleware-type-cell {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+.middleware-type-icon {
+  width: 16px;
+  height: 16px;
+  display: block;
+  flex-shrink: 0;
+  border-radius: 4px;
+}
+.middleware-type-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.middleware-type-selected {
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.middleware-type-selected span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.middleware-type-option-icon {
+  width: 16px;
+  height: 16px;
+  display: block;
+  flex-shrink: 0;
+  border-radius: 4px;
 }
 </style>
 

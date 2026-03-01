@@ -3,7 +3,8 @@ import { tauriInvoke } from "@/utils/invoke";
 export type TaxonomyResourceType =
   | "host"
   | "ip_address"
-  | "application";
+  | "application"
+  | "business_application";
 export type TaxonomyFieldKey = "tags" | "owner" | "tech_stack";
 export type TaxonomySortBy = "alpha" | "recent";
 export type TaxonomyRecencyScope = "global" | "resource_type";
@@ -70,6 +71,16 @@ export function listApplicationOwnerTerms(limit = 100): Promise<string[]> {
     limit,
     sort_by: "recent",
     recency_scope: "global",
+  });
+}
+
+export function listBusinessApplicationOwnerTerms(limit = 100): Promise<string[]> {
+  return listTaxonomyTerms({
+    resource_type: "business_application",
+    field_key: "owner",
+    limit,
+    sort_by: "recent",
+    recency_scope: "resource_type",
   });
 }
 

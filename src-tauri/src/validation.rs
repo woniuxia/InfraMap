@@ -194,9 +194,14 @@ pub fn validate_business_application(app: &BusinessApplication) -> Result<(), St
             validate_string_length(code.trim(), 1, 64, "code")?;
         }
     }
-    if let Some(owner) = app.owner.as_deref() {
-        if !owner.trim().is_empty() {
-            validate_string_length(owner.trim(), 1, 50, "owner")?;
+    if let Some(ref owners) = app.owners {
+        if owners.len() > 20 {
+            return Err("owners length must be <= 20".into());
+        }
+        for owner in owners {
+            if !owner.trim().is_empty() {
+                validate_string_length(owner.trim(), 1, 50, "owner")?;
+            }
         }
     }
     Ok(())
@@ -513,7 +518,7 @@ mod tests {
             id: "ba1".into(),
             name: "支付中心".into(),
             code: Some("PAY".into()),
-            owner: Some("alice".into()),
+            owners: Some(vec!["alice".into()]),
             description: None,
             env: Some("prod".into()),
             status: "active".into(),

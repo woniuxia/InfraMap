@@ -428,6 +428,37 @@ pub const MIGRATIONS: &[(i32, &str)] = &[
         DROP TABLE IF EXISTS dependencies;
     "#,
     ),
+    (
+        15,
+        r#"
+        INSERT OR IGNORE INTO taxonomy_terms (id, field_key, normalized_value, display_name, is_deleted, deleted_at, created_at, updated_at)
+        SELECT lower(hex(randomblob(16))), 'owner', lower(trim(owner)), trim(owner), 0, NULL, COALESCE(updated_at, datetime('now')), COALESCE(updated_at, datetime('now'))
+        FROM business_applications
+        WHERE is_deleted = 0
+          AND TRIM(COALESCE(owner, '')) <> '';
+
+        INSERT OR IGNORE INTO taxonomy_bindings (id, term_id, resource_type, resource_id, is_deleted, deleted_at, created_at, updated_at)
+        SELECT lower(hex(randomblob(16))), tt.id, 'business_application', ba.id, 0, NULL, COALESCE(ba.updated_at, datetime('now')), COALESCE(ba.updated_at, datetime('now'))
+        FROM business_applications ba
+        JOIN taxonomy_terms tt
+          ON tt.field_key = 'owner'
+         AND tt.normalized_value = lower(trim(ba.owner))
+         AND tt.is_deleted = 0
+        WHERE ba.is_deleted = 0
+          AND TRIM(COALESCE(ba.owner, '')) <> '';
+
+        DELETE FROM taxonomy_term_stats;
+        INSERT INTO taxonomy_term_stats (term_id, resource_type, usage_count, last_used_at, updated_at)
+        SELECT tb.term_id, tb.resource_type, COUNT(*) AS usage_count, MAX(tb.updated_at) AS last_used_at, datetime('now')
+        FROM taxonomy_bindings tb
+        JOIN taxonomy_terms tt ON tt.id = tb.term_id
+        WHERE tb.is_deleted = 0
+          AND tt.is_deleted = 0
+        GROUP BY tb.term_id, tb.resource_type;
+
+        ALTER TABLE business_applications DROP COLUMN owner;
+    "#,
+    ),
 ];
 
 const TAXONOMY_TERMS_REQUIRED_COLUMNS: [&str; 8] = [
@@ -1070,6 +1101,18 @@ mod tests {
             .expect("query sqlite_master");
 
         assert_eq!(exists, 1, "business_applications table should exist");
+
+        let mut stmt = conn
+            .prepare("PRAGMA table_info(business_applications)")
+            .expect("prepare table info query");
+        let rows = stmt
+            .query_map([], |row| row.get::<_, String>(1))
+            .expect("query table info");
+        let columns: Vec<String> = rows.filter_map(|r| r.ok()).collect();
+        assert!(
+            !columns.iter().any(|col| col == "owner"),
+            "business_applications table should not contain legacy owner column"
+        );
     }
 
     #[test]
@@ -1088,6 +1131,48 @@ mod tests {
         assert!(
             columns.iter().any(|col| col == "business_application_id"),
             "applications table should contain business_application_id column"
+        );
+    }
+
+    #[test]
+    fn business_application_owner_should_migrate_to_taxonomy_before_owner_column_drop() {
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        for (version, sql) in MIGRATIONS.iter() {
+            if *version == 15 {
+                conn.execute(
+                    "INSERT INTO business_applications (id, name, code, owner, description, env, status, is_deleted, deleted_at, created_at, updated_at)
+                     VALUES ('ba-mig-1', '支付中心', 'PAY', 'alice', NULL, 'prod', 'active', 0, NULL, datetime('now'), datetime('now'))",
+                    [],
+                )
+                .expect("seed business application owner before migration v15");
+            }
+
+            conn.execute_batch(sql)
+                .unwrap_or_else(|e| panic!("Migration v{} failed: {}", version, e));
+            if *version == 12 {
+                migrate_taxonomy_v2(&conn)
+                    .unwrap_or_else(|e| panic!("Post-migration hook v{} failed: {}", version, e));
+            }
+        }
+
+        let owner_binding_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*)
+                 FROM taxonomy_bindings tb
+                 JOIN taxonomy_terms tt ON tt.id = tb.term_id
+                 WHERE tb.resource_type = 'business_application'
+                   AND tb.resource_id = 'ba-mig-1'
+                   AND tb.is_deleted = 0
+                   AND tt.is_deleted = 0
+                   AND tt.field_key = 'owner'
+                   AND tt.display_name = 'alice'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count migrated business owner binding");
+        assert_eq!(
+            owner_binding_count, 1,
+            "business application owner should be migrated into taxonomy"
         );
     }
 

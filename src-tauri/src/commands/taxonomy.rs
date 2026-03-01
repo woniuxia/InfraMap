@@ -13,7 +13,8 @@ pub const SORT_RECENT: &str = "recent";
 pub const RECENCY_SCOPE_GLOBAL: &str = "global";
 pub const RECENCY_SCOPE_RESOURCE_TYPE: &str = "resource_type";
 
-const ALLOWED_RESOURCE_TYPES: [&str; 3] = ["host", "ip_address", "application"];
+const ALLOWED_RESOURCE_TYPES: [&str; 4] =
+    ["host", "ip_address", "application", "business_application"];
 const ALLOWED_SORT_BY: [&str; 2] = [SORT_ALPHA, SORT_RECENT];
 const ALLOWED_RECENCY_SCOPE: [&str; 2] = [RECENCY_SCOPE_GLOBAL, RECENCY_SCOPE_RESOURCE_TYPE];
 const ALLOWED_APP_TYPES: [&str; 2] = ["frontend", "backend"];
@@ -23,7 +24,7 @@ struct TaxonomyFieldSpec {
     field_key: &'static str,
 }
 
-const TAXONOMY_FIELD_SPECS: [TaxonomyFieldSpec; 4] = [
+const TAXONOMY_FIELD_SPECS: [TaxonomyFieldSpec; 5] = [
     TaxonomyFieldSpec {
         resource_type: "host",
         field_key: FIELD_TAGS,
@@ -39,6 +40,10 @@ const TAXONOMY_FIELD_SPECS: [TaxonomyFieldSpec; 4] = [
     TaxonomyFieldSpec {
         resource_type: "application",
         field_key: FIELD_TECH_STACK,
+    },
+    TaxonomyFieldSpec {
+        resource_type: "business_application",
+        field_key: FIELD_OWNER,
     },
 ];
 
@@ -699,9 +704,9 @@ mod tests {
     use super::{
         is_taxonomy_schema_error, list_resource_terms_by_field, list_terms_by_scope,
         list_terms_by_scope_with_options, list_terms_with_fallback, normalize_terms,
-        parse_json_string_array, parse_tech_stack_terms, save_resource_terms, FIELD_OWNER,
-        FIELD_TAGS, FIELD_TECH_STACK, RECENCY_SCOPE_GLOBAL, RECENCY_SCOPE_RESOURCE_TYPE,
-        SORT_RECENT,
+        parse_json_string_array, parse_tech_stack_terms, save_resource_terms,
+        validate_resource_field, FIELD_OWNER, FIELD_TAGS, FIELD_TECH_STACK, RECENCY_SCOPE_GLOBAL,
+        RECENCY_SCOPE_RESOURCE_TYPE, SORT_RECENT,
     };
     use crate::test_helpers::setup_test_db;
 
@@ -760,6 +765,12 @@ mod tests {
         let owners =
             list_terms_by_scope(&conn, "application", FIELD_OWNER, 100).expect("list owners");
         assert_eq!(owners, vec!["alice".to_string()]);
+    }
+
+    #[test]
+    fn validate_resource_field_should_allow_business_application_owner_only() {
+        assert!(validate_resource_field("test", "business_application", FIELD_OWNER).is_ok());
+        assert!(validate_resource_field("test", "business_application", FIELD_TECH_STACK).is_err());
     }
 
     #[test]

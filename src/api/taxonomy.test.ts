@@ -3,6 +3,7 @@ import { __clearMockHandlers, __setMockHandler } from "@/__mocks__/tauri";
 import {
   listApplicationOwnerTerms,
   listApplicationTechStackTerms,
+  listBusinessApplicationOwnerTerms,
   listHostTagTerms,
   listIpTagTerms,
   listResourceTerms,
@@ -118,6 +119,23 @@ describe("taxonomy API", () => {
 
     const result = await listApplicationOwnerTerms();
     expect(result).toEqual(["alice"]);
+  });
+
+  it("listBusinessApplicationOwnerTerms should use business application owner with resource_type scope", async () => {
+    __setMockHandler("list_taxonomy_terms", (_cmd, args) => {
+      expect(args).toEqual({
+        resourceType: "business_application",
+        fieldKey: "owner",
+        limit: 100,
+        sortBy: "recent",
+        recencyScope: "resource_type",
+        appType: undefined,
+      });
+      return ["alice", "bob"];
+    });
+
+    const result = await listBusinessApplicationOwnerTerms();
+    expect(result).toEqual(["alice", "bob"]);
   });
 
   it("listApplicationTechStackTerms should pass app_type with global scope", async () => {

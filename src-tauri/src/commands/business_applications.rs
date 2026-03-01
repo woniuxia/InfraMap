@@ -1,8 +1,9 @@
 use std::collections::{HashMap, HashSet};
 use tauri::State;
 
+use crate::commands::taxonomy::{build_taxonomy_exists_filter, parse_filter_values, FIELD_OWNER};
 use crate::db::audit::insert_audit_log;
-use crate::db::crud::{build_where_clause, count_query, soft_delete};
+use crate::db::crud::{count_query, soft_delete};
 use crate::db::DbPool;
 use crate::error::{AppError, AppResult};
 use crate::models::application::Application;
@@ -34,14 +35,14 @@ fn row_to_business_application(row: &rusqlite::Row) -> rusqlite::Result<Business
         id: row.get(0)?,
         name: row.get(1)?,
         code: row.get(2)?,
-        owner: row.get(3)?,
-        description: row.get(4)?,
-        env: row.get(5)?,
-        status: row.get(6)?,
-        is_deleted: row.get(7)?,
-        deleted_at: row.get(8)?,
-        created_at: row.get(9)?,
-        updated_at: row.get(10)?,
+        owners: Some(Vec::new()),
+        description: row.get(3)?,
+        env: row.get(4)?,
+        status: row.get(5)?,
+        is_deleted: row.get(6)?,
+        deleted_at: row.get(7)?,
+        created_at: row.get(8)?,
+        updated_at: row.get(9)?,
     })
 }
 
@@ -70,32 +71,12 @@ fn row_to_application_with_business(row: &rusqlite::Row) -> rusqlite::Result<App
 }
 
 const SELECT_BUSINESS_APPLICATION_COLUMNS: &str =
-    "id, name, code, owner, description, env, status, is_deleted, deleted_at, created_at, updated_at";
+    "id, name, code, description, env, status, is_deleted, deleted_at, created_at, updated_at";
 const SELECT_APPLICATION_COLUMNS: &str = "applications.id, applications.name, applications.type, applications.address, \
      applications.port, applications.tech_stack, applications.deploy_mode, applications.env, applications.git_repo, \
      applications.owner, applications.business_application_id, \
      (SELECT ba.name FROM business_applications ba WHERE ba.id = applications.business_application_id AND ba.is_deleted = 0) AS business_application_name, \
      applications.status, applications.description, applications.is_deleted, applications.deleted_at, applications.created_at, applications.updated_at";
-
-fn parse_filter_values(raw: &str) -> Vec<String> {
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return Vec::new();
-    }
-    if trimmed.starts_with('[') {
-        if let Ok(values) = serde_json::from_str::<Vec<String>>(trimmed) {
-            let normalized: Vec<String> = values
-                .into_iter()
-                .map(|v| v.trim().to_string())
-                .filter(|v| !v.is_empty())
-                .collect();
-            if !normalized.is_empty() {
-                return normalized;
-            }
-        }
-    }
-    vec![trimmed.to_string()]
-}
 
 fn build_unassigned_applications_where_clause(
     params: &QueryParams,
@@ -155,6 +136,119 @@ fn build_unassigned_applications_where_clause(
     (format!("WHERE {}", conditions.join(" AND ")), sql_params)
 }
 
+fn build_business_applications_where_clause(
+    params: &QueryParams,
+) -> (String, Vec<Box<dyn rusqlite::types::ToSql>>) {
+    let mut conditions: Vec<String> = vec!["business_applications.is_deleted = 0".to_string()];
+    let mut sql_params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+
+    if let Some(search) = params
+        .search
+        .as_ref()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+    {
+        let like_value = format!("%{}%", search);
+        conditions.push(
+            "(business_applications.name LIKE ? \
+              OR business_applications.code LIKE ? \
+              OR business_applications.description LIKE ?)"
+                .to_string(),
+        );
+        for _ in 0..3 {
+            sql_params.push(Box::new(like_value.clone()));
+        }
+    }
+
+    if let Some(filters) = &params.filters {
+        for (column, key) in [
+            ("business_applications.status", "status"),
+            ("business_applications.env", "env"),
+        ] {
+            if let Some(value) = filters.get(key) {
+                let values = parse_filter_values(value);
+                if values.is_empty() {
+                    continue;
+                }
+                if values.len() == 1 {
+                    conditions.push(format!("{} = ?", column));
+                    sql_params.push(Box::new(values[0].clone()));
+                } else {
+                    let placeholders = vec!["?"; values.len()].join(", ");
+                    conditions.push(format!("{} IN ({})", column, placeholders));
+                    for item in values {
+                        sql_params.push(Box::new(item));
+                    }
+                }
+            }
+        }
+
+        if let Some(owner_filter) = filters.get("owner") {
+            let owners = parse_filter_values(owner_filter);
+            if !owners.is_empty() {
+                if let Some(clause) = build_taxonomy_exists_filter(
+                    "business_application",
+                    FIELD_OWNER,
+                    "business_applications.id",
+                    &owners,
+                ) {
+                    conditions.push(clause);
+                    for owner in owners {
+                        sql_params.push(Box::new(owner));
+                    }
+                }
+            }
+        }
+    }
+
+    (format!("WHERE {}", conditions.join(" AND ")), sql_params)
+}
+
+fn load_business_application_owner_map(
+    conn: &rusqlite::Connection,
+    business_app_ids: &[String],
+) -> Result<HashMap<String, Vec<String>>, rusqlite::Error> {
+    if business_app_ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    let placeholders = vec!["?"; business_app_ids.len()].join(", ");
+    let sql = format!(
+        "SELECT tb.resource_id, tt.display_name
+         FROM taxonomy_bindings tb
+         JOIN taxonomy_terms tt ON tt.id = tb.term_id
+         WHERE tb.resource_type = 'business_application'
+           AND tb.is_deleted = 0
+           AND tt.is_deleted = 0
+           AND tt.field_key = 'owner'
+           AND tb.resource_id IN ({})
+         ORDER BY tt.display_name ASC",
+        placeholders
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let param_refs: Vec<&str> = business_app_ids.iter().map(String::as_str).collect();
+    let rows = stmt.query_map(rusqlite::params_from_iter(param_refs), |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
+
+    let mut map: HashMap<String, Vec<String>> = HashMap::new();
+    for row in rows {
+        let (business_app_id, owner_name) = row?;
+        let owners = map.entry(business_app_id).or_default();
+        if !owners.iter().any(|item| item == &owner_name) {
+            owners.push(owner_name);
+        }
+    }
+    Ok(map)
+}
+
+fn merge_business_application_owners(
+    business: &mut BusinessApplication,
+    owner_map: &HashMap<String, Vec<String>>,
+) {
+    business.owners = Some(owner_map.get(&business.id).cloned().unwrap_or_default());
+}
+
 fn save_business_application_inner(
     command: &str,
     conn: &rusqlite::Connection,
@@ -185,13 +279,12 @@ fn save_business_application_inner(
                 data.id.clone()
             };
             conn.execute(
-                "INSERT INTO business_applications (id, name, code, owner, description, env, status, is_deleted, deleted_at, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0, NULL, ?8, ?8)",
+                "INSERT INTO business_applications (id, name, code, description, env, status, is_deleted, deleted_at, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, NULL, ?7, ?7)",
                 rusqlite::params![
                     id,
                     data.name,
                     data.code,
-                    data.owner,
                     data.description,
                     data.env,
                     data.status,
@@ -212,12 +305,11 @@ fn save_business_application_inner(
         } else {
             conn.execute(
                 "UPDATE business_applications
-                 SET name = ?1, code = ?2, owner = ?3, description = ?4, env = ?5, status = ?6, updated_at = ?7
-                 WHERE id = ?8 AND is_deleted = 0",
+                 SET name = ?1, code = ?2, description = ?3, env = ?4, status = ?5, updated_at = ?6
+                 WHERE id = ?7 AND is_deleted = 0",
                 rusqlite::params![
                     data.name,
                     data.code,
-                    data.owner,
                     data.description,
                     data.env,
                     data.status,
@@ -623,9 +715,7 @@ pub fn list_business_applications(
         .get()
         .map_err(|e| AppError::db_unavailable(command, format!("Pool error: {}", e)))?;
 
-    let search_columns = &["name", "code", "owner", "description"];
-    let filter_columns = &["status", "env"];
-    let (where_clause, sql_params) = build_where_clause(&params, search_columns, filter_columns);
+    let (where_clause, sql_params) = build_business_applications_where_clause(&params);
     let total = count_query(&conn, "business_applications", &where_clause, &sql_params)
         .map_err(|e| AppError::from_db_error(command, "查询业务应用数量", e))?;
 
@@ -648,7 +738,13 @@ pub fn list_business_applications(
     let rows = stmt
         .query_map(param_refs.as_slice(), row_to_business_application)
         .map_err(|e| AppError::from_db_error(command, "读取业务应用列表", e))?;
-    let data: Vec<BusinessApplication> = rows.filter_map(|row| row.ok()).collect();
+    let mut data: Vec<BusinessApplication> = rows.filter_map(|row| row.ok()).collect();
+    let business_ids: Vec<String> = data.iter().map(|item| item.id.clone()).collect();
+    let owner_map = load_business_application_owner_map(&conn, &business_ids)
+        .map_err(|e| AppError::from_db_error(command, "读取业务应用负责人标签", e))?;
+    for item in &mut data {
+        merge_business_application_owners(item, &owner_map);
+    }
 
     Ok(PagedResult {
         data,
@@ -668,8 +764,15 @@ pub fn get_business_application(pool: State<DbPool>, id: String) -> AppResult<Bu
         "SELECT {} FROM business_applications WHERE id = ?1 AND is_deleted = 0",
         SELECT_BUSINESS_APPLICATION_COLUMNS
     );
-    conn.query_row(&sql, rusqlite::params![id], row_to_business_application)
-        .map_err(|e| AppError::not_found(command, "业务应用不存在或已删除。", Some(e.to_string())))
+    let mut business = conn
+        .query_row(&sql, rusqlite::params![id], row_to_business_application)
+        .map_err(|e| {
+            AppError::not_found(command, "业务应用不存在或已删除。", Some(e.to_string()))
+        })?;
+    let owner_map = load_business_application_owner_map(&conn, &[business.id.clone()])
+        .map_err(|e| AppError::from_db_error(command, "读取业务应用负责人标签", e))?;
+    merge_business_application_owners(&mut business, &owner_map);
+    Ok(business)
 }
 
 #[tauri::command]
@@ -893,7 +996,7 @@ fn list_services_by_business_application_inner(
 #[cfg(test)]
 mod tests {
     use super::{
-        attach_services_to_business_application_inner,
+        attach_services_to_business_application_inner, build_business_applications_where_clause,
         detach_service_from_business_application_inner,
         list_services_by_business_application_inner,
         replace_services_by_business_application_inner, save_business_application_inner,
@@ -901,14 +1004,16 @@ mod tests {
     };
     use crate::error::AppErrorCode;
     use crate::models::business_application::BusinessApplication;
+    use crate::models::common::QueryParams;
     use crate::test_helpers::{insert_test_application, setup_test_db};
+    use std::collections::HashMap;
 
     fn make_business_application(name: &str) -> BusinessApplication {
         BusinessApplication {
             id: "".into(),
             name: name.into(),
             code: Some("PAY".into()),
-            owner: Some("alice".into()),
+            owners: Some(vec!["alice".into()]),
             description: None,
             env: Some("prod".into()),
             status: "active".into(),
@@ -921,11 +1026,29 @@ mod tests {
 
     fn insert_business_application(conn: &rusqlite::Connection, id: &str, name: &str) {
         conn.execute(
-            "INSERT INTO business_applications (id, name, code, owner, description, env, status, is_deleted, deleted_at, created_at, updated_at)
-             VALUES (?1, ?2, 'PAY', 'alice', NULL, 'prod', 'active', 0, NULL, datetime('now'), datetime('now'))",
+            "INSERT INTO business_applications (id, name, code, description, env, status, is_deleted, deleted_at, created_at, updated_at)
+             VALUES (?1, ?2, 'PAY', NULL, 'prod', 'active', 0, NULL, datetime('now'), datetime('now'))",
             rusqlite::params![id, name],
         )
         .expect("insert business application");
+    }
+
+    #[test]
+    fn build_business_applications_where_clause_should_use_taxonomy_owner_filter_without_owner_text_search(
+    ) {
+        let mut filters = HashMap::new();
+        filters.insert("owner".to_string(), r#"["alice","bob"]"#.to_string());
+        let params = QueryParams {
+            search: Some("alice".into()),
+            filters: Some(filters),
+            ..Default::default()
+        };
+
+        let (where_clause, sql_params) = build_business_applications_where_clause(&params);
+        assert!(where_clause.contains("taxonomy_bindings"));
+        assert!(where_clause.contains("tt.field_key = 'owner'"));
+        assert!(!where_clause.contains("owner LIKE ?"));
+        assert_eq!(sql_params.len(), 5);
     }
 
     #[test]

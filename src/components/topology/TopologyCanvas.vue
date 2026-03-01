@@ -3,6 +3,7 @@ import { ref, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { Graph } from '@antv/g6'
 import type { GraphData, NodeData, EdgeData, ComboData, IElementEvent } from '@antv/g6'
 import type { TopologyGraph, TopologyNode } from '@/types'
+import { getMiddlewareIconByType } from '@/utils/middlewareCatalog'
 
 interface FilterConfig {
   types: string[]
@@ -84,20 +85,37 @@ function buildGraphTheme(): GraphTheme {
   }
 }
 
-function getNodeType(datum: NodeData): string {
+function getNodeType(datum: NodeData, isLargeGraph: boolean): string {
   const nodeType = datum.data?.node_type as string
-  const category = (datum.data?.extra as Record<string, unknown>)?.category as string
-  if (nodeType === 'middleware') {
-    if (category === 'database') return 'diamond'
-    if (category === 'message_queue') return 'rect'
-    return 'triangle'
-  }
+  if (nodeType === 'middleware') return 'image'
+  if (isLargeGraph) return 'circle'
   if (nodeType === 'nginx') return 'hexagon'
   return 'circle' // application
 }
 
-function getNodeStyle(datum: NodeData): Record<string, unknown> {
+function getNodeStyle(datum: NodeData, isLargeGraph: boolean): Record<string, unknown> {
   const theme = buildGraphTheme()
+  const nodeType = datum.data?.node_type as string
+  const nodeSize = isLargeGraph ? 20 : 32
+  const labelFontSize = isLargeGraph ? 9 : 11
+
+  if (nodeType === 'middleware') {
+    const extra = (datum.data?.extra as Record<string, unknown> | undefined) ?? {}
+    const category = typeof extra.category === 'string' ? extra.category : undefined
+    const middlewareType = typeof extra.type === 'string' ? extra.type : undefined
+    const icon = getMiddlewareIconByType(middlewareType, category)
+    return {
+      img: icon.src,
+      src: icon.src,
+      size: nodeSize,
+      labelText: datum.data?.name as string || datum.id,
+      labelPlacement: 'bottom',
+      labelFontSize,
+      labelFill: theme.labelPrimary,
+      labelOffsetY: 4,
+    }
+  }
+
   const status = datum.data?.status as string
   const fill = theme.statusColors[status] || theme.labelMuted
   return {
@@ -106,10 +124,10 @@ function getNodeStyle(datum: NodeData): Record<string, unknown> {
     lineWidth: 2,
     labelText: datum.data?.name as string || datum.id,
     labelPlacement: 'bottom',
-    labelFontSize: 11,
+    labelFontSize,
     labelFill: theme.labelPrimary,
     labelOffsetY: 4,
-    size: 32,
+    size: nodeSize,
   }
 }
 
@@ -216,10 +234,6 @@ function initGraph() {
         linkDistance: 150,
       }
 
-  // Simplified node style for large graphs
-  const nodeSize = isLargeGraph ? 20 : 32
-  const labelFontSize = isLargeGraph ? 9 : 11
-
   graph = new Graph({
     container,
     width: width || 800,
@@ -229,20 +243,8 @@ function initGraph() {
     data: g6Data,
     layout: layoutConfig,
     node: {
-      type: isLargeGraph ? 'circle' : getNodeType,
-      style: (datum: NodeData) => {
-        const baseStyle = getNodeStyle(datum)
-        if (isLargeGraph) {
-          return {
-            ...baseStyle,
-            size: nodeSize,
-            labelFontSize,
-            shadowBlur: 0,
-            shadowColor: undefined,
-          }
-        }
-        return baseStyle
-      },
+      type: (datum: NodeData) => getNodeType(datum, isLargeGraph),
+      style: (datum: NodeData) => getNodeStyle(datum, isLargeGraph),
       state: {
         highlight: {
           lineWidth: 3,

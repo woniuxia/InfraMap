@@ -77,7 +77,7 @@ export interface BusinessApplication {
   id: string;
   name: string;
   code?: string;
-  owner?: string;
+  owners?: string[];
   description?: string;
   env?: "prod" | "dev" | "test";
   status: "active" | "inactive";
