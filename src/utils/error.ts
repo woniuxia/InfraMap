@@ -1,4 +1,4 @@
-﻿import { InfraError, type InfraErrorCode, type InfraErrorPayload } from "@/types/error";
+import { InfraError, type InfraErrorCode, type InfraErrorPayload } from "@/types/error";
 
 const STRUCTURED_CODES = new Set<InfraErrorCode>([
   "VALIDATION_ERROR",
@@ -39,16 +39,6 @@ function fromLegacyMessage(message: string, command: string): InfraErrorPayload 
     return {
       code: "CONFLICT",
       message: "保存失败，IP 地址与环境组合已存在，请勿重复创建。",
-      details: message,
-      command,
-      retryable: false,
-    };
-  }
-
-  if (message.includes("UNIQUE constraint failed: hosts.ip_address")) {
-    return {
-      code: "CONFLICT",
-      message: "保存失败，IP 地址已存在，请使用其他 IP 地址。",
       details: message,
       command,
       retryable: false,

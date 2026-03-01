@@ -1,7 +1,6 @@
 export interface Host {
   id: string;
   hostname: string;
-  ip_address?: string;
   ip_display?: string;
   env: "prod" | "dev" | "test";
   os_type?: string;
@@ -64,12 +63,38 @@ export interface Application {
   git_repo?: string;
   owner?: string;
   owners?: string[];
+  business_application_id?: string;
+  business_application_name?: string;
   status: "running" | "stopped" | "maintenance";
   description?: string;
   is_deleted: number;
   deleted_at?: string;
   created_at: string;
   updated_at: string;
+}
+
+export interface BusinessApplication {
+  id: string;
+  name: string;
+  code?: string;
+  owner?: string;
+  description?: string;
+  env?: "prod" | "dev" | "test";
+  status: "active" | "inactive";
+  is_deleted: number;
+  deleted_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AttachServicesResult {
+  attached_count: number;
+  skipped_count: number;
+}
+
+export interface BusinessApplicationServices {
+  frontend: Application[];
+  backend: Application[];
 }
 
 export interface Middleware {

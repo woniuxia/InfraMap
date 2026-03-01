@@ -187,22 +187,9 @@ describe("SearchToolbar", () => {
     expect(wrapper.get(".im-search-ops").classes()).not.toContain("im-search-ops--actions-only");
   });
 
-  it("shows active chip row by default", () => {
+  it("does not render active chip row even when filters are active", () => {
     const wrapper = mountToolbar({
       searchText: "prod",
-      fields: [statusField],
-      filters: {
-        status: [],
-      },
-    });
-
-    expect(wrapper.find(".im-search-chip-row").exists()).toBe(true);
-  });
-
-  it("hides active chip row when showChips is false", () => {
-    const wrapper = mountToolbar({
-      searchText: "prod",
-      showChips: false,
       fields: [statusField],
       filters: {
         status: [],

@@ -28,6 +28,12 @@ pub fn setup_test_db() -> Connection {
             rusqlite::params![version],
         )
         .unwrap_or_else(|e| panic!("Failed to record migration v{}: {}", version, e));
+
+        // Run post-migration hooks
+        if *version == 12 {
+            crate::db::schema::migrate_taxonomy_v2(&conn)
+                .unwrap_or_else(|e| panic!("Post-migration hook v{} failed: {}", version, e));
+        }
     }
 
     conn
@@ -36,9 +42,9 @@ pub fn setup_test_db() -> Connection {
 pub fn insert_test_host(conn: &Connection, id: &str, hostname: &str, ip: &str) {
     let now = chrono::Utc::now().to_rfc3339();
     conn.execute(
-        "INSERT INTO hosts (id, hostname, ip_address, status, is_deleted, created_at, updated_at)
-         VALUES (?1, ?2, ?3, 'running', 0, ?4, ?5)",
-        rusqlite::params![id, hostname, ip, now, now],
+        "INSERT INTO hosts (id, hostname, env, status, is_deleted, created_at, updated_at)
+         VALUES (?1, ?2, 'prod', 'running', 0, ?3, ?4)",
+        rusqlite::params![id, hostname, now, now],
     )
     .unwrap_or_else(|e| panic!("insert_test_host failed: {}", e));
 

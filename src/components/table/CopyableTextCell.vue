@@ -1,25 +1,17 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref } from "vue";
-
-type CopyState = "idle" | "copied" | "failed";
+import { computed } from "vue";
+import { CopyDocument } from "@element-plus/icons-vue";
+import { ElMessage } from "element-plus";
 
 const props = withDefaults(
   defineProps<{
     text?: string;
     placeholder?: string;
-    copyLabel?: string;
-    copiedText?: string;
-    retryText?: string;
-    resetDelayMs?: number;
     ariaLabel?: string;
   }>(),
   {
     text: "",
     placeholder: "-",
-    copyLabel: "复制",
-    copiedText: "已复制",
-    retryText: "重试",
-    resetDelayMs: 1200,
     ariaLabel: "复制文本",
   }
 );
@@ -29,31 +21,9 @@ const emit = defineEmits<{
   (e: "copy-failed", error: unknown): void;
 }>();
 
-const copyState = ref<CopyState>("idle");
-let resetTimer: ReturnType<typeof setTimeout> | null = null;
-
 const normalizedText = computed(() => props.text.trim());
 const canCopy = computed(() => normalizedText.value.length > 0);
 const displayText = computed(() => (canCopy.value ? normalizedText.value : props.placeholder));
-const buttonText = computed(() => {
-  if (copyState.value === "copied") return props.copiedText;
-  if (copyState.value === "failed") return props.retryText;
-  return props.copyLabel;
-});
-
-function clearResetTimer() {
-  if (!resetTimer) return;
-  clearTimeout(resetTimer);
-  resetTimer = null;
-}
-
-function scheduleReset() {
-  clearResetTimer();
-  resetTimer = setTimeout(() => {
-    copyState.value = "idle";
-    resetTimer = null;
-  }, props.resetDelayMs);
-}
 
 function fallbackCopyText(value: string): boolean {
   if (typeof document === "undefined" || typeof document.execCommand !== "function") {
@@ -92,19 +62,21 @@ async function handleCopy() {
   if (!canCopy.value) return;
   try {
     await copyText(normalizedText.value);
-    copyState.value = "copied";
     emit("copied", normalizedText.value);
+    ElMessage.success("复制成功");
   } catch (error) {
-    copyState.value = "failed";
     emit("copy-failed", error);
+    ElMessage.error("复制失败，请重试");
   } finally {
-    scheduleReset();
+    if (typeof document !== "undefined") {
+      // Pointer click should not keep focus, otherwise :focus-within keeps action visible.
+      const activeElement = document.activeElement;
+      if (activeElement instanceof HTMLElement) {
+        activeElement.blur();
+      }
+    }
   }
 }
-
-onBeforeUnmount(() => {
-  clearResetTimer();
-});
 </script>
 
 <template>
@@ -119,30 +91,36 @@ onBeforeUnmount(() => {
       :aria-label="ariaLabel"
       @click="handleCopy"
     >
-      {{ buttonText }}
+      <el-icon class="im-copyable-cell__icon" aria-hidden="true">
+        <CopyDocument />
+      </el-icon>
     </el-button>
   </div>
 </template>
 
 <style scoped lang="scss">
 .im-copyable-cell {
-  display: inline-flex;
+  position: relative;
+  display: flex;
+  width: 100%;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  max-width: 100%;
+  min-height: 24px;
 }
 
 .im-copyable-cell__text {
   font-family: var(--im-font-mono);
   color: var(--im-text-regular);
-  word-break: break-all;
+  white-space: nowrap;
 }
 
 .im-copyable-cell__btn {
+  position: absolute;
+  inset-inline-end: 8px;
+  inset-block-start: 50%;
   opacity: 0;
   pointer-events: none;
-  transform: translateY(1px);
+  transform: translateY(calc(-50% + 1px));
   transition:
     opacity var(--im-duration-fast) var(--im-ease-standard),
     transform var(--im-duration-fast) var(--im-ease-standard);
@@ -152,12 +130,16 @@ onBeforeUnmount(() => {
 .im-copyable-cell:focus-within .im-copyable-cell__btn {
   opacity: 1;
   pointer-events: auto;
-  transform: translateY(0);
+  transform: translateY(-50%);
 }
 
 .im-copyable-cell__btn:focus-visible {
   outline: 2px solid var(--im-accent-dim);
   outline-offset: 1px;
   border-radius: var(--im-radius-sm);
+}
+
+.im-copyable-cell__icon {
+  font-size: 14px;
 }
 </style>

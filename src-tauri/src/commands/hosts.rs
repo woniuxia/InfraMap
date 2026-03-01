@@ -1,5 +1,9 @@
 use tauri::State;
 
+use crate::commands::taxonomy::{
+    build_taxonomy_exists_filter, parse_filter_values, parse_json_string_array,
+    save_resource_terms, soft_delete_resource_terms, FIELD_TAGS,
+};
 use crate::db::audit::insert_audit_log;
 use crate::db::crud::soft_delete;
 use crate::db::DbPool;
@@ -7,28 +11,6 @@ use crate::error::{AppError, AppResult};
 use crate::models::common::{PagedResult, QueryParams};
 use crate::models::host::Host;
 use crate::validation::validate_host;
-
-fn parse_filter_values(raw: &str) -> Vec<String> {
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return Vec::new();
-    }
-
-    if trimmed.starts_with('[') {
-        if let Ok(values) = serde_json::from_str::<Vec<String>>(trimmed) {
-            let normalized: Vec<String> = values
-                .into_iter()
-                .map(|value| value.trim().to_string())
-                .filter(|value| !value.is_empty())
-                .collect();
-            if !normalized.is_empty() {
-                return normalized;
-            }
-        }
-    }
-
-    vec![trimmed.to_string()]
-}
 
 fn build_hosts_where_clause(
     params: &QueryParams,
@@ -77,6 +59,20 @@ fn build_hosts_where_clause(
                 }
             }
         }
+
+        if let Some(raw_tags) = filters.get("tags") {
+            let values = parse_filter_values(raw_tags);
+            if !values.is_empty() {
+                if let Some(clause) =
+                    build_taxonomy_exists_filter("host", FIELD_TAGS, "h.id", &values)
+                {
+                    conditions.push(clause);
+                }
+                for value in values {
+                    sql_params.push(Box::new(value));
+                }
+            }
+        }
     }
 
     (format!("WHERE {}", conditions.join(" AND ")), sql_params)
@@ -86,33 +82,26 @@ fn row_to_host(row: &rusqlite::Row) -> rusqlite::Result<Host> {
     Ok(Host {
         id: row.get(0)?,
         hostname: row.get(1)?,
-        ip_address: row.get(2)?,
-        ip_display: row.get(3)?,
-        env: row.get(4)?,
-        os_type: row.get(5)?,
-        cpu_model: row.get(6)?,
-        cpu_cores: row.get(7)?,
-        cpu_threads: row.get(8)?,
-        cpu_freq: row.get(9)?,
-        ram_gb: row.get(10)?,
-        disk_gb: row.get(11)?,
-        status: row.get(12)?,
-        tags: row.get(13)?,
-        description: row.get(14)?,
-        is_deleted: row.get(15)?,
-        deleted_at: row.get(16)?,
-        created_at: row.get(17)?,
-        updated_at: row.get(18)?,
+        ip_display: row.get(2)?,
+        env: row.get(3)?,
+        os_type: row.get(4)?,
+        cpu_model: row.get(5)?,
+        cpu_cores: row.get(6)?,
+        cpu_threads: row.get(7)?,
+        cpu_freq: row.get(8)?,
+        ram_gb: row.get(9)?,
+        disk_gb: row.get(10)?,
+        status: row.get(11)?,
+        tags: row.get(12)?,
+        description: row.get(13)?,
+        is_deleted: row.get(14)?,
+        deleted_at: row.get(15)?,
+        created_at: row.get(16)?,
+        updated_at: row.get(17)?,
     })
 }
 
 const SELECT_COLUMNS: &str = "h.id, h.hostname,
-     (SELECT ia.ip_address
-      FROM host_ip_bindings hb
-      JOIN ip_addresses ia ON ia.id = hb.ip_id
-      WHERE hb.host_id = h.id AND hb.is_deleted = 0 AND ia.is_deleted = 0
-      ORDER BY ia.created_at ASC
-      LIMIT 1) AS ip_address,
      NULLIF((
       SELECT GROUP_CONCAT(ia.ip_address, ', ')
       FROM host_ip_bindings hb
@@ -195,7 +184,6 @@ pub fn save_host(pool: State<DbPool>, data: Host) -> AppResult<()> {
         .get()
         .map_err(|e| AppError::db_unavailable(command, format!("Pool error: {}", e)))?;
     let now = chrono::Utc::now().to_rfc3339();
-    let ip_address_for_legacy = data.ip_address.clone().unwrap_or_default();
 
     let is_new = data.id.is_empty() || {
         let count: i64 = conn
@@ -219,39 +207,12 @@ pub fn save_host(pool: State<DbPool>, data: Host) -> AppResult<()> {
                 data.id.clone()
             };
             conn.execute(
-                "INSERT INTO hosts (id, hostname, ip_address, env, os_type, cpu_model, cpu_cores, cpu_threads, cpu_freq,
+                "INSERT INTO hosts (id, hostname, env, os_type, cpu_model, cpu_cores, cpu_threads, cpu_freq,
                                     ram_gb, disk_gb, status, tags, description, is_deleted, deleted_at, created_at, updated_at)
-                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,0,NULL,?15,?15)",
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,0,NULL,?14,?14)",
                 rusqlite::params![
                     id,
                     data.hostname,
-                    ip_address_for_legacy,
-                    data.env,
-                    data.os_type,
-                    data.cpu_model,
-                    data.cpu_cores,
-                    data.cpu_threads,
-                    data.cpu_freq,
-                    data.ram_gb,
-                    data.disk_gb,
-                    data.status,
-                    data.tags,
-                    data.description,
-                    now
-                ],
-            )
-            .map_err(|e| AppError::from_db_error(command, "创建主机", e))?;
-            insert_audit_log(&conn, "create", "host", &id, Some(&data.hostname), None)
-                .map_err(|e| AppError::from_db_error(command, "写入审计日志", e))?;
-        } else {
-            conn.execute(
-                "UPDATE hosts SET hostname=?1, ip_address=?2, env=?3, os_type=?4, cpu_model=?5, cpu_cores=?6,
-                                  cpu_threads=?7, cpu_freq=?8, ram_gb=?9, disk_gb=?10,
-                                  status=?11, tags=?12, description=?13, updated_at=?14
-                 WHERE id=?15 AND is_deleted=0",
-                rusqlite::params![
-                    data.hostname,
-                    ip_address_for_legacy,
                     data.env,
                     data.os_type,
                     data.cpu_model,
@@ -264,7 +225,35 @@ pub fn save_host(pool: State<DbPool>, data: Host) -> AppResult<()> {
                     data.tags,
                     data.description,
                     now,
-                    data.id
+                ],
+            )
+            .map_err(|e| AppError::from_db_error(command, "创建主机", e))?;
+            insert_audit_log(&conn, "create", "host", &id, Some(&data.hostname), None)
+                .map_err(|e| AppError::from_db_error(command, "写入审计日志", e))?;
+            let tag_values = parse_json_string_array(data.tags.as_deref());
+            save_resource_terms(&conn, "host", &id, FIELD_TAGS, &tag_values, &now)
+                .map_err(|e| AppError::from_db_error(command, "同步标签词条", e))?;
+        } else {
+            conn.execute(
+                "UPDATE hosts SET hostname=?1, env=?2, os_type=?3, cpu_model=?4, cpu_cores=?5,
+                                  cpu_threads=?6, cpu_freq=?7, ram_gb=?8, disk_gb=?9,
+                                  status=?10, tags=?11, description=?12, updated_at=?13
+                 WHERE id=?14 AND is_deleted=0",
+                rusqlite::params![
+                    data.hostname,
+                    data.env,
+                    data.os_type,
+                    data.cpu_model,
+                    data.cpu_cores,
+                    data.cpu_threads,
+                    data.cpu_freq,
+                    data.ram_gb,
+                    data.disk_gb,
+                    data.status,
+                    data.tags,
+                    data.description,
+                    now,
+                    data.id,
                 ],
             )
             .map_err(|e| AppError::from_db_error(command, "更新主机", e))?;
@@ -277,6 +266,9 @@ pub fn save_host(pool: State<DbPool>, data: Host) -> AppResult<()> {
                 None,
             )
             .map_err(|e| AppError::from_db_error(command, "写入审计日志", e))?;
+            let tag_values = parse_json_string_array(data.tags.as_deref());
+            save_resource_terms(&conn, "host", &data.id, FIELD_TAGS, &tag_values, &now)
+                .map_err(|e| AppError::from_db_error(command, "同步标签词条", e))?;
         }
         Ok(())
     })();
@@ -291,6 +283,45 @@ pub fn save_host(pool: State<DbPool>, data: Host) -> AppResult<()> {
             let _ = conn.execute_batch("ROLLBACK;");
             Err(error)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_hosts_where_clause;
+    use crate::models::common::QueryParams;
+    use std::collections::HashMap;
+
+    #[test]
+    fn build_hosts_where_clause_should_support_tag_filter() {
+        let mut filters = HashMap::new();
+        filters.insert("tags".to_string(), r#"["core","edge"]"#.to_string());
+        let params = QueryParams {
+            filters: Some(filters),
+            ..Default::default()
+        };
+
+        let (where_clause, sql_params) = build_hosts_where_clause(&params);
+        assert!(where_clause.contains("taxonomy_bindings"));
+        assert!(where_clause.contains("tt.field_key = 'tags'"));
+        assert!(where_clause.contains("tt.display_name IN (?, ?)"));
+        assert_eq!(sql_params.len(), 2);
+    }
+
+    #[test]
+    fn build_hosts_where_clause_should_combine_status_and_tags() {
+        let mut filters = HashMap::new();
+        filters.insert("status".to_string(), "running".to_string());
+        filters.insert("tags".to_string(), "core".to_string());
+        let params = QueryParams {
+            filters: Some(filters),
+            ..Default::default()
+        };
+
+        let (where_clause, sql_params) = build_hosts_where_clause(&params);
+        assert!(where_clause.contains("h.status = ?"));
+        assert!(where_clause.contains("taxonomy_bindings"));
+        assert_eq!(sql_params.len(), 2);
     }
 }
 
@@ -315,6 +346,9 @@ pub fn soft_delete_host(pool: State<DbPool>, id: String) -> AppResult<()> {
     match soft_delete(&conn, "hosts", &id) {
         Ok(()) => match insert_audit_log(&conn, "delete", "host", &id, name.as_deref(), None) {
             Ok(()) => {
+                let now = chrono::Utc::now().to_rfc3339();
+                soft_delete_resource_terms(&conn, "host", &id, &now)
+                    .map_err(|e| AppError::from_db_error(command, "删除标签绑定", e))?;
                 conn.execute_batch("COMMIT;")
                     .map_err(|e| AppError::from_db_error(command, "提交事务", e))?;
                 Ok(())

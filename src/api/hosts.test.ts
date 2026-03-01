@@ -1,9 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { __clearMockHandlers, __setMockHandler } from "@/__mocks__/tauri";
-import {
-  listApplications,
-  saveApplication,
-} from "@/api/applications";
+import { listHosts, saveHost } from "@/api/hosts";
 
 vi.mock("element-plus", () => ({
   ElMessage: {
@@ -14,59 +11,58 @@ vi.mock("element-plus", () => ({
   },
 }));
 
-describe("applications API", () => {
+describe("hosts API", () => {
   beforeEach(() => {
     __clearMockHandlers();
     vi.clearAllMocks();
   });
 
-  it("listApplications should pass params as-is", async () => {
-    __setMockHandler("list_applications", (_cmd, args) => {
+  it("listHosts should pass tags filter as-is", async () => {
+    __setMockHandler("list_hosts", (_cmd, args) => {
       expect(args).toEqual({
         params: {
           page: 1,
           page_size: 20,
-          search: "alice",
           filters: {
             env: "prod",
+            tags: "[\"core\",\"edge\"]",
           },
         },
       });
       return { data: [], total: 0, page: 1, page_size: 20 };
     });
 
-    const result = await listApplications({
+    const result = await listHosts({
       page: 1,
       page_size: 20,
-      search: "alice",
       filters: {
         env: "prod",
+        tags: "[\"core\",\"edge\"]",
       },
     });
     expect(result.total).toBe(0);
   });
 
-  it("saveApplication should pass owners array", async () => {
-    __setMockHandler("save_application", (_cmd, args) => {
+  it("saveHost should invoke save_host", async () => {
+    __setMockHandler("save_host", (_cmd, args) => {
       expect(args).toEqual({
         data: {
-          name: "payment-api",
-          type: "backend",
+          id: "host-1",
+          hostname: "web-prod-01",
           env: "prod",
           status: "running",
-          owners: ["alice", "bob"],
+          tags: "[\"core\"]",
         },
       });
-      return "app-123";
+      return undefined;
     });
 
-    const result = await saveApplication({
-      name: "payment-api",
-      type: "backend",
+    await saveHost({
+      id: "host-1",
+      hostname: "web-prod-01",
       env: "prod",
       status: "running",
-      owners: ["alice", "bob"],
+      tags: "[\"core\"]",
     });
-    expect(result).toBe("app-123");
   });
 });

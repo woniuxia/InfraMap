@@ -28,10 +28,3 @@ export interface SearchToolbarQueryPayload {
   search: string;
   filters: Record<string, string>;
 }
-
-export interface SearchToolbarChip {
-  id: string;
-  key: string;
-  label: string;
-  value: string;
-}

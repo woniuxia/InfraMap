@@ -1,5 +1,9 @@
 use tauri::State;
 
+use crate::commands::taxonomy::{
+    build_taxonomy_exists_filter, parse_filter_values, parse_json_string_array,
+    save_resource_terms, soft_delete_resource_terms, FIELD_TAGS,
+};
 use crate::db::audit::insert_audit_log;
 use crate::db::crud::{build_where_clause, count_query, soft_delete};
 use crate::db::DbPool;
@@ -133,6 +137,10 @@ fn save_ip_address_inner(
                 None,
             )
             .map_err(|e| AppError::from_db_error(command, "写入审计日志", e))?;
+
+            let tag_values = parse_json_string_array(data.tags.as_deref());
+            save_resource_terms(conn, "ip_address", &id, FIELD_TAGS, &tag_values, &now)
+                .map_err(|e| AppError::from_db_error(command, "同步标签词条", e))?;
         } else {
             conn.execute(
                 "UPDATE ip_addresses SET ip_address=?1, env=?2, is_vip=?3, real_ips=?4, tags=?5, description=?6, updated_at=?7
@@ -159,6 +167,10 @@ fn save_ip_address_inner(
                 None,
             )
             .map_err(|e| AppError::from_db_error(command, "写入审计日志", e))?;
+
+            let tag_values = parse_json_string_array(data.tags.as_deref());
+            save_resource_terms(conn, "ip_address", &data.id, FIELD_TAGS, &tag_values, &now)
+                .map_err(|e| AppError::from_db_error(command, "同步标签词条", e))?;
         }
 
         Ok(())
@@ -237,7 +249,26 @@ pub fn list_ip_addresses(
 
     let search_columns = &["ip_address", "description", "real_ips", "tags"];
     let filter_columns = &["env", "is_vip"];
-    let (where_clause, sql_params) = build_where_clause(&params, search_columns, filter_columns);
+    let (mut where_clause, mut sql_params) =
+        build_where_clause(&params, search_columns, filter_columns);
+    if let Some(filters) = params.filters.as_ref() {
+        if let Some(raw_tags) = filters.get("tags") {
+            let tag_values = parse_filter_values(raw_tags);
+            if !tag_values.is_empty() {
+                if let Some(clause) = build_taxonomy_exists_filter(
+                    "ip_address",
+                    FIELD_TAGS,
+                    "ip_addresses.id",
+                    &tag_values,
+                ) {
+                    where_clause = format!("{} AND {}", where_clause, clause);
+                }
+                for value in tag_values {
+                    sql_params.push(Box::new(value));
+                }
+            }
+        }
+    }
     let total = count_query(&conn, "ip_addresses", &where_clause, &sql_params)
         .map_err(|e| AppError::from_db_error(command, "查询IP资源数量", e))?;
 
@@ -342,6 +373,9 @@ fn soft_delete_ip_address_inner(
         Ok(()) => match insert_audit_log(&conn, "delete", "ip_address", &id, name.as_deref(), None)
         {
             Ok(()) => {
+                let now = chrono::Utc::now().to_rfc3339();
+                soft_delete_resource_terms(&conn, "ip_address", &id, &now)
+                    .map_err(|e| AppError::from_db_error(command, "删除标签绑定", e))?;
                 conn.execute_batch("COMMIT;")
                     .map_err(|e| AppError::from_db_error(command, "提交事务", e))?;
                 Ok(())
@@ -370,6 +404,7 @@ pub fn soft_delete_ip_address(pool: State<DbPool>, id: String) -> AppResult<()> 
 #[cfg(test)]
 mod tests {
     use super::{expand_ipv4_range, save_ip_address_inner, BatchCreateIpParams};
+    use crate::commands::taxonomy::{list_terms_by_scope, FIELD_TAGS};
     use crate::error::AppErrorCode;
     use crate::models::ip_address::IpAddress;
     use crate::test_helpers::{insert_test_host, setup_test_db};
@@ -470,5 +505,21 @@ mod tests {
             )
             .expect("query inserted rows");
         assert_eq!(count, 3);
+
+        let tags =
+            list_terms_by_scope(&conn, "ip_address", FIELD_TAGS, 100).expect("query taxonomy tags");
+        assert_eq!(tags, vec!["batch".to_string(), "generated".to_string()]);
+    }
+
+    #[test]
+    fn save_ip_address_should_sync_taxonomy_tags() {
+        let conn = setup_test_db();
+        let mut ip = make_test_ip();
+        ip.tags = Some(r#"["core","gateway"]"#.into());
+        save_ip_address_inner("test", &conn, ip).expect("save ip with tags");
+
+        let tags =
+            list_terms_by_scope(&conn, "ip_address", FIELD_TAGS, 100).expect("query taxonomy tags");
+        assert_eq!(tags, vec!["core".to_string(), "gateway".to_string()]);
     }
 }

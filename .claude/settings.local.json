@@ -20,7 +20,8 @@
       "Bash(cd \"E:/Projects/InfraMap\" && npx vite build 2>&1)",
       "Bash(cd E:/Projects/InfraMap && npx vue-tsc --noEmit 2>&1)",
       "Bash(cd E:/Projects/InfraMap/src-tauri && cargo test 2>&1)",
-      "Bash(cd E:/Projects/InfraMap && npx vitest run 2>&1)"
+      "Bash(cd E:/Projects/InfraMap && npx vitest run 2>&1)",
+      "Bash(cd /e/Projects/InfraMap/src-tauri && cargo test 2>&1)"
     ]
   }
 }

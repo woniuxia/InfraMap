@@ -1,4 +1,4 @@
-﻿import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { __setMockHandler, __clearMockHandlers } from "@/__mocks__/tauri";
 import { tauriInvoke } from "@/utils/invoke";
 import { presentInfraError } from "@/composables/useErrorPresenter";
@@ -60,14 +60,14 @@ describe("tauriInvoke", () => {
     expect(presentInfraError).not.toHaveBeenCalled();
   });
 
-  it("maps legacy unique-constraint string errors", async () => {
+  it("maps generic unique-constraint string errors", async () => {
     __setMockHandler("save_host", () => {
-      throw "Update failed: UNIQUE constraint failed: hosts.ip_address";
+      throw "Update failed: UNIQUE constraint failed: hosts.hostname";
     });
 
     await expect(tauriInvoke("save_host")).rejects.toMatchObject({
       code: "CONFLICT",
-      message: "保存失败，IP 地址已存在，请使用其他 IP 地址。",
+      message: "保存失败，存在重复数据，请检查后重试。",
     });
   });
 });

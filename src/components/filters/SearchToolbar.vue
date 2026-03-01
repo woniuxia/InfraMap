@@ -10,7 +10,6 @@ import type {
 import {
   buildSearchToolbarQuery,
   createEmptyFilters,
-  getActiveFilterChips,
   isEmptyFilterValue,
 } from "@/components/filters/searchToolbar.utils";
 
@@ -22,8 +21,6 @@ interface Props {
   searchPlaceholder?: string;
   searchWidth?: SearchFieldWidth;
   debounceMs?: number;
-  maxChipValues?: number;
-  showChips?: boolean;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -31,8 +28,6 @@ const props = withDefaults(defineProps<Props>(), {
   searchPlaceholder: "搜索...",
   searchWidth: "lg",
   debounceMs: 400,
-  maxChipValues: 2,
-  showChips: true,
 });
 
 const emit = defineEmits<{
@@ -63,10 +58,12 @@ const advancedToggleText = computed(() => {
   return "高级筛选";
 });
 
-const activeChips = computed(() =>
-  getActiveFilterChips(props.searchText, props.searchLabel, props.fields, props.filters, props.maxChipValues)
-);
-const hasActiveFilters = computed(() => activeChips.value.length > 0);
+const hasActiveFilters = computed(() => {
+  if (props.searchText.trim().length > 0) {
+    return true;
+  }
+  return props.fields.some((field) => !isEmptyFilterValue(field, props.filters[field.key]));
+});
 
 function emitQuery(searchText: string, filters: SearchToolbarFilters) {
   emit("query", buildSearchToolbarQuery(searchText, props.fields, filters));
@@ -187,22 +184,6 @@ function selectFieldValue(field: SearchFieldConfig): string | string[] {
   return typeof value === "string" ? value : "";
 }
 
-function removeChip(key: string) {
-  clearQueryTimer();
-  if (key === "__search__") {
-    emit("update:searchText", "");
-    emitQuery("", props.filters);
-    return;
-  }
-
-  const field = props.fields.find((item) => item.key === key);
-  if (!field) return;
-  const emptyValue: SearchFieldValue = field.type === "multi-select" ? [] : "";
-  const nextFilters = buildNextFilters(field.key, emptyValue);
-  emit("update:filters", nextFilters);
-  emitQuery(props.searchText, nextFilters);
-}
-
 onBeforeUnmount(() => {
   clearQueryTimer();
 });
@@ -308,20 +289,6 @@ onBeforeUnmount(() => {
       </div>
     </el-collapse-transition>
 
-    <div v-if="showChips && activeChips.length > 0" class="im-search-chip-row">
-      <el-tag
-        v-for="chip in activeChips"
-        :key="chip.id"
-        closable
-        type="info"
-        class="im-search-chip"
-        @close="removeChip(chip.key)"
-      >
-        <span class="im-search-chip-label">{{ chip.label }}:</span>
-        <span class="im-search-chip-value">{{ chip.value }}</span>
-      </el-tag>
-      <el-button link type="primary" class="im-search-clear-all" @click="resetAll">清空全部</el-button>
-    </div>
   </div>
 </template>
 
@@ -383,30 +350,6 @@ onBeforeUnmount(() => {
 .im-search-advanced {
   border-top: 1px solid var(--im-border-subtle);
   padding-top: 12px;
-}
-
-.im-search-chip-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-}
-
-.im-search-chip {
-  max-width: 100%;
-}
-
-.im-search-chip-label {
-  font-weight: 600;
-  margin-right: 4px;
-}
-
-.im-search-chip-value {
-  font-family: var(--im-font-mono);
-}
-
-.im-search-clear-all {
-  padding: 0;
 }
 
 @media (max-width: 1279px) {

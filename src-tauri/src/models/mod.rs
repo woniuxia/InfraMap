@@ -1,5 +1,6 @@
 pub mod application;
 pub mod audit_log;
+pub mod business_application;
 pub mod common;
 pub mod dashboard;
 pub mod dependency;

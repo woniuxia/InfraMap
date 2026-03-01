@@ -135,14 +135,6 @@ impl AppError {
             );
         }
 
-        if raw.contains("UNIQUE constraint failed: hosts.ip_address") {
-            return Self::conflict(
-                command,
-                "保存失败，IP 地址已存在，请使用其他 IP 地址。",
-                Some(raw),
-            );
-        }
-
         if raw.contains("UNIQUE constraint failed") {
             return Self::conflict(command, "保存失败，存在重复数据，请检查后重试。", Some(raw));
         }
@@ -200,10 +192,10 @@ mod tests {
         let err = AppError::from_db_error(
             "save_host",
             "保存主机",
-            "UNIQUE constraint failed: hosts.ip_address",
+            "UNIQUE constraint failed: hosts.hostname",
         );
         assert_eq!(err.code, AppErrorCode::Conflict);
-        assert_eq!(err.message, "保存失败，IP 地址已存在，请使用其他 IP 地址。");
+        assert_eq!(err.message, "保存失败，存在重复数据，请检查后重试。");
     }
 
     #[test]

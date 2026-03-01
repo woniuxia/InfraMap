@@ -4,13 +4,12 @@ import { ElMessage } from "element-plus";
 import type { Application, Dependency, Middleware, NginxConfig, RelationDirection } from "@/types";
 import type { SearchFieldConfig, SearchToolbarQueryPayload } from "@/types/searchToolbar";
 import {
-  listApplicationOwnerCandidates,
   listApplications,
-  listTopApplicationTechStacks,
   saveApplication,
   softDeleteApplication,
 } from "@/api/applications";
-import type { ApplicationTechStackSide } from "@/api/applications";
+import { listTaxonomyTerms } from "@/api/taxonomy";
+import type { TaxonomyAppType } from "@/api/taxonomy";
 import { saveDependenciesBatch } from "@/api/dependencies";
 import { listMiddlewares } from "@/api/middlewares";
 import { listNginxConfigs } from "@/api/nginx-configs";
@@ -177,7 +176,7 @@ function ownersForRow(row: Application) {
   return normalizeOwners(row.owners, row.owner);
 }
 
-function resolveTechStackSide(type: Application["type"] | undefined): ApplicationTechStackSide {
+function resolveTechStackSide(type: Application["type"] | undefined): TaxonomyAppType {
   return type === "frontend" ? "frontend" : "backend";
 }
 
@@ -298,7 +297,14 @@ function handleTypeChange(type: Application["type"] | undefined) {
 
 async function fetchTopTechStackOptions(type: Application["type"] | undefined) {
   try {
-    topTechStackOptions.value = await listTopApplicationTechStacks(10, resolveTechStackSide(type));
+    topTechStackOptions.value = await listTaxonomyTerms({
+      resource_type: "application",
+      field_key: "tech_stack",
+      limit: 10,
+      sort_by: "recent",
+      recency_scope: "global",
+      app_type: resolveTechStackSide(type),
+    });
   } catch {
     // error shown by tauriInvoke
   }
@@ -306,7 +312,13 @@ async function fetchTopTechStackOptions(type: Application["type"] | undefined) {
 
 async function fetchOwnerOptions() {
   try {
-    ownerOptions.value = await listApplicationOwnerCandidates(100);
+    ownerOptions.value = await listTaxonomyTerms({
+      resource_type: "application",
+      field_key: "owner",
+      limit: 100,
+      sort_by: "recent",
+      recency_scope: "global",
+    });
   } catch {
     // error shown by tauriInvoke
   }
@@ -440,6 +452,9 @@ onMounted(() => {
           <span v-else>-</span>
         </template>
       </el-table-column>
+      <el-table-column prop="business_application_name" label="所属业务应用" min-width="150" align="center">
+        <template #default="{ row }">{{ row.business_application_name || "-" }}</template>
+      </el-table-column>
       <el-table-column prop="status" label="状态" width="100" align="center">
         <template #default="{ row }">
           <el-tag :type="statusTagType(row.status)" size="small">{{ statusLabel(row.status) }}</el-tag>
@@ -540,6 +555,13 @@ onMounted(() => {
           >
             <el-option v-for="item in ownerSuggestions" :key="item" :label="item" :value="item" />
           </el-select>
+        </el-form-item>
+        <el-form-item label="所属业务应用">
+          <el-input
+            :model-value="editingApp.business_application_name || '-'"
+            disabled
+            placeholder="请在“业务应用”页面维护"
+          />
         </el-form-item>
 
         <el-divider content-position="left">调用关系</el-divider>

@@ -233,8 +233,8 @@ mod tests {
 
     fn seed_test_host_without_binding(conn: &rusqlite::Connection, id: &str, hostname: &str) {
         conn.execute(
-            "INSERT INTO hosts (id, hostname, ip_address, env, status, is_deleted, created_at, updated_at)
-             VALUES (?1, ?2, '', 'prod', 'running', 0, datetime('now'), datetime('now'))",
+            "INSERT INTO hosts (id, hostname, env, status, is_deleted, created_at, updated_at)
+             VALUES (?1, ?2, 'prod', 'running', 0, datetime('now'), datetime('now'))",
             rusqlite::params![id, hostname],
         )
         .expect("seed host");

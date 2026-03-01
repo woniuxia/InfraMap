@@ -1,6 +1,7 @@
 use std::net::Ipv4Addr;
 
 use crate::models::application::Application;
+use crate::models::business_application::BusinessApplication;
 use crate::models::dependency::Dependency;
 use crate::models::deployment::Deployment;
 use crate::models::host::Host;
@@ -174,6 +175,28 @@ pub fn validate_application(app: &Application) -> Result<(), String> {
         }
         for owner in owners {
             validate_string_length(owner, 1, 50, "owner")?;
+        }
+    }
+    Ok(())
+}
+
+pub fn validate_business_application(app: &BusinessApplication) -> Result<(), String> {
+    validate_required(&app.name, "name")?;
+    validate_string_length(&app.name, 1, 200, "name")?;
+    validate_enum(&app.status, &["active", "inactive"], "status")?;
+    if let Some(env) = app.env.as_deref() {
+        if !env.trim().is_empty() {
+            validate_enum(env, &["prod", "dev", "test"], "env")?;
+        }
+    }
+    if let Some(code) = app.code.as_deref() {
+        if !code.trim().is_empty() {
+            validate_string_length(code.trim(), 1, 64, "code")?;
+        }
+    }
+    if let Some(owner) = app.owner.as_deref() {
+        if !owner.trim().is_empty() {
+            validate_string_length(owner.trim(), 1, 50, "owner")?;
         }
     }
     Ok(())
@@ -372,7 +395,6 @@ mod tests {
         Host {
             id: "h1".into(),
             hostname: "server1".into(),
-            ip_address: Some("192.168.1.1".into()),
             ip_display: Some("192.168.1.1".into()),
             env: "prod".into(),
             os_type: None,
@@ -398,9 +420,8 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_host_without_ip_is_allowed() {
+    fn test_validate_host_without_ip_display_is_allowed() {
         let mut host = make_test_host();
-        host.ip_address = None;
         host.ip_display = None;
         assert!(validate_host(&host).is_ok());
     }
@@ -457,6 +478,8 @@ mod tests {
             git_repo: None,
             owner: None,
             owners: None,
+            business_application_id: None,
+            business_application_name: None,
             status: "running".into(),
             description: None,
             is_deleted: 0,
@@ -483,6 +506,34 @@ mod tests {
         let mut app = make_test_app();
         app.env = "staging".into();
         assert!(validate_application(&app).is_err());
+    }
+
+    fn make_test_business_application() -> BusinessApplication {
+        BusinessApplication {
+            id: "ba1".into(),
+            name: "支付中心".into(),
+            code: Some("PAY".into()),
+            owner: Some("alice".into()),
+            description: None,
+            env: Some("prod".into()),
+            status: "active".into(),
+            is_deleted: 0,
+            deleted_at: None,
+            created_at: "2024-01-01T00:00:00Z".into(),
+            updated_at: "2024-01-01T00:00:00Z".into(),
+        }
+    }
+
+    #[test]
+    fn test_validate_business_application_valid() {
+        assert!(validate_business_application(&make_test_business_application()).is_ok());
+    }
+
+    #[test]
+    fn test_validate_business_application_invalid_status() {
+        let mut app = make_test_business_application();
+        app.status = "paused".into();
+        assert!(validate_business_application(&app).is_err());
     }
 
     // --- validate_middleware ---

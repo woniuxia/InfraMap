@@ -283,17 +283,574 @@ pub const MIGRATIONS: &[(i32, &str)] = &[
         ALTER TABLE ip_addresses ADD COLUMN tags TEXT;
     "#,
     ),
+    (
+        9,
+        r#"
+        CREATE TABLE IF NOT EXISTS business_applications (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            code TEXT,
+            owner TEXT,
+            description TEXT,
+            env TEXT,
+            status TEXT NOT NULL DEFAULT 'active',
+            is_deleted INTEGER NOT NULL DEFAULT 0,
+            deleted_at TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS uk_business_applications_name_env
+        ON business_applications(name, env) WHERE is_deleted = 0;
+        CREATE INDEX IF NOT EXISTS idx_business_applications_status
+        ON business_applications(status) WHERE is_deleted = 0;
+
+        ALTER TABLE applications ADD COLUMN business_application_id TEXT;
+        CREATE INDEX IF NOT EXISTS idx_applications_business_application_id
+        ON applications(business_application_id) WHERE is_deleted = 0;
+    "#,
+    ),
+    (
+        10,
+        r#"
+        CREATE TABLE IF NOT EXISTS taxonomy_terms (
+            id TEXT PRIMARY KEY,
+            resource_type TEXT NOT NULL,
+            field_key TEXT NOT NULL,
+            value TEXT NOT NULL,
+            display_name TEXT NOT NULL,
+            normalized_value TEXT NOT NULL,
+            is_deleted INTEGER NOT NULL DEFAULT 0,
+            deleted_at TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS taxonomy_bindings (
+            id TEXT PRIMARY KEY,
+            term_id TEXT NOT NULL,
+            resource_type TEXT NOT NULL,
+            resource_id TEXT NOT NULL,
+            field_key TEXT NOT NULL,
+            is_deleted INTEGER NOT NULL DEFAULT 0,
+            deleted_at TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS uk_taxonomy_terms_scope_normalized
+        ON taxonomy_terms(resource_type, field_key, normalized_value) WHERE is_deleted = 0;
+
+        CREATE INDEX IF NOT EXISTS idx_taxonomy_terms_scope
+        ON taxonomy_terms(resource_type, field_key) WHERE is_deleted = 0;
+
+        CREATE INDEX IF NOT EXISTS idx_taxonomy_terms_display_name
+        ON taxonomy_terms(display_name) WHERE is_deleted = 0;
+
+        CREATE UNIQUE INDEX IF NOT EXISTS uk_taxonomy_bindings_term_resource_field
+        ON taxonomy_bindings(term_id, resource_type, resource_id, field_key) WHERE is_deleted = 0;
+
+        CREATE INDEX IF NOT EXISTS idx_taxonomy_bindings_resource
+        ON taxonomy_bindings(resource_type, resource_id, field_key) WHERE is_deleted = 0;
+
+        CREATE INDEX IF NOT EXISTS idx_taxonomy_bindings_term
+        ON taxonomy_bindings(term_id) WHERE is_deleted = 0;
+    "#,
+    ),
+    (
+        11,
+        r#"
+        CREATE TABLE IF NOT EXISTS taxonomy_term_stats (
+            term_id TEXT PRIMARY KEY,
+            resource_type TEXT NOT NULL,
+            field_key TEXT NOT NULL,
+            usage_count INTEGER NOT NULL DEFAULT 0,
+            last_used_at TEXT,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_taxonomy_term_stats_scope_recent
+        ON taxonomy_term_stats(resource_type, field_key, last_used_at DESC);
+
+        CREATE INDEX IF NOT EXISTS idx_taxonomy_term_stats_field_recent
+        ON taxonomy_term_stats(field_key, last_used_at DESC);
+
+        CREATE INDEX IF NOT EXISTS idx_taxonomy_term_stats_scope_count
+        ON taxonomy_term_stats(resource_type, field_key, usage_count DESC);
+    "#,
+    ),
+    (
+        12,
+        "-- taxonomy v2 migration handled by post-migration hook",
+    ),
+    (
+        13,
+        r#"
+        DROP INDEX IF EXISTS uk_hosts_ip;
+        ALTER TABLE hosts DROP COLUMN ip_address;
+    "#,
+    ),
 ];
+
+const TAXONOMY_TERMS_REQUIRED_COLUMNS: [&str; 8] = [
+    "id",
+    "field_key",
+    "normalized_value",
+    "display_name",
+    "is_deleted",
+    "deleted_at",
+    "created_at",
+    "updated_at",
+];
+
+const TAXONOMY_BINDINGS_REQUIRED_COLUMNS: [&str; 8] = [
+    "id",
+    "term_id",
+    "resource_type",
+    "resource_id",
+    "is_deleted",
+    "deleted_at",
+    "created_at",
+    "updated_at",
+];
+
+const TAXONOMY_STATS_REQUIRED_COLUMNS: [&str; 5] = [
+    "term_id",
+    "resource_type",
+    "usage_count",
+    "last_used_at",
+    "updated_at",
+];
+
+const TAXONOMY_TERMS_LEGACY_COLUMNS: [&str; 2] = ["resource_type", "value"];
+const TAXONOMY_BINDINGS_LEGACY_COLUMNS: [&str; 1] = ["field_key"];
+const TAXONOMY_STATS_LEGACY_COLUMNS: [&str; 1] = ["field_key"];
+
+const TAXONOMY_REQUIRED_INDEXES: [&str; 5] = [
+    "uk_taxonomy_terms_field_normalized",
+    "uk_taxonomy_bindings_term_resource",
+    "idx_taxonomy_bindings_resource",
+    "idx_taxonomy_bindings_term",
+    "idx_taxonomy_term_stats_recent",
+];
+
+fn table_columns(
+    conn: &rusqlite::Connection,
+    table_name: &str,
+) -> Result<std::collections::HashSet<String>, rusqlite::Error> {
+    let mut stmt = conn.prepare(&format!("PRAGMA table_info({})", table_name))?;
+    let rows = stmt.query_map([], |row| row.get::<_, String>(1))?;
+    let mut columns = std::collections::HashSet::new();
+    for row in rows {
+        columns.insert(row?);
+    }
+    Ok(columns)
+}
+
+fn has_required_columns(columns: &std::collections::HashSet<String>, required: &[&str]) -> bool {
+    required.iter().all(|column| columns.contains(*column))
+}
+
+fn has_any_columns(columns: &std::collections::HashSet<String>, candidates: &[&str]) -> bool {
+    candidates.iter().any(|column| columns.contains(*column))
+}
+
+fn index_exists(conn: &rusqlite::Connection, index_name: &str) -> Result<bool, rusqlite::Error> {
+    let exists: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name=?1",
+        rusqlite::params![index_name],
+        |row| row.get(0),
+    )?;
+    Ok(exists > 0)
+}
+
+fn has_required_indexes(conn: &rusqlite::Connection) -> Result<bool, rusqlite::Error> {
+    for index_name in TAXONOMY_REQUIRED_INDEXES {
+        if !index_exists(conn, index_name)? {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+fn ensure_taxonomy_indexes(conn: &rusqlite::Connection) -> Result<(), rusqlite::Error> {
+    conn.execute_batch(
+        "CREATE UNIQUE INDEX IF NOT EXISTS uk_taxonomy_terms_field_normalized
+         ON taxonomy_terms(field_key, normalized_value) WHERE is_deleted = 0;
+
+         CREATE UNIQUE INDEX IF NOT EXISTS uk_taxonomy_bindings_term_resource
+         ON taxonomy_bindings(term_id, resource_type, resource_id) WHERE is_deleted = 0;
+
+         CREATE INDEX IF NOT EXISTS idx_taxonomy_bindings_resource
+         ON taxonomy_bindings(resource_type, resource_id) WHERE is_deleted = 0;
+
+         CREATE INDEX IF NOT EXISTS idx_taxonomy_bindings_term
+         ON taxonomy_bindings(term_id) WHERE is_deleted = 0;
+
+         CREATE INDEX IF NOT EXISTS idx_taxonomy_term_stats_recent
+         ON taxonomy_term_stats(resource_type, last_used_at DESC);",
+    )?;
+    Ok(())
+}
+
+fn recreate_empty_taxonomy_v2_schema(conn: &rusqlite::Connection) -> Result<(), rusqlite::Error> {
+    conn.execute_batch(
+        "DROP TABLE IF EXISTS taxonomy_term_stats;
+         DROP TABLE IF EXISTS taxonomy_bindings;
+         DROP TABLE IF EXISTS taxonomy_terms;
+
+         CREATE TABLE taxonomy_terms (
+             id TEXT PRIMARY KEY,
+             field_key TEXT NOT NULL,
+             normalized_value TEXT NOT NULL,
+             display_name TEXT NOT NULL,
+             is_deleted INTEGER NOT NULL DEFAULT 0,
+             deleted_at TEXT,
+             created_at TEXT NOT NULL,
+             updated_at TEXT NOT NULL
+         );
+
+         CREATE TABLE taxonomy_bindings (
+             id TEXT PRIMARY KEY,
+             term_id TEXT NOT NULL,
+             resource_type TEXT NOT NULL,
+             resource_id TEXT NOT NULL,
+             is_deleted INTEGER NOT NULL DEFAULT 0,
+             deleted_at TEXT,
+             created_at TEXT NOT NULL,
+             updated_at TEXT NOT NULL
+         );
+
+         CREATE TABLE taxonomy_term_stats (
+             term_id TEXT NOT NULL,
+             resource_type TEXT NOT NULL,
+             usage_count INTEGER NOT NULL DEFAULT 0,
+             last_used_at TEXT,
+             updated_at TEXT NOT NULL,
+             PRIMARY KEY (term_id, resource_type)
+         );",
+    )?;
+    ensure_taxonomy_indexes(conn)
+}
+
+pub fn ensure_taxonomy_schema_consistency(
+    conn: &rusqlite::Connection,
+) -> Result<(), rusqlite::Error> {
+    let term_columns = table_columns(conn, "taxonomy_terms")?;
+    let binding_columns = table_columns(conn, "taxonomy_bindings")?;
+    let stats_columns = table_columns(conn, "taxonomy_term_stats")?;
+
+    let terms_schema_ok = has_required_columns(&term_columns, &TAXONOMY_TERMS_REQUIRED_COLUMNS);
+    let bindings_schema_ok =
+        has_required_columns(&binding_columns, &TAXONOMY_BINDINGS_REQUIRED_COLUMNS);
+    let stats_schema_ok = has_required_columns(&stats_columns, &TAXONOMY_STATS_REQUIRED_COLUMNS);
+    let terms_has_legacy_columns = has_any_columns(&term_columns, &TAXONOMY_TERMS_LEGACY_COLUMNS);
+    let bindings_has_legacy_columns =
+        has_any_columns(&binding_columns, &TAXONOMY_BINDINGS_LEGACY_COLUMNS);
+    let stats_has_legacy_columns = has_any_columns(&stats_columns, &TAXONOMY_STATS_LEGACY_COLUMNS);
+    let indexes_ok = has_required_indexes(conn)?;
+
+    if terms_schema_ok
+        && bindings_schema_ok
+        && stats_schema_ok
+        && !terms_has_legacy_columns
+        && !bindings_has_legacy_columns
+        && !stats_has_legacy_columns
+    {
+        if indexes_ok {
+            return Ok(());
+        }
+        return ensure_taxonomy_indexes(conn);
+    }
+
+    let can_migrate_from_existing =
+        has_required_columns(&term_columns, &TAXONOMY_TERMS_REQUIRED_COLUMNS)
+            && has_required_columns(&binding_columns, &TAXONOMY_BINDINGS_REQUIRED_COLUMNS);
+
+    conn.execute_batch("BEGIN IMMEDIATE TRANSACTION;")?;
+
+    let repair_result = if can_migrate_from_existing {
+        migrate_taxonomy_v2(conn)
+    } else {
+        recreate_empty_taxonomy_v2_schema(conn)
+    };
+
+    match repair_result {
+        Ok(_) => {
+            ensure_taxonomy_indexes(conn)?;
+            conn.execute_batch("COMMIT;")?;
+            Ok(())
+        }
+        Err(error) => {
+            let _ = conn.execute_batch("ROLLBACK;");
+            Err(error)
+        }
+    }
+}
+
+/// Taxonomy v2 migration: merge terms by (field_key, normalized_value), rebuild tables.
+///
+/// Old schema had terms keyed by (resource_type, field_key, normalized_value).
+/// New schema keys terms by (field_key, normalized_value) only, removing resource_type
+/// from terms and field_key from bindings/stats.
+pub fn migrate_taxonomy_v2(conn: &rusqlite::Connection) -> Result<(), rusqlite::Error> {
+    use std::collections::HashMap;
+
+    // --- Phase 1: Read old data into memory ---
+
+    // Old terms: id, resource_type, field_key, display_name, normalized_value, is_deleted, deleted_at, created_at, updated_at
+    struct OldTerm {
+        id: String,
+        field_key: String,
+        display_name: String,
+        normalized_value: String,
+        is_deleted: i32,
+        deleted_at: Option<String>,
+        created_at: String,
+        updated_at: String,
+    }
+
+    let mut old_terms: Vec<OldTerm> = Vec::new();
+    {
+        let mut stmt = conn.prepare(
+            "SELECT id, field_key, display_name, normalized_value, is_deleted, deleted_at, created_at, updated_at
+             FROM taxonomy_terms",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(OldTerm {
+                id: row.get(0)?,
+                field_key: row.get(1)?,
+                display_name: row.get(2)?,
+                normalized_value: row.get(3)?,
+                is_deleted: row.get(4)?,
+                deleted_at: row.get(5)?,
+                created_at: row.get(6)?,
+                updated_at: row.get(7)?,
+            })
+        })?;
+        for row in rows {
+            old_terms.push(row?);
+        }
+    }
+
+    // Old bindings: id, term_id, resource_type, resource_id, is_deleted, deleted_at, created_at, updated_at
+    struct OldBinding {
+        id: String,
+        term_id: String,
+        resource_type: String,
+        resource_id: String,
+        is_deleted: i32,
+        deleted_at: Option<String>,
+        created_at: String,
+        updated_at: String,
+    }
+
+    let mut old_bindings: Vec<OldBinding> = Vec::new();
+    {
+        let mut stmt = conn.prepare(
+            "SELECT id, term_id, resource_type, resource_id, is_deleted, deleted_at, created_at, updated_at
+             FROM taxonomy_bindings",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(OldBinding {
+                id: row.get(0)?,
+                term_id: row.get(1)?,
+                resource_type: row.get(2)?,
+                resource_id: row.get(3)?,
+                is_deleted: row.get(4)?,
+                deleted_at: row.get(5)?,
+                created_at: row.get(6)?,
+                updated_at: row.get(7)?,
+            })
+        })?;
+        for row in rows {
+            old_bindings.push(row?);
+        }
+    }
+
+    // --- Phase 2: Merge terms by (field_key, normalized_value) ---
+
+    struct MergedTerm {
+        id: String,
+        field_key: String,
+        normalized_value: String,
+        display_name: String,
+        is_deleted: i32,
+        deleted_at: Option<String>,
+        created_at: String,
+        updated_at: String,
+    }
+
+    // Key: (field_key, normalized_value) -> MergedTerm
+    let mut merged_terms: HashMap<(String, String), MergedTerm> = HashMap::new();
+    // Map: old_term_id -> new_term_id
+    let mut id_map: HashMap<String, String> = HashMap::new();
+
+    for term in &old_terms {
+        let key = (term.field_key.clone(), term.normalized_value.clone());
+        match merged_terms.get_mut(&key) {
+            Some(existing) => {
+                // Keep earliest created_at, latest display_name (by updated_at)
+                if term.created_at < existing.created_at {
+                    existing.created_at = term.created_at.clone();
+                }
+                if term.updated_at > existing.updated_at {
+                    existing.display_name = term.display_name.clone();
+                    existing.updated_at = term.updated_at.clone();
+                }
+                // If any active copy exists, mark as active
+                if term.is_deleted == 0 {
+                    existing.is_deleted = 0;
+                    existing.deleted_at = None;
+                }
+                id_map.insert(term.id.clone(), existing.id.clone());
+            }
+            None => {
+                let new_id = uuid::Uuid::new_v4().to_string();
+                id_map.insert(term.id.clone(), new_id.clone());
+                merged_terms.insert(
+                    key,
+                    MergedTerm {
+                        id: new_id,
+                        field_key: term.field_key.clone(),
+                        normalized_value: term.normalized_value.clone(),
+                        display_name: term.display_name.clone(),
+                        is_deleted: term.is_deleted,
+                        deleted_at: term.deleted_at.clone(),
+                        created_at: term.created_at.clone(),
+                        updated_at: term.updated_at.clone(),
+                    },
+                );
+            }
+        }
+    }
+
+    // --- Phase 3: Drop old tables and create new ones ---
+
+    conn.execute_batch(
+        "DROP TABLE IF EXISTS taxonomy_term_stats;
+         DROP TABLE IF EXISTS taxonomy_bindings;
+         DROP TABLE IF EXISTS taxonomy_terms;
+
+         CREATE TABLE taxonomy_terms (
+             id TEXT PRIMARY KEY,
+             field_key TEXT NOT NULL,
+             normalized_value TEXT NOT NULL,
+             display_name TEXT NOT NULL,
+             is_deleted INTEGER NOT NULL DEFAULT 0,
+             deleted_at TEXT,
+             created_at TEXT NOT NULL,
+             updated_at TEXT NOT NULL
+         );
+
+         CREATE UNIQUE INDEX uk_taxonomy_terms_field_normalized
+             ON taxonomy_terms(field_key, normalized_value) WHERE is_deleted = 0;
+
+         CREATE TABLE taxonomy_bindings (
+             id TEXT PRIMARY KEY,
+             term_id TEXT NOT NULL,
+             resource_type TEXT NOT NULL,
+             resource_id TEXT NOT NULL,
+             is_deleted INTEGER NOT NULL DEFAULT 0,
+             deleted_at TEXT,
+             created_at TEXT NOT NULL,
+             updated_at TEXT NOT NULL
+         );
+
+         CREATE UNIQUE INDEX uk_taxonomy_bindings_term_resource
+             ON taxonomy_bindings(term_id, resource_type, resource_id) WHERE is_deleted = 0;
+         CREATE INDEX idx_taxonomy_bindings_resource
+             ON taxonomy_bindings(resource_type, resource_id) WHERE is_deleted = 0;
+         CREATE INDEX idx_taxonomy_bindings_term
+             ON taxonomy_bindings(term_id) WHERE is_deleted = 0;
+
+         CREATE TABLE taxonomy_term_stats (
+             term_id TEXT NOT NULL,
+             resource_type TEXT NOT NULL,
+             usage_count INTEGER NOT NULL DEFAULT 0,
+             last_used_at TEXT,
+             updated_at TEXT NOT NULL,
+             PRIMARY KEY (term_id, resource_type)
+         );
+
+         CREATE INDEX idx_taxonomy_term_stats_recent
+             ON taxonomy_term_stats(resource_type, last_used_at DESC);",
+    )?;
+
+    // --- Phase 4: Insert merged terms ---
+
+    {
+        let mut insert_stmt = conn.prepare(
+            "INSERT INTO taxonomy_terms (id, field_key, normalized_value, display_name, is_deleted, deleted_at, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        )?;
+        for term in merged_terms.values() {
+            insert_stmt.execute(rusqlite::params![
+                term.id,
+                term.field_key,
+                term.normalized_value,
+                term.display_name,
+                term.is_deleted,
+                term.deleted_at,
+                term.created_at,
+                term.updated_at,
+            ])?;
+        }
+    }
+
+    // --- Phase 5: Recreate bindings with mapped term_ids ---
+
+    {
+        let mut insert_stmt = conn.prepare(
+            "INSERT OR IGNORE INTO taxonomy_bindings (id, term_id, resource_type, resource_id, is_deleted, deleted_at, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        )?;
+        for binding in &old_bindings {
+            if let Some(new_term_id) = id_map.get(&binding.term_id) {
+                insert_stmt.execute(rusqlite::params![
+                    binding.id,
+                    new_term_id,
+                    binding.resource_type,
+                    binding.resource_id,
+                    binding.is_deleted,
+                    binding.deleted_at,
+                    binding.created_at,
+                    binding.updated_at,
+                ])?;
+            }
+        }
+    }
+
+    // --- Phase 6: Rebuild stats ---
+
+    let now = chrono::Utc::now().to_rfc3339();
+    conn.execute(
+        "INSERT INTO taxonomy_term_stats (term_id, resource_type, usage_count, last_used_at, updated_at)
+         SELECT tb.term_id, tb.resource_type, COUNT(*) AS usage_count, MAX(tb.updated_at) AS last_used_at, ?1 AS updated_at
+         FROM taxonomy_bindings tb
+         JOIN taxonomy_terms tt ON tt.id = tb.term_id
+         WHERE tb.is_deleted = 0
+           AND tt.is_deleted = 0
+         GROUP BY tb.term_id, tb.resource_type",
+        rusqlite::params![now],
+    )?;
+
+    Ok(())
+}
 
 #[cfg(test)]
 mod tests {
-    use super::MIGRATIONS;
+    use super::{ensure_taxonomy_schema_consistency, migrate_taxonomy_v2, MIGRATIONS};
     use rusqlite::Connection;
 
     fn apply_all_migrations(conn: &Connection) {
         for (version, sql) in MIGRATIONS.iter() {
             conn.execute_batch(sql)
                 .unwrap_or_else(|e| panic!("Migration v{} failed: {}", version, e));
+            if *version == 12 {
+                migrate_taxonomy_v2(conn)
+                    .unwrap_or_else(|e| panic!("Post-migration hook v{} failed: {}", version, e));
+            }
         }
     }
 
@@ -313,6 +870,25 @@ mod tests {
         assert!(
             columns.iter().any(|col| col == "env"),
             "hosts table should contain env column"
+        );
+    }
+
+    #[test]
+    fn hosts_table_should_not_have_legacy_ip_address_column_after_migrations() {
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        apply_all_migrations(&conn);
+
+        let mut stmt = conn
+            .prepare("PRAGMA table_info(hosts)")
+            .expect("prepare table info query");
+        let rows = stmt
+            .query_map([], |row| row.get::<_, String>(1))
+            .expect("query table info");
+        let columns: Vec<String> = rows.filter_map(|r| r.ok()).collect();
+
+        assert!(
+            !columns.iter().any(|col| col == "ip_address"),
+            "hosts table should not contain legacy ip_address column"
         );
     }
 
@@ -393,6 +969,10 @@ mod tests {
 
             conn.execute_batch(sql)
                 .unwrap_or_else(|e| panic!("Migration v{} failed: {}", version, e));
+            if *version == 12 {
+                migrate_taxonomy_v2(&conn)
+                    .unwrap_or_else(|e| panic!("Post-migration hook v{} failed: {}", version, e));
+            }
         }
 
         let ip_count: i64 = conn
@@ -435,6 +1015,193 @@ mod tests {
         assert!(
             columns.iter().any(|col| col == "tags"),
             "ip_addresses table should contain tags column"
+        );
+    }
+
+    #[test]
+    fn business_applications_table_should_exist_after_migrations() {
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        apply_all_migrations(&conn);
+
+        let exists: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='business_applications'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("query sqlite_master");
+
+        assert_eq!(exists, 1, "business_applications table should exist");
+    }
+
+    #[test]
+    fn applications_table_should_have_business_application_id_column_after_migrations() {
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        apply_all_migrations(&conn);
+
+        let mut stmt = conn
+            .prepare("PRAGMA table_info(applications)")
+            .expect("prepare table info query");
+        let rows = stmt
+            .query_map([], |row| row.get::<_, String>(1))
+            .expect("query table info");
+        let columns: Vec<String> = rows.filter_map(|r| r.ok()).collect();
+
+        assert!(
+            columns.iter().any(|col| col == "business_application_id"),
+            "applications table should contain business_application_id column"
+        );
+    }
+
+    #[test]
+    fn taxonomy_tables_should_have_correct_v2_schema_after_migrations() {
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        apply_all_migrations(&conn);
+
+        let terms_exists: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='taxonomy_terms'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("query taxonomy_terms");
+        let bindings_exists: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='taxonomy_bindings'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("query taxonomy_bindings");
+
+        assert_eq!(terms_exists, 1, "taxonomy_terms table should exist");
+        assert_eq!(bindings_exists, 1, "taxonomy_bindings table should exist");
+
+        // Verify taxonomy_terms has no resource_type column (v2 removed it)
+        let mut stmt = conn
+            .prepare("PRAGMA table_info(taxonomy_terms)")
+            .expect("prepare table info query");
+        let rows = stmt
+            .query_map([], |row| row.get::<_, String>(1))
+            .expect("query table info");
+        let columns: Vec<String> = rows.filter_map(|r| r.ok()).collect();
+        assert!(
+            !columns.iter().any(|col| col == "resource_type"),
+            "taxonomy_terms should not have resource_type column in v2"
+        );
+        assert!(
+            !columns.iter().any(|col| col == "value"),
+            "taxonomy_terms should not have value column in v2"
+        );
+        assert!(
+            columns.iter().any(|col| col == "field_key"),
+            "taxonomy_terms should have field_key column"
+        );
+
+        // Verify taxonomy_bindings has no field_key column (v2 removed it)
+        let mut stmt = conn
+            .prepare("PRAGMA table_info(taxonomy_bindings)")
+            .expect("prepare table info query");
+        let rows = stmt
+            .query_map([], |row| row.get::<_, String>(1))
+            .expect("query table info");
+        let columns: Vec<String> = rows.filter_map(|r| r.ok()).collect();
+        assert!(
+            !columns.iter().any(|col| col == "field_key"),
+            "taxonomy_bindings should not have field_key column in v2"
+        );
+    }
+
+    #[test]
+    fn taxonomy_term_stats_table_should_have_composite_pk_after_migrations() {
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        apply_all_migrations(&conn);
+
+        let stats_exists: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='taxonomy_term_stats'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("query taxonomy_term_stats");
+        assert_eq!(stats_exists, 1, "taxonomy_term_stats table should exist");
+
+        // Verify no field_key column (v2 removed it)
+        let mut stmt = conn
+            .prepare("PRAGMA table_info(taxonomy_term_stats)")
+            .expect("prepare table info query");
+        let rows = stmt
+            .query_map([], |row| row.get::<_, String>(1))
+            .expect("query table info");
+        let columns: Vec<String> = rows.filter_map(|r| r.ok()).collect();
+        assert!(
+            !columns.iter().any(|col| col == "field_key"),
+            "taxonomy_term_stats should not have field_key column in v2"
+        );
+        assert!(
+            columns.iter().any(|col| col == "term_id"),
+            "taxonomy_term_stats should have term_id column"
+        );
+        assert!(
+            columns.iter().any(|col| col == "resource_type"),
+            "taxonomy_term_stats should have resource_type column"
+        );
+    }
+
+    #[test]
+    fn ensure_taxonomy_schema_consistency_should_repair_missing_index() {
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        apply_all_migrations(&conn);
+
+        conn.execute("DROP INDEX IF EXISTS idx_taxonomy_term_stats_recent", [])
+            .expect("drop index");
+
+        ensure_taxonomy_schema_consistency(&conn).expect("repair taxonomy schema");
+
+        let exists: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_taxonomy_term_stats_recent'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("query index existence");
+        assert_eq!(exists, 1, "missing index should be recreated");
+    }
+
+    #[test]
+    fn ensure_taxonomy_schema_consistency_should_repair_legacy_stats_schema() {
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        apply_all_migrations(&conn);
+
+        conn.execute_batch(
+            "DROP TABLE IF EXISTS taxonomy_term_stats;
+             CREATE TABLE taxonomy_term_stats (
+                term_id TEXT PRIMARY KEY,
+                resource_type TEXT NOT NULL,
+                field_key TEXT NOT NULL,
+                usage_count INTEGER NOT NULL DEFAULT 0,
+                last_used_at TEXT,
+                updated_at TEXT NOT NULL
+             );",
+        )
+        .expect("create legacy stats schema");
+
+        ensure_taxonomy_schema_consistency(&conn).expect("repair taxonomy schema");
+
+        let mut stmt = conn
+            .prepare("PRAGMA table_info(taxonomy_term_stats)")
+            .expect("prepare table info");
+        let rows = stmt
+            .query_map([], |row| row.get::<_, String>(1))
+            .expect("query table info");
+        let columns: Vec<String> = rows.filter_map(|r| r.ok()).collect();
+
+        assert!(
+            !columns.iter().any(|col| col == "field_key"),
+            "repaired schema should not contain legacy field_key column"
+        );
+        assert!(
+            columns.iter().any(|col| col == "resource_type"),
+            "repaired schema should keep resource_type column"
         );
     }
 }

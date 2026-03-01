@@ -1,6 +1,10 @@
 use std::collections::{HashMap, HashSet};
 use tauri::State;
 
+use crate::commands::taxonomy::{
+    build_taxonomy_exists_filter, parse_filter_values, parse_tech_stack_terms, save_resource_terms,
+    soft_delete_resource_terms, FIELD_OWNER, FIELD_TECH_STACK,
+};
 use crate::db::audit::insert_audit_log;
 use crate::db::crud::soft_delete;
 use crate::db::DbPool;
@@ -22,18 +26,23 @@ fn row_to_application(row: &rusqlite::Row) -> rusqlite::Result<Application> {
         git_repo: row.get(8)?,
         owner: row.get(9)?,
         owners: Some(Vec::new()),
-        status: row.get(10)?,
-        description: row.get(11)?,
-        is_deleted: row.get(12)?,
-        deleted_at: row.get(13)?,
-        created_at: row.get(14)?,
-        updated_at: row.get(15)?,
+        business_application_id: row.get(10)?,
+        business_application_name: row.get(11)?,
+        status: row.get(12)?,
+        description: row.get(13)?,
+        is_deleted: row.get(14)?,
+        deleted_at: row.get(15)?,
+        created_at: row.get(16)?,
+        updated_at: row.get(17)?,
     })
 }
 
 const SELECT_COLUMNS: &str = "id, name, type, address, port, tech_stack, deploy_mode, \
-     env, git_repo, owner, status, description, is_deleted, deleted_at, created_at, updated_at";
+     env, git_repo, owner, business_application_id, \
+     (SELECT ba.name FROM business_applications ba WHERE ba.id = applications.business_application_id AND ba.is_deleted = 0) AS business_application_name, \
+     status, description, is_deleted, deleted_at, created_at, updated_at";
 
+#[cfg(test)]
 fn parse_tech_stack_items(value: &str) -> Vec<String> {
     value
         .split(|ch| matches!(ch, ',' | ';' | '|' | '/' | '\u{FF0C}' | '\u{FF1B}'))
@@ -42,6 +51,7 @@ fn parse_tech_stack_items(value: &str) -> Vec<String> {
         .collect()
 }
 
+#[cfg(test)]
 fn collect_top_tech_stacks<I>(rows: I, limit: usize) -> Vec<String>
 where
     I: IntoIterator<Item = String>,
@@ -72,13 +82,6 @@ where
         .collect()
 }
 
-fn resolve_tech_stack_side(app_type: Option<&str>) -> &'static str {
-    match app_type.unwrap_or("").trim() {
-        "frontend" => "frontend",
-        _ => "backend",
-    }
-}
-
 fn normalize_owner_names(owners: Option<Vec<String>>) -> Vec<String> {
     let mut normalized: Vec<String> = Vec::new();
     let mut dedupe: HashSet<String> = HashSet::new();
@@ -98,21 +101,6 @@ fn normalize_owner_names(owners: Option<Vec<String>>) -> Vec<String> {
     normalized
 }
 
-fn parse_owner_filter_values(raw: &str) -> Vec<String> {
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return Vec::new();
-    }
-
-    if trimmed.starts_with('[') {
-        if let Ok(values) = serde_json::from_str::<Vec<String>>(trimmed) {
-            return normalize_owner_names(Some(values));
-        }
-    }
-
-    vec![trimmed.to_string()]
-}
-
 fn load_owner_map(
     conn: &rusqlite::Connection,
     app_ids: &[String],
@@ -123,11 +111,16 @@ fn load_owner_map(
 
     let placeholders = vec!["?"; app_ids.len()].join(", ");
     let sql = format!(
-        "SELECT application_id, owner_name
-         FROM application_owners
-         WHERE is_deleted = 0 AND application_id IN ({})
-         ORDER BY owner_name ASC",
-        placeholders
+        "SELECT tb.resource_id, tt.display_name
+         FROM taxonomy_bindings tb
+         JOIN taxonomy_terms tt ON tt.id = tb.term_id
+         WHERE tb.is_deleted = 0
+           AND tt.is_deleted = 0
+           AND tb.resource_type = 'application'
+           AND tt.field_key = '{}'
+           AND tb.resource_id IN ({})
+         ORDER BY tt.display_name ASC",
+        FIELD_OWNER, placeholders
     );
 
     let param_refs: Vec<&dyn rusqlite::types::ToSql> = app_ids
@@ -225,10 +218,21 @@ fn build_applications_where_clause(
                     WHERE ao.application_id = applications.id \
                       AND ao.is_deleted = 0 \
                       AND ao.owner_name LIKE ? \
+                 ) \
+              OR EXISTS ( \
+                    SELECT 1 \
+                    FROM taxonomy_bindings tb \
+                    JOIN taxonomy_terms tt ON tt.id = tb.term_id \
+                    WHERE tb.resource_type = 'application' \
+                      AND tb.resource_id = applications.id \
+                      AND tb.is_deleted = 0 \
+                      AND tt.is_deleted = 0 \
+                      AND tt.field_key = 'owner' \
+                      AND tt.display_name LIKE ? \
                  ))"
             .to_string(),
         );
-        for _ in 0..6 {
+        for _ in 0..7 {
             sql_params.push(Box::new(like_value.clone()));
         }
     }
@@ -241,7 +245,7 @@ fn build_applications_where_clause(
             ("applications.deploy_mode", "deploy_mode"),
         ] {
             if let Some(value) = filters.get(key) {
-                let values = parse_owner_filter_values(value);
+                let values = parse_filter_values(value);
                 if values.is_empty() {
                     continue;
                 }
@@ -259,38 +263,17 @@ fn build_applications_where_clause(
         }
 
         if let Some(owner_filter) = filters.get("owner") {
-            let owners = parse_owner_filter_values(owner_filter);
+            let owners = parse_filter_values(owner_filter);
             if !owners.is_empty() {
-                if owners.len() == 1 {
-                    conditions.push(
-                        "(applications.owner = ? \
-                          OR EXISTS ( \
-                                SELECT 1 FROM application_owners ao \
-                                WHERE ao.application_id = applications.id \
-                                  AND ao.is_deleted = 0 \
-                                  AND ao.owner_name = ? \
-                             ))"
-                        .to_string(),
-                    );
-                    sql_params.push(Box::new(owners[0].clone()));
-                    sql_params.push(Box::new(owners[0].clone()));
-                } else {
-                    let placeholders = vec!["?"; owners.len()].join(", ");
-                    conditions.push(format!(
-                        "(applications.owner IN ({}) \
-                          OR EXISTS ( \
-                                SELECT 1 FROM application_owners ao \
-                                WHERE ao.application_id = applications.id \
-                                  AND ao.is_deleted = 0 \
-                                  AND ao.owner_name IN ({}) \
-                             ))",
-                        placeholders, placeholders
-                    ));
-                    for owner in &owners {
-                        sql_params.push(Box::new(owner.clone()));
-                    }
-                    for owner in &owners {
-                        sql_params.push(Box::new(owner.clone()));
+                if let Some(clause) = build_taxonomy_exists_filter(
+                    "application",
+                    FIELD_OWNER,
+                    "applications.id",
+                    &owners,
+                ) {
+                    conditions.push(clause);
+                    for owner in owners {
+                        sql_params.push(Box::new(owner));
                     }
                 }
             }
@@ -298,94 +281,6 @@ fn build_applications_where_clause(
     }
 
     (format!("WHERE {}", conditions.join(" AND ")), sql_params)
-}
-
-#[tauri::command]
-pub fn list_top_application_tech_stacks(
-    pool: State<DbPool>,
-    limit: Option<u32>,
-    app_type: Option<String>,
-) -> AppResult<Vec<String>> {
-    let command = "list_top_application_tech_stacks";
-    let conn = pool
-        .get()
-        .map_err(|e| AppError::db_unavailable(command, format!("Pool error: {}", e)))?;
-
-    let side = resolve_tech_stack_side(app_type.as_deref());
-    let query_sql = match side {
-        "frontend" => {
-            "SELECT tech_stack
-             FROM applications
-             WHERE is_deleted = 0
-               AND type = 'frontend'
-               AND tech_stack IS NOT NULL
-               AND TRIM(tech_stack) <> ''"
-        }
-        _ => {
-            "SELECT tech_stack
-             FROM applications
-             WHERE is_deleted = 0
-               AND type <> 'frontend'
-               AND tech_stack IS NOT NULL
-               AND TRIM(tech_stack) <> ''"
-        }
-    };
-
-    let mut stmt = conn
-        .prepare(query_sql)
-        .map_err(|e| AppError::from_db_error(command, "query application tech stacks", e))?;
-
-    let rows = stmt
-        .query_map([], |row| row.get::<_, Option<String>>(0))
-        .map_err(|e| AppError::from_db_error(command, "read application tech stacks", e))?;
-
-    let mut tech_stack_rows: Vec<String> = Vec::new();
-    for row in rows {
-        let value =
-            row.map_err(|e| AppError::from_db_error(command, "decode application tech stacks", e))?;
-        if let Some(text) = value {
-            tech_stack_rows.push(text);
-        }
-    }
-
-    let top_limit = limit.unwrap_or(10).clamp(1, 100) as usize;
-    Ok(collect_top_tech_stacks(tech_stack_rows, top_limit))
-}
-
-#[tauri::command]
-pub fn list_application_owner_candidates(
-    pool: State<DbPool>,
-    limit: Option<u32>,
-) -> AppResult<Vec<String>> {
-    let command = "list_application_owner_candidates";
-    let conn = pool
-        .get()
-        .map_err(|e| AppError::db_unavailable(command, format!("Pool error: {}", e)))?;
-    let max_limit = limit.unwrap_or(100).clamp(1, 500) as i64;
-
-    let mut stmt = conn
-        .prepare(
-            "SELECT DISTINCT ao.owner_name
-             FROM application_owners ao
-             INNER JOIN applications a ON a.id = ao.application_id
-             WHERE ao.is_deleted = 0
-               AND a.is_deleted = 0
-               AND TRIM(ao.owner_name) <> ''
-             ORDER BY ao.owner_name ASC
-             LIMIT ?1",
-        )
-        .map_err(|e| AppError::from_db_error(command, "query owner candidates", e))?;
-
-    let rows = stmt
-        .query_map(rusqlite::params![max_limit], |row| row.get::<_, String>(0))
-        .map_err(|e| AppError::from_db_error(command, "read owner candidates", e))?;
-
-    let mut candidates: Vec<String> = Vec::new();
-    for row in rows {
-        candidates
-            .push(row.map_err(|e| AppError::from_db_error(command, "decode owner candidates", e))?);
-    }
-    Ok(candidates)
 }
 
 #[tauri::command]
@@ -482,6 +377,7 @@ fn save_application_inner(
     let mut normalized_data = data.clone();
     normalized_data.owners = Some(normalized_owners.clone());
     normalized_data.owner = normalized_owners.first().cloned();
+    let tech_stack_terms = parse_tech_stack_terms(normalized_data.tech_stack.as_deref());
     validate_application(&normalized_data).map_err(|e| AppError::validation(command, e))?;
     let now = chrono::Utc::now().to_rfc3339();
 
@@ -508,8 +404,8 @@ fn save_application_inner(
             };
             conn.execute(
                 "INSERT INTO applications (id, name, type, address, port, tech_stack, deploy_mode,
-                                           env, git_repo, owner, status, description, is_deleted, deleted_at, created_at, updated_at)
-                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,0,NULL,?13,?13)",
+                                           env, git_repo, owner, business_application_id, status, description, is_deleted, deleted_at, created_at, updated_at)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,0,NULL,?14,?14)",
                 rusqlite::params![
                     persisted_id,
                     normalized_data.name,
@@ -521,6 +417,7 @@ fn save_application_inner(
                     normalized_data.env,
                     normalized_data.git_repo,
                     normalized_data.owner,
+                    normalized_data.business_application_id,
                     normalized_data.status,
                     normalized_data.description,
                     now
@@ -529,6 +426,24 @@ fn save_application_inner(
             .map_err(|e| AppError::from_db_error(command, "创建应用", e))?;
             replace_application_owners(conn, &persisted_id, &normalized_owners, &now)
                 .map_err(|e| AppError::from_db_error(command, "保存应用负责人", e))?;
+            save_resource_terms(
+                conn,
+                "application",
+                &persisted_id,
+                FIELD_OWNER,
+                &normalized_owners,
+                &now,
+            )
+            .map_err(|e| AppError::from_db_error(command, "同步负责人词条", e))?;
+            save_resource_terms(
+                conn,
+                "application",
+                &persisted_id,
+                FIELD_TECH_STACK,
+                &tech_stack_terms,
+                &now,
+            )
+            .map_err(|e| AppError::from_db_error(command, "同步技术栈词条", e))?;
             insert_audit_log(
                 conn,
                 "create",
@@ -542,8 +457,8 @@ fn save_application_inner(
         } else {
             conn.execute(
                 "UPDATE applications SET name=?1, type=?2, address=?3, port=?4, tech_stack=?5, deploy_mode=?6,
-                                         env=?7, git_repo=?8, owner=?9, status=?10, description=?11, updated_at=?12
-                 WHERE id=?13 AND is_deleted=0",
+                                         env=?7, git_repo=?8, owner=?9, business_application_id=?10, status=?11, description=?12, updated_at=?13
+                 WHERE id=?14 AND is_deleted=0",
                 rusqlite::params![
                     normalized_data.name,
                     normalized_data.app_type,
@@ -554,6 +469,7 @@ fn save_application_inner(
                     normalized_data.env,
                     normalized_data.git_repo,
                     normalized_data.owner,
+                    normalized_data.business_application_id,
                     normalized_data.status,
                     normalized_data.description,
                     now,
@@ -563,6 +479,24 @@ fn save_application_inner(
             .map_err(|e| AppError::from_db_error(command, "更新应用", e))?;
             replace_application_owners(conn, &normalized_data.id, &normalized_owners, &now)
                 .map_err(|e| AppError::from_db_error(command, "保存应用负责人", e))?;
+            save_resource_terms(
+                conn,
+                "application",
+                &normalized_data.id,
+                FIELD_OWNER,
+                &normalized_owners,
+                &now,
+            )
+            .map_err(|e| AppError::from_db_error(command, "同步负责人词条", e))?;
+            save_resource_terms(
+                conn,
+                "application",
+                &normalized_data.id,
+                FIELD_TECH_STACK,
+                &tech_stack_terms,
+                &now,
+            )
+            .map_err(|e| AppError::from_db_error(command, "同步技术栈词条", e))?;
             insert_audit_log(
                 conn,
                 "update",
@@ -623,6 +557,10 @@ pub fn soft_delete_application(pool: State<DbPool>, id: String) -> AppResult<()>
                 let _ = conn.execute_batch("ROLLBACK;");
                 return Err(AppError::from_db_error(command, "删除应用负责人", e));
             }
+            if let Err(e) = soft_delete_resource_terms(&conn, "application", &id, &now) {
+                let _ = conn.execute_batch("ROLLBACK;");
+                return Err(AppError::from_db_error(command, "删除应用词条绑定", e));
+            }
             match insert_audit_log(&conn, "delete", "application", &id, name.as_deref(), None) {
                 Ok(()) => {
                     conn.execute_batch("COMMIT;")
@@ -646,7 +584,7 @@ pub fn soft_delete_application(pool: State<DbPool>, id: String) -> AppResult<()>
 mod tests {
     use super::{
         build_applications_where_clause, collect_top_tech_stacks, normalize_owner_names,
-        parse_owner_filter_values, resolve_tech_stack_side, save_application_inner,
+        save_application_inner,
     };
     use crate::models::application::Application;
     use crate::models::common::QueryParams;
@@ -677,14 +615,6 @@ mod tests {
     }
 
     #[test]
-    fn resolve_tech_stack_side_should_fallback_to_backend_for_unknown_values() {
-        assert_eq!(resolve_tech_stack_side(Some("frontend")), "frontend");
-        assert_eq!(resolve_tech_stack_side(Some("backend")), "backend");
-        assert_eq!(resolve_tech_stack_side(Some("gateway")), "backend");
-        assert_eq!(resolve_tech_stack_side(None), "backend");
-    }
-
-    #[test]
     fn normalize_owner_names_should_trim_deduplicate_and_drop_empty() {
         let owners = vec![
             " alice ".to_string(),
@@ -698,16 +628,6 @@ mod tests {
 
         let result = normalize_owner_names(Some(owners));
         assert_eq!(result, vec!["alice", "bob", "carol"]);
-    }
-
-    #[test]
-    fn parse_owner_filter_values_should_support_json_array_and_plain_text() {
-        assert_eq!(
-            parse_owner_filter_values(r#"["alice","bob"]"#),
-            vec!["alice", "bob"]
-        );
-        assert_eq!(parse_owner_filter_values("alice"), vec!["alice"]);
-        assert_eq!(parse_owner_filter_values("   "), Vec::<String>::new());
     }
 
     #[test]
@@ -739,6 +659,8 @@ mod tests {
             git_repo: None,
             owner: Some("alice".into()),
             owners: Some(vec!["alice".into()]),
+            business_application_id: None,
+            business_application_name: None,
             status: "running".into(),
             description: None,
             is_deleted: 0,

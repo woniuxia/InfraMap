@@ -25,7 +25,6 @@ describe("resourceCopy", () => {
     const host: Host = {
       id: "h1",
       hostname: "host-01",
-      ip_address: "10.0.0.10",
       env: "prod",
       status: "running",
       is_deleted: 0,
@@ -43,11 +42,10 @@ describe("resourceCopy", () => {
     expect(stripped.deleted_at).toBeUndefined();
   });
 
-  it("builds host copy draft with empty ip address", () => {
+  it("builds host copy draft without legacy ip fields", () => {
     const host: Host = {
       id: "h2",
       hostname: "db-host",
-      ip_address: "10.0.0.20",
       env: "dev",
       status: "running",
       os_type: "Ubuntu 22.04",
@@ -60,7 +58,6 @@ describe("resourceCopy", () => {
     const draft = buildHostCopyDraft(host, fixedDate);
 
     expect(draft.hostname).toBe("db-host（副本-20260228090507）");
-    expect(draft.ip_address).toBeUndefined();
     expect(draft.ip_display).toBeUndefined();
     expect(draft.os_type).toBe("Ubuntu 22.04");
     expect(draft.tags).toBe("[\"db\"]");

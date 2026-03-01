@@ -9,7 +9,6 @@ pub struct Host {
     #[serde(default)]
     pub id: String,
     pub hostname: String,
-    pub ip_address: Option<String>,
     pub ip_display: Option<String>,
     #[serde(default = "default_env")]
     pub env: String,

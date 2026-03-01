@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import type { FormInstance, FormRules } from "element-plus";
 import { ElMessage } from "element-plus";
 import { ArrowDown } from "@element-plus/icons-vue";
@@ -9,6 +9,7 @@ import {
   saveIpAddress,
   softDeleteIpAddress,
 } from "@/api/ip-addresses";
+import { listTaxonomyTerms } from "@/api/taxonomy";
 import type { IpAddress } from "@/types";
 import type { SearchFieldConfig, SearchToolbarQueryPayload } from "@/types/searchToolbar";
 import { useResourceList } from "@/composables/useResourceList";
@@ -32,9 +33,10 @@ const {
 });
 
 const searchText = ref("");
-const listFilters = ref<{ env: string[]; is_vip: string[] }>({
+const listFilters = ref<{ env: string[]; is_vip: string[]; tags: string[] }>({
   env: [],
   is_vip: [],
+  tags: [],
 });
 const dialogVisible = ref(false);
 const isEditing = ref(false);
@@ -64,14 +66,29 @@ const vipOptions = [
   { label: "VIP", value: "1" },
   { label: "普通IP", value: "0" },
 ];
+const tagFilterOptions = ref<Array<{ label: string; value: string }>>([]);
 
-const toolbarFields: SearchFieldConfig[] = [
+function buildTagSuggestionOptions(currentValues: string[]) {
+  const merged = new Set<string>(tagFilterOptions.value.map((item) => item.value));
+  for (const value of currentValues) {
+    const normalized = value.trim();
+    if (normalized) {
+      merged.add(normalized);
+    }
+  }
+  return Array.from(merged).map((value) => ({ label: value, value }));
+}
+
+const formTagSuggestionOptions = computed(() => buildTagSuggestionOptions(tagList.value));
+const batchTagSuggestionOptions = computed(() => buildTagSuggestionOptions(batchTagList.value));
+
+const toolbarFields = computed<SearchFieldConfig[]>(() => [
   {
     key: "env",
     queryKey: "env",
     label: "环境",
     type: "multi-select",
-    width: "sm",
+    width: "md",
     options: envOptions,
   },
   {
@@ -79,10 +96,19 @@ const toolbarFields: SearchFieldConfig[] = [
     queryKey: "is_vip",
     label: "类型",
     type: "multi-select",
-    width: "sm",
+    width: "md",
     options: vipOptions,
   },
-];
+  {
+    key: "tags",
+    queryKey: "tags",
+    label: "标签",
+    type: "multi-select",
+    width: "md",
+    options: tagFilterOptions.value,
+    maxCollapseTags: 2,
+  },
+]);
 
 const formRules: FormRules = {
   ip_address: [
@@ -151,6 +177,21 @@ function envTagType(env: string): "primary" | "success" | "warning" | "info" | "
 
 function handleToolbarQuery(payload: SearchToolbarQueryPayload) {
   handleQuery(payload);
+}
+
+async function loadTagFilterOptions() {
+  try {
+    const tags = await listTaxonomyTerms({
+      resource_type: "ip_address",
+      field_key: "tags",
+      limit: 200,
+      sort_by: "recent",
+      recency_scope: "global",
+    });
+    tagFilterOptions.value = tags.map((item) => ({ label: item, value: item }));
+  } catch {
+    // error shown by tauriInvoke
+  }
 }
 
 function openAdd() {
@@ -236,7 +277,7 @@ async function handleSave() {
     await saveIpAddress(payload);
     ElMessage.success(isEditing.value ? "更新成功" : "创建成功");
     dialogVisible.value = false;
-    fetchData();
+    await Promise.all([fetchData(), loadTagFilterOptions()]);
   } catch {
     // error shown by tauriInvoke
   } finally {
@@ -264,7 +305,7 @@ async function handleBatchCreate() {
     ElMessage.success(
       `批量生成完成：新增 ${result.created_count} 条，跳过 ${result.skipped_count} 条`
     );
-    fetchData();
+    await Promise.all([fetchData(), loadTagFilterOptions()]);
   } catch {
     // error shown by tauriInvoke
   } finally {
@@ -272,7 +313,10 @@ async function handleBatchCreate() {
   }
 }
 
-onMounted(() => fetchData());
+onMounted(() => {
+  fetchData();
+  loadTagFilterOptions();
+});
 </script>
 
 <template>
@@ -323,7 +367,14 @@ onMounted(() => fetchData());
                 :reserve-keyword="false"
                 placeholder="输入标签后回车"
                 class="w-full"
-              />
+              >
+                <el-option
+                  v-for="option in batchTagSuggestionOptions"
+                  :key="`batch-tag-${option.value}`"
+                  :label="option.label"
+                  :value="option.value"
+                />
+              </el-select>
             </el-form-item>
           </el-col>
         </el-row>
@@ -356,7 +407,7 @@ onMounted(() => fetchData());
     </SearchToolbar>
 
     <el-table :data="data" v-loading="loading" border stripe class="w-full im-table-fixed-ops">
-      <el-table-column label="IP地址" min-width="180" align="center">
+      <el-table-column label="IP地址" min-width="220" align="center">
         <template #default="{ row }">
           <CopyableTextCell :text="row.ip_address" aria-label="复制IP地址" />
         </template>
@@ -441,7 +492,14 @@ onMounted(() => fetchData());
             :reserve-keyword="false"
             class="w-full"
             placeholder="输入标签后回车"
-          />
+          >
+            <el-option
+              v-for="option in formTagSuggestionOptions"
+              :key="`form-tag-${option.value}`"
+              :label="option.label"
+              :value="option.value"
+            />
+          </el-select>
         </el-form-item>
         <el-form-item label="描述">
           <el-input

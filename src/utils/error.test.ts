@@ -1,4 +1,4 @@
-﻿import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { normalizeInvokeError } from "@/utils/error";
 import { InfraError } from "@/types/error";
 
@@ -44,15 +44,15 @@ describe("normalizeInvokeError", () => {
     });
   });
 
-  it("maps legacy unique constraint errors", () => {
+  it("maps generic unique constraint errors", () => {
     const error = normalizeInvokeError(
-      "Update failed: UNIQUE constraint failed: hosts.ip_address",
+      "Update failed: UNIQUE constraint failed: hosts.hostname",
       "save_host",
     );
 
     expect(error).toMatchObject({
       code: "CONFLICT",
-      message: "保存失败，IP 地址已存在，请使用其他 IP 地址。",
+      message: "保存失败，存在重复数据，请检查后重试。",
       command: "save_host",
     });
   });

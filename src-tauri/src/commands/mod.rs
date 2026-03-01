@@ -1,6 +1,7 @@
 pub mod applications;
 pub mod audit_logs;
 pub mod backup;
+pub mod business_applications;
 pub mod dashboard;
 pub mod dependencies;
 pub mod deployments;
@@ -11,4 +12,5 @@ pub mod ip_addresses;
 pub mod middlewares;
 pub mod nginx_configs;
 pub mod settings;
+pub mod taxonomy;
 pub mod topology;
