@@ -1,9 +1,11 @@
 use std::net::Ipv4Addr;
 
 use crate::models::application::Application;
+use crate::models::business_application::BusinessApplication;
 use crate::models::dependency::Dependency;
 use crate::models::deployment::Deployment;
 use crate::models::host::Host;
+use crate::models::ip_address::IpAddress;
 use crate::models::middleware::Middleware;
 use crate::models::nginx_config::NginxConfig;
 
@@ -15,10 +17,18 @@ pub fn validate_required(value: &str, field_name: &str) -> Result<(), String> {
     }
 }
 
-pub fn validate_string_length(value: &str, min: usize, max: usize, field_name: &str) -> Result<(), String> {
+pub fn validate_string_length(
+    value: &str,
+    min: usize,
+    max: usize,
+    field_name: &str,
+) -> Result<(), String> {
     let len = value.chars().count();
     if len < min || len > max {
-        Err(format!("{} length must be {}-{}, got {}", field_name, min, max, len))
+        Err(format!(
+            "{} length must be {}-{}, got {}",
+            field_name, min, max, len
+        ))
     } else {
         Ok(())
     }
@@ -42,7 +52,10 @@ pub fn validate_enum(value: &str, allowed: &[&str], field_name: &str) -> Result<
     if allowed.contains(&value) {
         Ok(())
     } else {
-        Err(format!("{} must be one of {:?}, got '{}'", field_name, allowed, value))
+        Err(format!(
+            "{} must be one of {:?}, got '{}'",
+            field_name, allowed, value
+        ))
     }
 }
 
@@ -61,14 +74,28 @@ pub fn validate_positive_int(value: i64, field_name: &str) -> Result<(), String>
     }
 }
 
+fn parse_string_array(value: &str, field_name: &str) -> Result<Vec<String>, String> {
+    let parsed: Vec<String> = serde_json::from_str(value)
+        .map_err(|_| format!("{} must be a JSON string array", field_name))?;
+    let normalized: Vec<String> = parsed
+        .into_iter()
+        .map(|item| item.trim().to_string())
+        .filter(|item| !item.is_empty())
+        .collect();
+    Ok(normalized)
+}
+
 // --- Entity-specific validation ---
 
 pub fn validate_host(host: &Host) -> Result<(), String> {
     validate_required(&host.hostname, "hostname")?;
     validate_string_length(&host.hostname, 1, 200, "hostname")?;
-    validate_required(&host.ip_address, "ip_address")?;
-    validate_ipv4(&host.ip_address)?;
-    validate_enum(&host.status, &["running", "stopped", "maintenance"], "status")?;
+    validate_enum(&host.env, &["prod", "dev", "test"], "env")?;
+    validate_enum(
+        &host.status,
+        &["running", "stopped", "maintenance"],
+        "status",
+    )?;
     if let Some(ref tags) = host.tags {
         if !tags.is_empty() {
             validate_json_array(tags, "tags")?;
@@ -89,18 +116,93 @@ pub fn validate_host(host: &Host) -> Result<(), String> {
     Ok(())
 }
 
+pub fn validate_ip_address_resource(ip: &IpAddress) -> Result<(), String> {
+    validate_required(&ip.ip_address, "ip_address")?;
+    validate_ipv4(&ip.ip_address)?;
+    validate_enum(&ip.env, &["prod", "dev", "test"], "env")?;
+    if let Some(tags) = ip.tags.as_deref() {
+        if !tags.trim().is_empty() {
+            validate_json_array(tags, "tags")?;
+        }
+    }
+
+    let real_ips: Vec<String> = match ip.real_ips.as_deref() {
+        Some(raw) if !raw.trim().is_empty() => parse_string_array(raw, "real_ips")?,
+        _ => Vec::new(),
+    };
+
+    if ip.is_vip {
+        if real_ips.is_empty() {
+            return Err("real_ips must contain at least one IPv4 when is_vip is true".into());
+        }
+        for real_ip in &real_ips {
+            validate_ipv4(real_ip)?;
+        }
+    } else if !real_ips.is_empty() {
+        return Err("real_ips must be empty when is_vip is false".into());
+    }
+
+    Ok(())
+}
+
 pub fn validate_application(app: &Application) -> Result<(), String> {
     validate_required(&app.name, "name")?;
     validate_string_length(&app.name, 1, 200, "name")?;
     validate_enum(
         &app.app_type,
-        &["frontend", "backend", "gateway", "batch_job", "microservice", "other"],
+        &[
+            "frontend",
+            "backend",
+            "gateway",
+            "batch_job",
+            "microservice",
+            "other",
+        ],
         "type",
     )?;
     validate_enum(&app.env, &["prod", "dev", "test"], "env")?;
-    validate_enum(&app.status, &["running", "stopped", "maintenance"], "status")?;
+    validate_enum(
+        &app.status,
+        &["running", "stopped", "maintenance"],
+        "status",
+    )?;
     if let Some(port) = app.port {
         validate_port(port)?;
+    }
+    if let Some(ref owners) = app.owners {
+        if owners.len() > 20 {
+            return Err("owners length must be <= 20".into());
+        }
+        for owner in owners {
+            validate_string_length(owner, 1, 50, "owner")?;
+        }
+    }
+    Ok(())
+}
+
+pub fn validate_business_application(app: &BusinessApplication) -> Result<(), String> {
+    validate_required(&app.name, "name")?;
+    validate_string_length(&app.name, 1, 200, "name")?;
+    validate_enum(&app.status, &["active", "inactive"], "status")?;
+    if let Some(env) = app.env.as_deref() {
+        if !env.trim().is_empty() {
+            validate_enum(env, &["prod", "dev", "test"], "env")?;
+        }
+    }
+    if let Some(code) = app.code.as_deref() {
+        if !code.trim().is_empty() {
+            validate_string_length(code.trim(), 1, 64, "code")?;
+        }
+    }
+    if let Some(ref owners) = app.owners {
+        if owners.len() > 20 {
+            return Err("owners length must be <= 20".into());
+        }
+        for owner in owners {
+            if !owner.trim().is_empty() {
+                validate_string_length(owner.trim(), 1, 50, "owner")?;
+            }
+        }
     }
     Ok(())
 }
@@ -110,7 +212,14 @@ pub fn validate_middleware(mw: &Middleware) -> Result<(), String> {
     validate_string_length(&mw.name, 1, 200, "name")?;
     validate_enum(
         &mw.category,
-        &["database", "message_queue", "cache", "search_engine", "config_center", "other"],
+        &[
+            "database",
+            "message_queue",
+            "cache",
+            "search_engine",
+            "config_center",
+            "other",
+        ],
         "category",
     )?;
     validate_required(&mw.mw_type, "type")?;
@@ -125,6 +234,7 @@ pub fn validate_middleware(mw: &Middleware) -> Result<(), String> {
 pub fn validate_nginx_config(nc: &NginxConfig) -> Result<(), String> {
     validate_required(&nc.name, "name")?;
     validate_string_length(&nc.name, 1, 200, "name")?;
+    validate_required(&nc.address, "address")?;
     validate_enum(&nc.env, &["prod", "dev", "test"], "env")?;
     validate_enum(&nc.status, &["running", "stopped", "maintenance"], "status")?;
     if let Some(ref strategy) = nc.strategy {
@@ -164,7 +274,15 @@ pub fn validate_dependency(dep: &Dependency) -> Result<(), String> {
     validate_required(&dep.target_type, "target_type")?;
     validate_enum(
         &dep.relation_type,
-        &["http_call", "tcp", "mq_produce", "mq_consume"],
+        &[
+            "http_call",
+            "tcp",
+            "mq_produce",
+            "mq_consume",
+            "grpc_call",
+            "db_query",
+            "cache_access",
+        ],
         "relation_type",
     )?;
     Ok(())
@@ -282,7 +400,8 @@ mod tests {
         Host {
             id: "h1".into(),
             hostname: "server1".into(),
-            ip_address: "192.168.1.1".into(),
+            ip_display: Some("192.168.1.1".into()),
+            env: "prod".into(),
             os_type: None,
             cpu_model: None,
             cpu_cores: None,
@@ -306,16 +425,23 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_host_invalid_ip() {
+    fn test_validate_host_without_ip_display_is_allowed() {
         let mut host = make_test_host();
-        host.ip_address = "invalid".into();
-        assert!(validate_host(&host).is_err());
+        host.ip_display = None;
+        assert!(validate_host(&host).is_ok());
     }
 
     #[test]
     fn test_validate_host_invalid_status() {
         let mut host = make_test_host();
         host.status = "unknown".into();
+        assert!(validate_host(&host).is_err());
+    }
+
+    #[test]
+    fn test_validate_host_invalid_env() {
+        let mut host = make_test_host();
+        host.env = "staging".into();
         assert!(validate_host(&host).is_err());
     }
 
@@ -356,6 +482,9 @@ mod tests {
             env: "prod".into(),
             git_repo: None,
             owner: None,
+            owners: None,
+            business_application_id: None,
+            business_application_name: None,
             status: "running".into(),
             description: None,
             is_deleted: 0,
@@ -382,6 +511,34 @@ mod tests {
         let mut app = make_test_app();
         app.env = "staging".into();
         assert!(validate_application(&app).is_err());
+    }
+
+    fn make_test_business_application() -> BusinessApplication {
+        BusinessApplication {
+            id: "ba1".into(),
+            name: "支付中心".into(),
+            code: Some("PAY".into()),
+            owners: Some(vec!["alice".into()]),
+            description: None,
+            env: Some("prod".into()),
+            status: "active".into(),
+            is_deleted: 0,
+            deleted_at: None,
+            created_at: "2024-01-01T00:00:00Z".into(),
+            updated_at: "2024-01-01T00:00:00Z".into(),
+        }
+    }
+
+    #[test]
+    fn test_validate_business_application_valid() {
+        assert!(validate_business_application(&make_test_business_application()).is_ok());
+    }
+
+    #[test]
+    fn test_validate_business_application_invalid_status() {
+        let mut app = make_test_business_application();
+        app.status = "paused".into();
+        assert!(validate_business_application(&app).is_err());
     }
 
     // --- validate_middleware ---
@@ -420,6 +577,7 @@ mod tests {
         NginxConfig {
             id: "n1".into(),
             name: "nginx-main".into(),
+            address: "10.0.0.1".into(),
             listen_port: Some(80),
             strategy: Some("roundrobin".into()),
             upstream_servers: Some(r#"["10.0.0.1:8080"]"#.into()),
@@ -442,6 +600,13 @@ mod tests {
     fn test_validate_nginx_config_invalid_strategy() {
         let mut nc = make_test_nginx();
         nc.strategy = Some("random".into());
+        assert!(validate_nginx_config(&nc).is_err());
+    }
+
+    #[test]
+    fn test_validate_nginx_config_requires_address() {
+        let mut nc = make_test_nginx();
+        nc.address = "".into();
         assert!(validate_nginx_config(&nc).is_err());
     }
 
@@ -495,9 +660,75 @@ mod tests {
     }
 
     #[test]
+    fn test_validate_dependency_new_relation_types() {
+        let mut dep = make_test_dependency();
+        dep.relation_type = "grpc_call".into();
+        assert!(validate_dependency(&dep).is_ok());
+
+        dep.relation_type = "db_query".into();
+        assert!(validate_dependency(&dep).is_ok());
+
+        dep.relation_type = "cache_access".into();
+        assert!(validate_dependency(&dep).is_ok());
+    }
+
+    #[test]
     fn test_validate_dependency_invalid_relation_type() {
         let mut dep = make_test_dependency();
-        dep.relation_type = "grpc".into();
+        dep.relation_type = "invalid_relation".into();
         assert!(validate_dependency(&dep).is_err());
+    }
+
+    // --- validate_ip_address_resource ---
+    fn make_test_ip_address() -> IpAddress {
+        IpAddress {
+            id: "ip1".into(),
+            ip_address: "10.0.0.10".into(),
+            env: "prod".into(),
+            is_vip: false,
+            real_ips: None,
+            tags: None,
+            description: None,
+            is_deleted: 0,
+            deleted_at: None,
+            created_at: "2024-01-01T00:00:00Z".into(),
+            updated_at: "2024-01-01T00:00:00Z".into(),
+        }
+    }
+
+    #[test]
+    fn test_validate_ip_address_resource_valid_normal_ip() {
+        assert!(validate_ip_address_resource(&make_test_ip_address()).is_ok());
+    }
+
+    #[test]
+    fn test_validate_ip_address_resource_vip_requires_real_ips() {
+        let mut ip = make_test_ip_address();
+        ip.is_vip = true;
+        ip.real_ips = Some("[]".into());
+        assert!(validate_ip_address_resource(&ip).is_err());
+    }
+
+    #[test]
+    fn test_validate_ip_address_resource_vip_real_ips_must_be_ipv4() {
+        let mut ip = make_test_ip_address();
+        ip.is_vip = true;
+        ip.real_ips = Some(r#"["10.0.0.11","invalid-ip"]"#.into());
+        assert!(validate_ip_address_resource(&ip).is_err());
+    }
+
+    #[test]
+    fn test_validate_ip_address_resource_non_vip_should_not_have_real_ips() {
+        let mut ip = make_test_ip_address();
+        ip.is_vip = false;
+        ip.real_ips = Some(r#"["10.0.0.11"]"#.into());
+        assert!(validate_ip_address_resource(&ip).is_err());
+    }
+
+    #[test]
+    fn test_validate_ip_address_resource_tags_should_be_json_array() {
+        let mut ip = make_test_ip_address();
+        ip.tags = Some(r#"{"bad":"json"}"#.into());
+        assert!(validate_ip_address_resource(&ip).is_err());
     }
 }

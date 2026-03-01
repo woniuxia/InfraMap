@@ -1,6 +1,6 @@
-use std::path::{Path, PathBuf};
-use rusqlite::backup::Backup;
 use crate::db::DbPool;
+use rusqlite::backup::Backup;
+use std::path::{Path, PathBuf};
 
 pub struct AppDataDir(pub PathBuf);
 
@@ -17,7 +17,8 @@ pub fn perform_backup(pool: &DbPool, dest_path: &Path) -> Result<(), String> {
         .map_err(|e| format!("Failed to open backup destination: {}", e))?;
     let backup = Backup::new(&src_conn, &mut dst_conn)
         .map_err(|e| format!("Failed to initialize backup: {}", e))?;
-    backup.run_to_completion(100, std::time::Duration::from_millis(50), None)
+    backup
+        .run_to_completion(100, std::time::Duration::from_millis(50), None)
         .map_err(|e| format!("Backup failed: {}", e))?;
     Ok(())
 }
@@ -37,7 +38,9 @@ pub fn enforce_max_backups(backup_dir: &Path, max_backups: usize) -> Result<(), 
     }
 
     entries.sort_by_key(|e| {
-        e.metadata().and_then(|m| m.modified()).unwrap_or(std::time::SystemTime::UNIX_EPOCH)
+        e.metadata()
+            .and_then(|m| m.modified())
+            .unwrap_or(std::time::SystemTime::UNIX_EPOCH)
     });
 
     let to_remove = entries.len() - max_backups;
@@ -67,53 +70,51 @@ pub fn read_backup_settings(pool: &DbPool) -> Result<(bool, i64, i64, Option<Str
 }
 
 pub fn start_auto_backup_thread(pool: DbPool, app_data_dir: PathBuf) {
-    std::thread::spawn(move || {
-        loop {
-            let settings = match read_backup_settings(&pool) {
-                Ok(s) => s,
-                Err(_) => {
-                    std::thread::sleep(std::time::Duration::from_secs(3600));
-                    continue;
+    std::thread::spawn(move || loop {
+        let settings = match read_backup_settings(&pool) {
+            Ok(s) => s,
+            Err(_) => {
+                std::thread::sleep(std::time::Duration::from_secs(3600));
+                continue;
+            }
+        };
+
+        let (enabled, interval_hours, max_backups, last_backup_time) = settings;
+
+        if enabled {
+            let should_backup = match last_backup_time {
+                Some(ref t) => {
+                    if let Ok(last) = chrono::DateTime::parse_from_rfc3339(t) {
+                        let elapsed = chrono::Utc::now().signed_duration_since(last);
+                        elapsed.num_hours() >= interval_hours
+                    } else {
+                        true
+                    }
                 }
+                None => true,
             };
 
-            let (enabled, interval_hours, max_backups, last_backup_time) = settings;
+            if should_backup {
+                if let Ok(backup_dir) = get_backup_dir(&app_data_dir) {
+                    let now = chrono::Utc::now().format("%Y%m%d_%H%M%S");
+                    let filename = format!("backup_auto_{}.db", now);
+                    let dest = backup_dir.join(&filename);
 
-            if enabled {
-                let should_backup = match last_backup_time {
-                    Some(ref t) => {
-                        if let Ok(last) = chrono::DateTime::parse_from_rfc3339(t) {
-                            let elapsed = chrono::Utc::now().signed_duration_since(last);
-                            elapsed.num_hours() >= interval_hours
-                        } else {
-                            true
-                        }
-                    }
-                    None => true,
-                };
-
-                if should_backup {
-                    if let Ok(backup_dir) = get_backup_dir(&app_data_dir) {
-                        let now = chrono::Utc::now().format("%Y%m%d_%H%M%S");
-                        let filename = format!("backup_auto_{}.db", now);
-                        let dest = backup_dir.join(&filename);
-
-                        if perform_backup(&pool, &dest).is_ok() {
-                            let now_rfc = chrono::Utc::now().to_rfc3339();
-                            if let Ok(conn) = pool.get() {
-                                let _ = conn.execute(
+                    if perform_backup(&pool, &dest).is_ok() {
+                        let now_rfc = chrono::Utc::now().to_rfc3339();
+                        if let Ok(conn) = pool.get() {
+                            let _ = conn.execute(
                                     "UPDATE system_settings SET last_backup_time = ?1, updated_at = ?2 WHERE id = 'default'",
                                     rusqlite::params![now_rfc, now_rfc],
                                 );
-                            }
-                            let _ = enforce_max_backups(&backup_dir, max_backups as usize);
                         }
+                        let _ = enforce_max_backups(&backup_dir, max_backups as usize);
                     }
                 }
             }
-
-            std::thread::sleep(std::time::Duration::from_secs(3600));
         }
+
+        std::thread::sleep(std::time::Duration::from_secs(3600));
     });
 }
 
@@ -136,7 +137,8 @@ mod tests {
         enforce_max_backups(&dir, 5).unwrap();
 
         // All 3 should remain
-        let count = fs::read_dir(&dir).unwrap()
+        let count = fs::read_dir(&dir)
+            .unwrap()
             .filter_map(|e| e.ok())
             .filter(|e| e.file_name().to_string_lossy().starts_with("backup_"))
             .count();
@@ -161,7 +163,8 @@ mod tests {
         enforce_max_backups(&dir, 3).unwrap();
 
         // Only 3 should remain
-        let remaining: Vec<String> = fs::read_dir(&dir).unwrap()
+        let remaining: Vec<String> = fs::read_dir(&dir)
+            .unwrap()
             .filter_map(|e| e.ok())
             .filter(|e| e.file_name().to_string_lossy().starts_with("backup_"))
             .map(|e| e.file_name().to_string_lossy().to_string())

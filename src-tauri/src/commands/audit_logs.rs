@@ -1,7 +1,9 @@
 use tauri::State;
+
 use crate::db::DbPool;
-use crate::models::common::{QueryParams, PagedResult};
+use crate::error::{AppError, AppResult};
 use crate::models::audit_log::AuditLog;
+use crate::models::common::{PagedResult, QueryParams};
 
 fn row_to_audit_log(row: &rusqlite::Row) -> rusqlite::Result<AuditLog> {
     Ok(AuditLog {
@@ -19,10 +21,15 @@ const SELECT_COLUMNS: &str =
     "id, action, resource_type, resource_id, resource_name, changes, created_at";
 
 #[tauri::command]
-pub fn list_audit_logs(pool: State<DbPool>, params: QueryParams) -> Result<PagedResult<AuditLog>, String> {
-    let conn = pool.get().map_err(|e| format!("Pool error: {}", e))?;
+pub fn list_audit_logs(
+    pool: State<DbPool>,
+    params: QueryParams,
+) -> AppResult<PagedResult<AuditLog>> {
+    let command = "list_audit_logs";
+    let conn = pool
+        .get()
+        .map_err(|e| AppError::db_unavailable(command, format!("Pool error: {}", e)))?;
 
-    // Build where clause manually (audit_logs has no is_deleted)
     let mut conditions: Vec<String> = Vec::new();
     let mut sql_params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
 
@@ -54,13 +61,15 @@ pub fn list_audit_logs(pool: State<DbPool>, params: QueryParams) -> Result<Paged
         format!("WHERE {}", conditions.join(" AND "))
     };
 
-    // Count
     let count_sql = format!("SELECT COUNT(*) FROM audit_logs {}", where_clause);
-    let param_refs: Vec<&dyn rusqlite::types::ToSql> = sql_params.iter().map(|p| p.as_ref()).collect();
+    let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+        sql_params.iter().map(|p| p.as_ref()).collect();
     let total: u64 = conn
-        .query_row(&count_sql, param_refs.as_slice(), |row| row.get::<_, i64>(0))
+        .query_row(&count_sql, param_refs.as_slice(), |row| {
+            row.get::<_, i64>(0)
+        })
         .map(|c| c as u64)
-        .map_err(|e| format!("Count failed: {}", e))?;
+        .map_err(|e| AppError::from_db_error(command, "统计审计日志数量", e))?;
 
     let page = params.page();
     let page_size = params.page_size();
@@ -75,13 +84,21 @@ pub fn list_audit_logs(pool: State<DbPool>, params: QueryParams) -> Result<Paged
     all_params.push(Box::new(page_size as i64));
     all_params.push(Box::new(offset as i64));
 
-    let param_refs: Vec<&dyn rusqlite::types::ToSql> = all_params.iter().map(|p| p.as_ref()).collect();
-    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+    let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+        all_params.iter().map(|p| p.as_ref()).collect();
+    let mut stmt = conn
+        .prepare(&sql)
+        .map_err(|e| AppError::from_db_error(command, "读取审计日志", e))?;
     let rows = stmt
         .query_map(param_refs.as_slice(), row_to_audit_log)
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| AppError::from_db_error(command, "遍历审计日志", e))?;
 
     let data: Vec<AuditLog> = rows.filter_map(|r| r.ok()).collect();
 
-    Ok(PagedResult { data, total, page, page_size })
+    Ok(PagedResult {
+        data,
+        total,
+        page,
+        page_size,
+    })
 }

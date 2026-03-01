@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildSearchToolbarQuery,
   createEmptyFilters,
-  getActiveFilterChips,
+  isEmptyFilterValue,
 } from "@/components/filters/searchToolbar.utils";
 import type { SearchFieldConfig } from "@/types/searchToolbar";
 
@@ -52,17 +52,10 @@ describe("searchToolbar.utils", () => {
     });
   });
 
-  it("getActiveFilterChips should summarize multi values and include search", () => {
-    const chips = getActiveFilterChips("gateway", "内容", fields, {
-      status: ["running", "stopped", "maintenance"],
-      owner: "alice",
-    });
-
-    expect(chips).toEqual([
-      { id: "__search__", key: "__search__", label: "内容", value: "gateway" },
-      { id: "status", key: "status", label: "状态", value: "运行中, 已停止 +1" },
-      { id: "owner", key: "owner", label: "负责人", value: "alice" },
-    ]);
+  it("isEmptyFilterValue should identify empty and non-empty values", () => {
+    expect(isEmptyFilterValue(fields[0], [])).toBe(true);
+    expect(isEmptyFilterValue(fields[0], ["running"])).toBe(false);
+    expect(isEmptyFilterValue(fields[1], "  ")).toBe(true);
+    expect(isEmptyFilterValue(fields[1], "alice")).toBe(false);
   });
 });
-

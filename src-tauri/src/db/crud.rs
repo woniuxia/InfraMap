@@ -1,5 +1,5 @@
-use rusqlite::Connection;
 use crate::models::common::QueryParams;
+use rusqlite::Connection;
 
 fn parse_filter_values(raw: &str) -> Vec<String> {
     let trimmed = raw.trim();
@@ -111,8 +111,8 @@ pub fn soft_delete(conn: &Connection, table: &str, id: &str) -> Result<(), Strin
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_helpers::*;
     use crate::models::common::QueryParams;
+    use crate::test_helpers::*;
     use std::collections::HashMap;
 
     #[test]
@@ -166,7 +166,10 @@ mod tests {
     #[test]
     fn test_build_where_clause_with_multi_value_filter() {
         let mut filters = HashMap::new();
-        filters.insert("status".to_string(), r#"["running","maintenance"]"#.to_string());
+        filters.insert(
+            "status".to_string(),
+            r#"["running","maintenance"]"#.to_string(),
+        );
         let params = QueryParams {
             filters: Some(filters),
             ..Default::default()

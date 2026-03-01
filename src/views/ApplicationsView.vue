@@ -1,13 +1,22 @@
-﻿<script setup lang="ts">
-import { ref, onMounted, nextTick } from "vue";
+<script setup lang="ts">
+import { computed, ref, onMounted } from "vue";
 import { ElMessage } from "element-plus";
 import type { Application } from "@/types";
 import type { SearchFieldConfig, SearchToolbarQueryPayload } from "@/types/searchToolbar";
-import { listApplications, saveApplication, softDeleteApplication } from "@/api/applications";
+import {
+  listApplications,
+  saveApplication,
+  softDeleteApplication,
+} from "@/api/applications";
+import { listApplicationOwnerTerms, listApplicationTechStackTerms } from "@/api/taxonomy";
+import type { TaxonomyAppType } from "@/api/taxonomy";
+import { replaceResourceCallRelations } from "@/api/call-relations";
 import { useResourceList } from "@/composables/useResourceList";
+import { buildTechStackSuggestions, parseTechStack, techStackToText } from "@/utils/techStack";
+import { buildApplicationCopyDraft } from "@/utils/resourceCopy";
 import SearchToolbar from "@/components/filters/SearchToolbar.vue";
+import CallRelationsEditor from "@/components/CallRelationsEditor.vue";
 import DeploymentPanel from "@/components/DeploymentPanel.vue";
-import DependencyPanel from "@/components/DependencyPanel.vue";
 
 const {
   loading,
@@ -22,7 +31,7 @@ const {
 } = useResourceList<Application>({
   listFn: listApplications,
   deleteFn: softDeleteApplication,
-  entityLabel: "搴旂敤鏈嶅姟",
+  entityLabel: "应用服务",
 });
 
 const searchText = ref("");
@@ -32,9 +41,17 @@ const isEditing = ref(false);
 const saveLoading = ref(false);
 
 const techStackList = ref<string[]>([]);
-const techStackInputVisible = ref(false);
-const techStackInputValue = ref("");
-const techStackInputRef = ref<InstanceType<typeof import("element-plus")["ElInput"]>>();
+const topTechStackOptions = ref<string[]>([]);
+const ownerList = ref<string[]>([]);
+const ownerOptions = ref<string[]>([]);
+const techStackSuggestions = computed(() =>
+  buildTechStackSuggestions(
+    topTechStackOptions.value.map((item) => ({ tech_stack: item })),
+    techStackList.value
+  )
+);
+const ownerSuggestions = computed(() => normalizeOwners([...ownerOptions.value, ...ownerList.value], ""));
+const callRelationsEditorRef = ref<InstanceType<typeof CallRelationsEditor> | null>(null);
 
 interface ApplicationListFilters {
   type: string[];
@@ -113,7 +130,6 @@ const toolbarFields: SearchFieldConfig[] = [
     key: "deploy_mode",
     queryKey: "deploy_mode",
     label: "部署方式",
-    section: "advanced",
     type: "multi-select",
     width: "md",
     options: deployModeOptions,
@@ -124,38 +140,27 @@ function handleToolbarQuery(payload: SearchToolbarQueryPayload) {
   handleQuery(payload);
 }
 
-function parseTechStack(value?: string): string[] {
-  if (!value) return [];
-  return value
-    .split(/[,，;；|/]/)
-    .map((x) => x.trim())
-    .filter(Boolean);
+function handleTechStackChange(values: string[]) {
+  techStackList.value = buildTechStackSuggestions([], values);
 }
 
-function techStackToText(list: string[]): string {
-  return list.join(", ");
+function normalizeOwners(owners?: string[], owner?: string) {
+  const values = [...(owners ?? []), owner ?? ""]
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+  return Array.from(new Set(values));
 }
 
-function handleTechStackClose(tag: string) {
-  techStackList.value = techStackList.value.filter((t) => t !== tag);
-  editingApp.value.tech_stack = techStackToText(techStackList.value);
+function handleOwnerChange(values: string[]) {
+  ownerList.value = normalizeOwners(values);
 }
 
-function showTechStackInput() {
-  techStackInputVisible.value = true;
-  nextTick(() => {
-    techStackInputRef.value?.input?.focus();
-  });
+function ownersForRow(row: Application) {
+  return normalizeOwners(row.owners, row.owner);
 }
 
-function handleTechStackInputConfirm() {
-  const value = techStackInputValue.value.trim();
-  if (value && !techStackList.value.includes(value)) {
-    techStackList.value.push(value);
-    editingApp.value.tech_stack = techStackToText(techStackList.value);
-  }
-  techStackInputVisible.value = false;
-  techStackInputValue.value = "";
+function resolveTechStackSide(type: Application["type"] | undefined): TaxonomyAppType {
+  return type === "frontend" ? "frontend" : "backend";
 }
 
 function applyDefaultPortByType(type: Application["type"] | undefined) {
@@ -180,36 +185,93 @@ function openAdd() {
     updated_at: "",
   };
   techStackList.value = [];
+  ownerList.value = [];
+  topTechStackOptions.value = [];
+  ownerOptions.value = [];
   isEditing.value = false;
   drawerVisible.value = true;
+  fetchTopTechStackOptions(editingApp.value.type);
+  fetchOwnerOptions();
 }
 
 function openEdit(row: Application) {
   editingApp.value = { ...row };
   techStackList.value = parseTechStack(row.tech_stack);
+  ownerList.value = normalizeOwners(row.owners, row.owner);
   isEditing.value = true;
   drawerVisible.value = true;
+  fetchTopTechStackOptions(editingApp.value.type);
+  fetchOwnerOptions();
+}
+
+function openCopy(row: Application) {
+  editingApp.value = buildApplicationCopyDraft(row);
+  techStackList.value = parseTechStack(editingApp.value.tech_stack);
+  ownerList.value = normalizeOwners(editingApp.value.owners, editingApp.value.owner);
+  isEditing.value = false;
+  drawerVisible.value = true;
+  fetchTopTechStackOptions(editingApp.value.type);
+  fetchOwnerOptions();
 }
 
 function handleTypeChange(type: Application["type"] | undefined) {
   applyDefaultPortByType(type);
+  fetchTopTechStackOptions(type);
+}
+
+async function fetchTopTechStackOptions(type: Application["type"] | undefined) {
+  try {
+    topTechStackOptions.value = await listApplicationTechStackTerms({
+      app_type: resolveTechStackSide(type),
+      limit: 10,
+    });
+  } catch {
+    // error shown by tauriInvoke
+  }
+}
+
+async function fetchOwnerOptions() {
+  try {
+    ownerOptions.value = await listApplicationOwnerTerms(100);
+  } catch {
+    // error shown by tauriInvoke
+  }
 }
 
 async function handleSave() {
+  const draftItems = callRelationsEditorRef.value?.getDraftItems();
+  if (draftItems === null) {
+    return;
+  }
+
+  const owners = normalizeOwners(ownerList.value);
   const payload: Partial<Application> = {
     id: "",
     is_deleted: 0,
     created_at: "",
     updated_at: "",
     ...editingApp.value,
+    owner: owners[0],
+    owners,
     tech_stack: techStackToText(techStackList.value),
   };
   saveLoading.value = true;
   try {
-    await saveApplication(payload);
-    ElMessage.success(isEditing.value ? "鏇存柊鎴愬姛" : "鍒涘缓鎴愬姛");
+    const appId = await saveApplication(payload);
+    try {
+      await replaceResourceCallRelations({
+        resource_id: appId,
+        resource_type: "application",
+        items: draftItems ?? [],
+      });
+    } catch {
+      ElMessage.warning("应用已保存，调用关系保存失败，请重新编辑后重试。");
+    }
+    ElMessage.success(isEditing.value ? "更新成功" : "创建成功");
     drawerVisible.value = false;
     fetchData();
+    fetchTopTechStackOptions((payload.type as Application["type"] | undefined) ?? editingApp.value.type);
+    fetchOwnerOptions();
   } catch {
     // error shown by tauriInvoke
   } finally {
@@ -256,7 +318,11 @@ function envTagType(env: string): "primary" | "success" | "warning" | "info" | "
   return map[env] || "info";
 }
 
-onMounted(() => fetchData());
+onMounted(() => {
+  fetchData();
+  fetchTopTechStackOptions("backend");
+  fetchOwnerOptions();
+});
 </script>
 
 <template>
@@ -274,7 +340,7 @@ onMounted(() => fetchData());
       </template>
     </SearchToolbar>
 
-    <el-table :data="data" v-loading="loading" border stripe class="w-full">
+    <el-table :data="data" v-loading="loading" border stripe class="w-full im-table-fixed-ops">
       <el-table-column prop="name" label="服务名称" min-width="150" align="center" />
       <el-table-column prop="type" label="类型" width="100" align="center">
         <template #default="{ row }">{{ typeLabel(row.type) }}</template>
@@ -288,16 +354,27 @@ onMounted(() => fetchData());
         </template>
       </el-table-column>
       <el-table-column prop="tech_stack" label="技术栈" width="140" show-overflow-tooltip align="center" />
-      <el-table-column prop="owner" label="负责人" width="100" align="center" />
+      <el-table-column label="负责人" min-width="160" align="center">
+        <template #default="{ row }">
+          <div v-if="ownersForRow(row).length > 0" class="owner-tags">
+            <el-tag v-for="owner in ownersForRow(row)" :key="owner" size="small" effect="plain">{{ owner }}</el-tag>
+          </div>
+          <span v-else>-</span>
+        </template>
+      </el-table-column>
+      <el-table-column prop="business_application_name" label="所属业务应用" min-width="150" align="center">
+        <template #default="{ row }">{{ row.business_application_name || "-" }}</template>
+      </el-table-column>
       <el-table-column prop="status" label="状态" width="100" align="center">
         <template #default="{ row }">
           <el-tag :type="statusTagType(row.status)" size="small">{{ statusLabel(row.status) }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="150" fixed="right" align="center">
+      <el-table-column label="操作" width="210" fixed="right" align="center">
         <template #default="{ row }">
-          <el-button text type="primary" size="small" @click="openEdit(row)">缂栬緫</el-button>
-          <el-button text type="danger" size="small" @click="handleDelete(row.id, row.name)">鍒犻櫎</el-button>
+          <el-button text type="primary" size="small" @click="openEdit(row)">编辑</el-button>
+          <el-button text type="primary" size="small" @click="openCopy(row)">复制</el-button>
+          <el-button text type="danger" size="small" @click="handleDelete(row.id, row.name)">删除</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -345,28 +422,19 @@ onMounted(() => fetchData());
 
         <el-divider content-position="left">部署信息</el-divider>
         <el-form-item label="技术栈">
-          <div class="tag-editor">
-            <el-tag
-              v-for="tag in techStackList"
-              :key="tag"
-              closable
-              :disable-transitions="false"
-              @close="handleTechStackClose(tag)"
-              class="tag-item"
-            >
-              {{ tag }}
-            </el-tag>
-            <el-input
-              v-if="techStackInputVisible"
-              ref="techStackInputRef"
-              v-model="techStackInputValue"
-              size="small"
-              class="w-140"
-              @keyup.enter="handleTechStackInputConfirm"
-              @blur="handleTechStackInputConfirm"
-            />
-            <el-button v-else size="small" @click="showTechStackInput">+ 添加技术栈</el-button>
-          </div>
+          <el-select
+            v-model="techStackList"
+            class="w-full"
+            multiple
+            filterable
+            allow-create
+            default-first-option
+            :reserve-keyword="false"
+            placeholder="输入技术栈进行筛选，按回车可新增"
+            @change="(values) => handleTechStackChange(values as string[])"
+          >
+            <el-option v-for="item in techStackSuggestions" :key="item" :label="item" :value="item" />
+          </el-select>
         </el-form-item>
         <el-form-item label="部署方式">
           <el-select v-model="editingApp.deploy_mode" clearable placeholder="请选择部署方式" class="w-full">
@@ -384,7 +452,26 @@ onMounted(() => fetchData());
           <el-input v-model="editingApp.git_repo" placeholder="Git 仓库地址" />
         </el-form-item>
         <el-form-item label="负责人">
-          <el-input v-model="editingApp.owner" placeholder="负责人姓名" />
+          <el-select
+            v-model="ownerList"
+            class="w-full"
+            multiple
+            filterable
+            allow-create
+            default-first-option
+            :reserve-keyword="false"
+            placeholder="输入负责人姓名进行筛选，按回车可新增"
+            @change="(values) => handleOwnerChange(values as string[])"
+          >
+            <el-option v-for="item in ownerSuggestions" :key="item" :label="item" :value="item" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="所属业务应用">
+          <el-input
+            :model-value="editingApp.business_application_name || '-'"
+            disabled
+            placeholder="请在“业务应用”页面维护"
+          />
         </el-form-item>
 
         <el-divider content-position="left">运维信息</el-divider>
@@ -400,12 +487,22 @@ onMounted(() => fetchData());
         </el-form-item>
       </el-form>
 
-      <DeploymentPanel v-if="isEditing && editingApp.id" :resource-id="editingApp.id!" resource-type="application" />
-      <DependencyPanel v-if="isEditing && editingApp.id" :resource-id="editingApp.id!" resource-type="application" />
+      <CallRelationsEditor
+        ref="callRelationsEditorRef"
+        :resource-id="isEditing ? editingApp.id : undefined"
+        resource-type="application"
+      />
+
+      <DeploymentPanel
+        v-if="isEditing && editingApp.id"
+        :resource-id="editingApp.id!"
+        resource-type="application"
+        :default-port="editingApp.port"
+      />
 
       <template #footer>
-        <el-button @click="drawerVisible = false">鍙栨秷</el-button>
-        <el-button type="primary" :loading="saveLoading" @click="handleSave">淇濆瓨</el-button>
+        <el-button @click="drawerVisible = false">取消</el-button>
+        <el-button type="primary" :loading="saveLoading" @click="handleSave">保存</el-button>
       </template>
     </el-dialog>
   </div>
@@ -556,15 +653,13 @@ onMounted(() => fetchData());
   display: flex;
   justify-content: flex-end;
 }
-.tag-editor {
+
+.owner-tags {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
+  justify-content: center;
   gap: 4px;
 }
-.tag-item {
-  margin-right: 6px;
-  margin-bottom: 4px;
-}
 </style>
+
 

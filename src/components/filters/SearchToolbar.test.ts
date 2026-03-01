@@ -82,6 +82,14 @@ const statusField: SearchFieldConfig = {
   ],
 };
 
+const ownerField: SearchFieldConfig = {
+  key: "owner",
+  label: "负责人",
+  queryKey: "owner",
+  type: "text",
+  section: "advanced",
+};
+
 function mountToolbar(props?: Partial<InstanceType<typeof SearchToolbar>["$props"]>) {
   return mount(SearchToolbar, {
     props: {
@@ -161,5 +169,33 @@ describe("SearchToolbar", () => {
       search: "",
       filters: {},
     });
+  });
+
+  it("aligns action slot to the right when advanced toggle is absent", () => {
+    const wrapper = mountToolbar({
+      fields: [statusField],
+    });
+
+    expect(wrapper.get(".im-search-ops").classes()).toContain("im-search-ops--actions-only");
+  });
+
+  it("keeps default ops layout when advanced toggle is present", () => {
+    const wrapper = mountToolbar({
+      fields: [statusField, ownerField],
+    });
+
+    expect(wrapper.get(".im-search-ops").classes()).not.toContain("im-search-ops--actions-only");
+  });
+
+  it("does not render active chip row even when filters are active", () => {
+    const wrapper = mountToolbar({
+      searchText: "prod",
+      fields: [statusField],
+      filters: {
+        status: [],
+      },
+    });
+
+    expect(wrapper.find(".im-search-chip-row").exists()).toBe(false);
   });
 });

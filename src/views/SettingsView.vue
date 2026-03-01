@@ -176,8 +176,12 @@ async function handleImport() {
     importLoading.value = true;
     const result: ImportResult = await importJson(filepath);
     ElMessage.success("数据导入成功");
+    const ownerLine =
+      typeof result.application_owners_imported === "number"
+        ? `\n- 应用负责人: ${result.application_owners_imported}`
+        : "";
     ElMessageBox.alert(
-      `导入完成：\n- 服务器: ${result.hosts_imported}\n- 应用: ${result.applications_imported}\n- 中间件: ${result.middlewares_imported}\n- Nginx: ${result.nginx_configs_imported}\n- 部署: ${result.deployments_imported}\n- 依赖: ${result.dependencies_imported}`,
+      `导入完成：\n- 服务器: ${result.hosts_imported}\n- 应用: ${result.applications_imported}${ownerLine}\n- 中间件: ${result.middlewares_imported}\n- Nginx: ${result.nginx_configs_imported}\n- 部署: ${result.deployments_imported}\n- 调用关系: ${result.call_relations_imported}`,
       "导入结果"
     );
   } catch {
@@ -289,7 +293,7 @@ onMounted(() => {
         v-loading="backupsLoading"
         border
         stripe
-        class="w-full"
+        class="w-full im-table-fixed-ops"
         empty-text="暂无备份"
       >
         <el-table-column prop="filename" label="文件名" min-width="280" />
@@ -363,7 +367,7 @@ onMounted(() => {
           <el-descriptions-item label="中间件">{{ previewData.middlewares }}</el-descriptions-item>
           <el-descriptions-item label="Nginx 配置">{{ previewData.nginx_configs }}</el-descriptions-item>
           <el-descriptions-item label="部署关系">{{ previewData.deployments }}</el-descriptions-item>
-          <el-descriptions-item label="依赖关系">{{ previewData.dependencies }}</el-descriptions-item>
+          <el-descriptions-item label="调用关系">{{ previewData.call_relations }}</el-descriptions-item>
           <el-descriptions-item label="Schema 版本">{{ previewData.schema_version }}</el-descriptions-item>
           <el-descriptions-item label="兼容性">
             <el-tag :type="previewData.is_compatible ? 'success' : 'danger'" size="small">

@@ -11,7 +11,8 @@ export {}
 /* prettier-ignore */
 declare module 'vue' {
   export interface GlobalComponents {
-    DependencyPanel: typeof import('./components/DependencyPanel.vue')['default']
+    CallRelationsEditor: typeof import('./components/CallRelationsEditor.vue')['default']
+    CopyableTextCell: typeof import('./components/table/CopyableTextCell.vue')['default']
     DeploymentPanel: typeof import('./components/DeploymentPanel.vue')['default']
     ElAlert: typeof import('element-plus/es')['ElAlert']
     ElAside: typeof import('element-plus/es')['ElAside']
@@ -56,6 +57,7 @@ declare module 'vue' {
     ElTableColumn: typeof import('element-plus/es')['ElTableColumn']
     ElTag: typeof import('element-plus/es')['ElTag']
     ElText: typeof import('element-plus/es')['ElText']
+    ErrorDetailDialog: typeof import('./components/ErrorDetailDialog.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
     SearchToolbar: typeof import('./components/filters/SearchToolbar.vue')['default']

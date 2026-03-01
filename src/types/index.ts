@@ -1,7 +1,8 @@
 export interface Host {
   id: string;
   hostname: string;
-  ip_address: string;
+  ip_display?: string;
+  env: "prod" | "dev" | "test";
   os_type?: string;
   cpu_model?: string;
   cpu_cores?: number;
@@ -18,6 +19,38 @@ export interface Host {
   updated_at: string;
 }
 
+export interface IpAddress {
+  id: string;
+  ip_address: string;
+  env: "prod" | "dev" | "test";
+  is_vip: boolean;
+  real_ips?: string;
+  tags?: string;
+  description?: string;
+  is_deleted: number;
+  deleted_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BatchCreateIpParams {
+  start_ip: string;
+  end_ip: string;
+  env: "prod" | "dev" | "test";
+  tags?: string;
+  description?: string;
+}
+
+export interface BatchCreateIpResult {
+  created_count: number;
+  skipped_count: number;
+}
+
+export interface HostIpBindingPayload {
+  host_id: string;
+  ip_id: string;
+}
+
 export interface Application {
   id: string;
   name: string;
@@ -29,12 +62,45 @@ export interface Application {
   env: "prod" | "dev" | "test";
   git_repo?: string;
   owner?: string;
+  owners?: string[];
+  business_application_id?: string;
+  business_application_name?: string;
   status: "running" | "stopped" | "maintenance";
   description?: string;
   is_deleted: number;
   deleted_at?: string;
   created_at: string;
   updated_at: string;
+}
+
+export interface BusinessApplication {
+  id: string;
+  name: string;
+  code?: string;
+  owners?: string[];
+  description?: string;
+  env?: "prod" | "dev" | "test";
+  status: "active" | "inactive";
+  is_deleted: number;
+  deleted_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AttachServicesResult {
+  attached_count: number;
+  skipped_count: number;
+}
+
+export interface ReplaceServicesResult {
+  attached_count: number;
+  detached_count: number;
+  unchanged_count: number;
+}
+
+export interface BusinessApplicationServices {
+  frontend: Application[];
+  backend: Application[];
 }
 
 export interface Middleware {
@@ -56,6 +122,7 @@ export interface Middleware {
 export interface NginxConfig {
   id: string;
   name: string;
+  address: string;
   listen_port?: number;
   strategy?: "roundrobin" | "ip_hash";
   upstream_servers?: string;
@@ -80,18 +147,63 @@ export interface Deployment {
   updated_at: string;
 }
 
-export interface Dependency {
+export type DeploymentResourceType = "application" | "middleware" | "nginx";
+
+export interface ResourceDeployContext {
+  resource_type: DeploymentResourceType;
+  resource_id: string;
+  address?: string | null;
+  resource_env?: "prod" | "dev" | "test" | null;
+  parsed_ip?: string | null;
+  matched_host_id?: string | null;
+  matched_host_name?: string | null;
+}
+
+export type CallRelationType =
+  | "http_call"
+  | "tcp"
+  | "mq_produce"
+  | "mq_consume"
+  | "grpc_call"
+  | "db_query"
+  | "cache_access";
+
+export type CallDirection = "upstream" | "downstream";
+
+export interface CallRelation {
   id: string;
-  source_id: string;
-  source_type: string;
-  target_id: string;
-  target_type: string;
-  relation_type: "http_call" | "tcp" | "mq_produce" | "mq_consume";
+  pair_key: string;
+  owner_id: string;
+  owner_type: "application" | "middleware" | "nginx";
+  peer_id: string;
+  peer_type: "application" | "middleware" | "nginx";
+  direction: CallDirection;
+  relation_type: CallRelationType;
   description?: string;
   is_deleted: number;
   deleted_at?: string;
   created_at: string;
   updated_at: string;
+}
+
+export interface ReplaceCallRelationItem {
+  peer_id: string;
+  peer_type: "application" | "middleware" | "nginx";
+  direction: CallDirection;
+  relation_type: CallRelationType;
+  description?: string;
+}
+
+export interface ReplaceResourceCallRelationsParams {
+  resource_id: string;
+  resource_type: "application" | "middleware" | "nginx";
+  items: ReplaceCallRelationItem[];
+}
+
+export interface ReplaceResourceCallRelationsResult {
+  created_count: number;
+  deleted_count: number;
+  deduplicated_count: number;
 }
 
 export interface AuditLog {
@@ -159,7 +271,14 @@ export interface TopologyEdge {
   id: string;
   source: string;
   target: string;
-  edge_type: "http_call" | "tcp" | "mq_produce" | "mq_consume";
+  edge_type:
+    | "http_call"
+    | "tcp"
+    | "mq_produce"
+    | "mq_consume"
+    | "grpc_call"
+    | "db_query"
+    | "cache_access";
   label?: string;
 }
 
@@ -224,7 +343,7 @@ export interface DbPreviewSummary {
   middlewares: number;
   nginx_configs: number;
   deployments: number;
-  dependencies: number;
+  call_relations: number;
   schema_version: number;
   is_compatible: boolean;
 }
@@ -232,8 +351,9 @@ export interface DbPreviewSummary {
 export interface ImportResult {
   hosts_imported: number;
   applications_imported: number;
+  application_owners_imported?: number;
   middlewares_imported: number;
   nginx_configs_imported: number;
   deployments_imported: number;
-  dependencies_imported: number;
+  call_relations_imported: number;
 }

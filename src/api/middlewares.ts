@@ -9,8 +9,8 @@ export function getMiddleware(id: string): Promise<Middleware> {
   return tauriInvoke<Middleware>('get_middleware', { id })
 }
 
-export function saveMiddleware(data: Partial<Middleware>): Promise<void> {
-  return tauriInvoke<void>('save_middleware', { data })
+export function saveMiddleware(data: Partial<Middleware>): Promise<string> {
+  return tauriInvoke<string>('save_middleware', { data })
 }
 
 export function softDeleteMiddleware(id: string): Promise<void> {

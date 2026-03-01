@@ -1,8 +1,8 @@
-pub mod pool;
-pub mod migration;
-pub mod schema;
 pub mod audit;
 pub mod crud;
+pub mod migration;
+pub mod pool;
+pub mod schema;
 
-pub use pool::{DbPool, init_db_pool};
 pub use migration::run_migrations;
+pub use pool::{init_db_pool, DbPool};

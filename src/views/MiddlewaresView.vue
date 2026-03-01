@@ -1,11 +1,21 @@
-﻿<script setup lang="ts">
-import { ref, onMounted } from "vue";
+<script setup lang="ts">
+import { computed, ref, onMounted, watch } from "vue";
 import { ElMessage } from "element-plus";
 import type { Middleware } from "@/types";
 import type { SearchFieldConfig, SearchToolbarQueryPayload } from "@/types/searchToolbar";
 import { listMiddlewares, saveMiddleware, softDeleteMiddleware } from "@/api/middlewares";
+import { replaceResourceCallRelations } from "@/api/call-relations";
 import { useResourceList } from "@/composables/useResourceList";
+import {
+  MIDDLEWARE_CATEGORY_OPTIONS,
+  getMiddlewareCategoryLabel,
+  getMiddlewareDefaultPort,
+  getMiddlewareIconByType,
+  getMiddlewareTypeOptionsWithIcon,
+} from "@/utils/middlewareCatalog";
+import { buildMiddlewareCopyDraft } from "@/utils/resourceCopy";
 import SearchToolbar from "@/components/filters/SearchToolbar.vue";
+import CallRelationsEditor from "@/components/CallRelationsEditor.vue";
 import DeploymentPanel from "@/components/DeploymentPanel.vue";
 
 const {
@@ -29,6 +39,8 @@ const drawerVisible = ref(false);
 const editingMw = ref<Partial<Middleware>>({});
 const isEditing = ref(false);
 const saveLoading = ref(false);
+const autoFilledPort = ref<number | undefined>(undefined);
+const callRelationsEditorRef = ref<InstanceType<typeof CallRelationsEditor> | null>(null);
 
 interface MiddlewareListFilters {
   category: string[];
@@ -43,14 +55,11 @@ function createDefaultFilters(): MiddlewareListFilters {
 }
 
 const listFilters = ref<MiddlewareListFilters>(createDefaultFilters());
-const categoryOptions = [
-  { label: "数据库", value: "database" },
-  { label: "消息队列", value: "message_queue" },
-  { label: "缓存", value: "cache" },
-  { label: "搜索引擎", value: "search_engine" },
-  { label: "配置中心", value: "config_center" },
-  { label: "其他", value: "other" },
-];
+const categoryOptions = MIDDLEWARE_CATEGORY_OPTIONS;
+
+const middlewareTypeOptionsWithIcon = computed(() =>
+  getMiddlewareTypeOptionsWithIcon(editingMw.value.category, editingMw.value.type)
+);
 
 const envOptions = [
   { label: "生产", value: "prod" },
@@ -82,6 +91,7 @@ function handleToolbarQuery(payload: SearchToolbarQueryPayload) {
 }
 
 function openAdd() {
+  autoFilledPort.value = undefined;
   editingMw.value = {
     id: "",
     env: "prod",
@@ -95,12 +105,25 @@ function openAdd() {
 }
 
 function openEdit(row: Middleware) {
+  autoFilledPort.value = undefined;
   editingMw.value = { ...row };
   isEditing.value = true;
   drawerVisible.value = true;
 }
 
+function openCopy(row: Middleware) {
+  autoFilledPort.value = undefined;
+  editingMw.value = buildMiddlewareCopyDraft(row);
+  isEditing.value = false;
+  drawerVisible.value = true;
+}
+
 async function handleSave() {
+  const draftItems = callRelationsEditorRef.value?.getDraftItems();
+  if (draftItems === null) {
+    return;
+  }
+
   const payload: Partial<Middleware> = {
     id: "",
     is_deleted: 0,
@@ -110,8 +133,17 @@ async function handleSave() {
   };
   saveLoading.value = true;
   try {
-    await saveMiddleware(payload);
-    ElMessage.success(isEditing.value ? "鏇存柊鎴愬姛" : "鍒涘缓鎴愬姛");
+    const middlewareId = await saveMiddleware(payload);
+    try {
+      await replaceResourceCallRelations({
+        resource_id: middlewareId,
+        resource_type: "middleware",
+        items: draftItems ?? [],
+      });
+    } catch {
+      ElMessage.warning("中间件已保存，调用关系保存失败，请重新编辑后重试。");
+    }
+    ElMessage.success(isEditing.value ? "更新成功" : "创建成功");
     drawerVisible.value = false;
     fetchData();
   } catch {
@@ -122,16 +154,39 @@ async function handleSave() {
 }
 
 function categoryLabel(category: string) {
-  return (
-    ({
-      database: "数据库",
-      message_queue: "消息队列",
-      cache: "缓存",
-      search_engine: "搜索引擎",
-      config_center: "配置中心",
-      other: "其他",
-    } as Record<string, string>)[category] || category
-  );
+  return getMiddlewareCategoryLabel(category);
+}
+
+function middlewareTypeLabel(type?: string): string {
+  const normalized = (type ?? "").trim();
+  return normalized || "-";
+}
+
+function middlewareTypeIconSrc(row: Pick<Middleware, "category" | "type">): string {
+  return getMiddlewareIconByType(row.type, row.category).src;
+}
+
+function middlewareTypeIconAlt(row: Pick<Middleware, "category" | "type">): string {
+  return getMiddlewareIconByType(row.type, row.category).alt;
+}
+
+function middlewareTypeSlotValue(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (typeof value === "number") return String(value);
+  return "";
+}
+
+function middlewareTypeLabelBySlot(label: unknown, value: unknown): string {
+  if (typeof label === "string" && label.trim().length > 0) return label;
+  return middlewareTypeLabel(middlewareTypeSlotValue(value));
+}
+
+function middlewareTypeIconSrcBySlot(value: unknown): string {
+  return getMiddlewareIconByType(middlewareTypeSlotValue(value), editingMw.value.category).src;
+}
+
+function middlewareTypeIconAltBySlot(value: unknown): string {
+  return getMiddlewareIconByType(middlewareTypeSlotValue(value), editingMw.value.category).alt;
 }
 
 function envLabel(env: string) {
@@ -148,6 +203,19 @@ function envTagType(env: string): "primary" | "success" | "warning" | "info" | "
 }
 
 onMounted(() => fetchData());
+
+watch(
+  () => editingMw.value.type,
+  (newType) => {
+    const defaultPort = getMiddlewareDefaultPort(newType);
+    if (!defaultPort) return;
+    const currentPort = editingMw.value.port;
+    if (currentPort == null || currentPort === autoFilledPort.value) {
+      editingMw.value.port = defaultPort;
+      autoFilledPort.value = defaultPort;
+    }
+  }
+);
 </script>
 
 <template>
@@ -164,25 +232,37 @@ onMounted(() => fetchData());
         <el-button type="primary" @click="openAdd">新增中间件</el-button>
       </template>
     </SearchToolbar>
-    <el-table :data="data" v-loading="loading" border stripe class="w-full">
-      <el-table-column prop="name" label="瀹炰緥鍚嶇О" min-width="150" align="center" />
-      <el-table-column prop="category" label="鍒嗙被" width="100" align="center">
+    <el-table :data="data" v-loading="loading" border stripe class="w-full im-table-fixed-ops">
+      <el-table-column prop="name" label="实例名称" min-width="150" align="center" />
+      <el-table-column prop="category" label="分类" width="100" align="center">
         <template #default="{ row }">{{ categoryLabel(row.category) }}</template>
       </el-table-column>
-      <el-table-column prop="type" label="绫诲瀷" width="100" align="center" />
-      <el-table-column label="鍦板潃" min-width="180" align="center">
+      <el-table-column prop="type" label="类型" width="140" align="center">
+        <template #default="{ row }">
+          <div class="middleware-type-cell">
+            <img
+              :src="middlewareTypeIconSrc(row)"
+              :alt="middlewareTypeIconAlt(row)"
+              class="middleware-type-icon"
+            />
+            <span>{{ middlewareTypeLabel(row.type) }}</span>
+          </div>
+        </template>
+      </el-table-column>
+      <el-table-column label="地址" min-width="180" align="center">
         <template #default="{ row }"> {{ row.address || "-" }}{{ row.port ? ":" + row.port : "" }} </template>
       </el-table-column>
-      <el-table-column prop="version" label="鐗堟湰" width="100" align="center" />
-      <el-table-column prop="env" label="鐜" width="80" align="center">
+      <el-table-column prop="version" label="版本" width="100" align="center" />
+      <el-table-column prop="env" label="环境" width="80" align="center">
         <template #default="{ row }">
           <el-tag :type="envTagType(row.env)" size="small">{{ envLabel(row.env) }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="鎿嶄綔" width="150" fixed="right" align="center">
+      <el-table-column label="操作" width="210" fixed="right" align="center">
         <template #default="{ row }">
-          <el-button text type="primary" size="small" @click="openEdit(row)">缂栬緫</el-button>
-          <el-button text type="danger" size="small" @click="handleDelete(row.id, row.name)">鍒犻櫎</el-button>
+          <el-button text type="primary" size="small" @click="openEdit(row)">编辑</el-button>
+          <el-button text type="primary" size="small" @click="openCopy(row)">复制</el-button>
+          <el-button text type="danger" size="small" @click="handleDelete(row.id, row.name)">删除</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -213,16 +293,46 @@ onMounted(() => fetchData());
         </el-form-item>
         <el-form-item label="分类" required>
           <el-select v-model="editingMw.category" class="w-full">
-            <el-option label="数据库" value="database" />
-            <el-option label="消息队列" value="message_queue" />
-            <el-option label="缓存" value="cache" />
-            <el-option label="搜索引擎" value="search_engine" />
-            <el-option label="配置中心" value="config_center" />
-            <el-option label="其他" value="other" />
+            <el-option
+              v-for="option in categoryOptions"
+              :key="option.value"
+              :label="option.label"
+              :value="option.value"
+            />
           </el-select>
         </el-form-item>
         <el-form-item label="类型" required>
-          <el-input v-model="editingMw.type" placeholder="如 MySQL/Redis/Kafka" />
+          <el-select
+            v-model="editingMw.type"
+            class="w-full"
+            filterable
+            allow-create
+            default-first-option
+            clearable
+            placeholder="可选择常用类型或手动输入"
+          >
+            <template #label="{ label, value }">
+              <div class="middleware-type-option middleware-type-selected">
+                <img
+                  :src="middlewareTypeIconSrcBySlot(value)"
+                  :alt="middlewareTypeIconAltBySlot(value)"
+                  class="middleware-type-option-icon"
+                />
+                <span>{{ middlewareTypeLabelBySlot(label, value) }}</span>
+              </div>
+            </template>
+            <el-option
+              v-for="option in middlewareTypeOptionsWithIcon"
+              :key="option.value"
+              :label="option.label"
+              :value="option.value"
+            >
+              <div class="middleware-type-option">
+                <img :src="option.icon.src" :alt="option.icon.alt" class="middleware-type-option-icon" />
+                <span>{{ option.label }}</span>
+              </div>
+            </el-option>
+          </el-select>
         </el-form-item>
         <el-form-item label="连接地址" required>
           <el-input v-model="editingMw.address" placeholder="如 192.168.1.100" />
@@ -248,6 +358,12 @@ onMounted(() => fetchData());
           <el-input v-model="editingMw.description" type="textarea" :rows="3" maxlength="300" show-word-limit />
         </el-form-item>
       </el-form>
+
+      <CallRelationsEditor
+        ref="callRelationsEditorRef"
+        :resource-id="isEditing ? editingMw.id : undefined"
+        resource-type="middleware"
+      />
 
       <DeploymentPanel v-if="isEditing && editingMw.id" :resource-id="editingMw.id!" resource-type="middleware" />
 
@@ -357,5 +473,40 @@ onMounted(() => fetchData());
   display: flex;
   justify-content: flex-end;
 }
+.middleware-type-cell {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+.middleware-type-icon {
+  width: 16px;
+  height: 16px;
+  display: block;
+  flex-shrink: 0;
+  border-radius: 4px;
+}
+.middleware-type-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.middleware-type-selected {
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.middleware-type-selected span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.middleware-type-option-icon {
+  width: 16px;
+  height: 16px;
+  display: block;
+  flex-shrink: 0;
+  border-radius: 4px;
+}
 </style>
+
 

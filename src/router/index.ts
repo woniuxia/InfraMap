@@ -8,6 +8,8 @@ const routes = [
     children: [
       { path: "", name: "Dashboard", component: () => import("@/views/DashboardView.vue"), meta: { title: "仪表盘" } },
       { path: "hosts", name: "Hosts", component: () => import("@/views/HostsView.vue"), meta: { title: "服务器" } },
+      { path: "ip-addresses", name: "IpAddresses", component: () => import("@/views/IpAddressesView.vue"), meta: { title: "IP地址" } },
+      { path: "business-applications", name: "BusinessApplications", component: () => import("@/views/BusinessApplicationsView.vue"), meta: { title: "业务应用" } },
       { path: "applications", name: "Applications", component: () => import("@/views/ApplicationsView.vue"), meta: { title: "应用服务" } },
       { path: "middlewares", name: "Middlewares", component: () => import("@/views/MiddlewaresView.vue"), meta: { title: "中间件" } },
       { path: "nginx-configs", name: "NginxConfigs", component: () => import("@/views/NginxConfigsView.vue"), meta: { title: "负载均衡" } },

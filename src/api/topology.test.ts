@@ -27,10 +27,10 @@ describe('topology API', () => {
     expect(result).toEqual(mockGraph)
   })
 
-  it('findPaths should pass source_id, target_id, max_results', async () => {
+  it('findPaths should pass sourceId, targetId, maxResults', async () => {
     const mockResult = { paths: [['A', 'B']], truncated: false }
     __setMockHandler('find_paths', (_cmd, args) => {
-      expect(args).toEqual({ source_id: 'A', target_id: 'B', max_results: 5 })
+      expect(args).toEqual({ sourceId: 'A', targetId: 'B', maxResults: 5 })
       return mockResult
     })
 
@@ -38,10 +38,10 @@ describe('topology API', () => {
     expect(result).toEqual(mockResult)
   })
 
-  it('analyzeImpact should pass node_id', async () => {
+  it('analyzeImpact should pass nodeId', async () => {
     const mockResult = { affected_nodes: [], total_count: 0, max_depth: 0 }
     __setMockHandler('analyze_impact', (_cmd, args) => {
-      expect(args).toEqual({ node_id: 'C' })
+      expect(args).toEqual({ nodeId: 'C' })
       return mockResult
     })
 

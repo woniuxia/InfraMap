@@ -1,11 +1,14 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import { ref, onMounted } from "vue";
 import { ElMessage } from "element-plus";
 import type { NginxConfig } from "@/types";
 import type { SearchFieldConfig, SearchToolbarQueryPayload } from "@/types/searchToolbar";
 import { listNginxConfigs, saveNginxConfig, softDeleteNginxConfig } from "@/api/nginx-configs";
+import { replaceResourceCallRelations } from "@/api/call-relations";
 import { useResourceList } from "@/composables/useResourceList";
+import { buildNginxCopyDraft } from "@/utils/resourceCopy";
 import SearchToolbar from "@/components/filters/SearchToolbar.vue";
+import CallRelationsEditor from "@/components/CallRelationsEditor.vue";
 import DeploymentPanel from "@/components/DeploymentPanel.vue";
 
 const {
@@ -21,7 +24,7 @@ const {
 } = useResourceList<NginxConfig>({
   listFn: listNginxConfigs,
   deleteFn: softDeleteNginxConfig,
-  entityLabel: "璐熻浇鍧囪　",
+  entityLabel: "负载均衡",
 });
 
 const searchText = ref("");
@@ -29,6 +32,7 @@ const drawerVisible = ref(false);
 const editingNc = ref<Partial<NginxConfig>>({});
 const isEditing = ref(false);
 const saveLoading = ref(false);
+const callRelationsEditorRef = ref<InstanceType<typeof CallRelationsEditor> | null>(null);
 
 interface NginxListFilters {
   env: string[];
@@ -84,7 +88,6 @@ const toolbarFields: SearchFieldConfig[] = [
     key: "strategy",
     queryKey: "strategy",
     label: "策略",
-    section: "advanced",
     type: "multi-select",
     width: "sm",
     options: strategyOptions,
@@ -98,6 +101,7 @@ function handleToolbarQuery(payload: SearchToolbarQueryPayload) {
 function openAdd() {
   editingNc.value = {
     id: "",
+    address: "",
     status: "running",
     env: "prod",
     strategy: "roundrobin",
@@ -115,7 +119,18 @@ function openEdit(row: NginxConfig) {
   drawerVisible.value = true;
 }
 
+function openCopy(row: NginxConfig) {
+  editingNc.value = buildNginxCopyDraft(row);
+  isEditing.value = false;
+  drawerVisible.value = true;
+}
+
 async function handleSave() {
+  const draftItems = callRelationsEditorRef.value?.getDraftItems();
+  if (draftItems === null) {
+    return;
+  }
+
   const payload: Partial<NginxConfig> = {
     id: "",
     is_deleted: 0,
@@ -125,8 +140,17 @@ async function handleSave() {
   };
   saveLoading.value = true;
   try {
-    await saveNginxConfig(payload);
-    ElMessage.success(isEditing.value ? "鏇存柊鎴愬姛" : "鍒涘缓鎴愬姛");
+    const nginxId = await saveNginxConfig(payload);
+    try {
+      await replaceResourceCallRelations({
+        resource_id: nginxId,
+        resource_type: "nginx",
+        items: draftItems ?? [],
+      });
+    } catch {
+      ElMessage.warning("负载均衡已保存，调用关系保存失败，请重新编辑后重试。");
+    }
+    ElMessage.success(isEditing.value ? "更新成功" : "创建成功");
     drawerVisible.value = false;
     fetchData();
   } catch {
@@ -150,7 +174,7 @@ function statusLabel(status: string) {
 }
 
 function strategyLabel(strategy: string) {
-  return ({ roundrobin: "杞", ip_hash: "IP 鍝堝笇" } as Record<string, string>)[strategy] || strategy || "-";
+  return ({ roundrobin: "轮询", ip_hash: "IP 哈希" } as Record<string, string>)[strategy] || strategy || "-";
 }
 
 function envLabel(env: string) {
@@ -174,7 +198,7 @@ onMounted(() => fetchData());
     <SearchToolbar
       v-model:search-text="searchText"
       v-model:filters="listFilters"
-      search-placeholder="搜索配置名称..."
+      search-placeholder="搜索配置名称/地址..."
       :fields="toolbarFields"
       @query="handleToolbarQuery"
     >
@@ -183,8 +207,9 @@ onMounted(() => fetchData());
         <el-button type="primary" @click="openAdd">新增配置</el-button>
       </template>
     </SearchToolbar>
-    <el-table :data="data" v-loading="loading" border stripe class="w-full">
+    <el-table :data="data" v-loading="loading" border stripe class="w-full im-table-fixed-ops">
       <el-table-column prop="name" label="配置名称" min-width="180" align="center" />
+      <el-table-column prop="address" label="连接地址" min-width="180" align="center" />
       <el-table-column prop="listen_port" label="监听端口" width="100" align="center">
         <template #default="{ row }">{{ row.listen_port || "-" }}</template>
       </el-table-column>
@@ -201,9 +226,10 @@ onMounted(() => fetchData());
           <el-tag :type="statusTagType(row.status)" size="small">{{ statusLabel(row.status) }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="150" fixed="right" align="center">
+      <el-table-column label="操作" width="210" fixed="right" align="center">
         <template #default="{ row }">
           <el-button text type="primary" size="small" @click="openEdit(row)">编辑</el-button>
+          <el-button text type="primary" size="small" @click="openCopy(row)">复制</el-button>
           <el-button text type="danger" size="small" @click="handleDelete(row.id, row.name)">删除</el-button>
         </template>
       </el-table-column>
@@ -232,6 +258,9 @@ onMounted(() => fetchData());
         <el-divider content-position="left">基础信息</el-divider>
         <el-form-item label="配置名称" required>
           <el-input v-model="editingNc.name" placeholder="请输入配置名称" />
+        </el-form-item>
+        <el-form-item label="连接地址" required>
+          <el-input v-model="editingNc.address" placeholder="如 192.168.1.200 或 https://edge.example.com" />
         </el-form-item>
         <el-form-item label="监听端口">
           <el-input-number v-model="editingNc.listen_port" :min="1" :max="65535" class="w-full" />
@@ -272,6 +301,12 @@ onMounted(() => fetchData());
           <el-input v-model="editingNc.description" type="textarea" :rows="3" maxlength="300" show-word-limit />
         </el-form-item>
       </el-form>
+
+      <CallRelationsEditor
+        ref="callRelationsEditorRef"
+        :resource-id="isEditing ? editingNc.id : undefined"
+        resource-type="nginx"
+      />
 
       <DeploymentPanel v-if="isEditing && editingNc.id" :resource-id="editingNc.id!" resource-type="nginx" />
 
@@ -385,4 +420,5 @@ onMounted(() => fetchData());
   justify-content: flex-end;
 }
 </style>
+
 
