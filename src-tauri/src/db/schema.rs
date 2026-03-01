@@ -205,6 +205,84 @@ pub const MIGRATIONS: &[(i32, &str)] = &[
         UPDATE nginx_configs SET address = 'unknown' WHERE TRIM(address) = '';
     "#,
     ),
+    (
+        7,
+        r#"
+        CREATE TABLE IF NOT EXISTS ip_addresses (
+            id TEXT PRIMARY KEY,
+            ip_address TEXT NOT NULL,
+            env TEXT NOT NULL DEFAULT 'prod',
+            is_vip INTEGER NOT NULL DEFAULT 0,
+            real_ips TEXT,
+            description TEXT,
+            is_deleted INTEGER NOT NULL DEFAULT 0,
+            deleted_at TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS uk_ip_addresses_ip_env
+        ON ip_addresses(ip_address, env) WHERE is_deleted = 0;
+        CREATE INDEX IF NOT EXISTS idx_ip_addresses_ip
+        ON ip_addresses(ip_address) WHERE is_deleted = 0;
+        CREATE INDEX IF NOT EXISTS idx_ip_addresses_env
+        ON ip_addresses(env) WHERE is_deleted = 0;
+        CREATE INDEX IF NOT EXISTS idx_ip_addresses_is_vip
+        ON ip_addresses(is_vip) WHERE is_deleted = 0;
+
+        DROP INDEX IF EXISTS uk_hosts_ip;
+
+        CREATE TABLE IF NOT EXISTS host_ip_bindings (
+            id TEXT PRIMARY KEY,
+            host_id TEXT NOT NULL,
+            ip_id TEXT NOT NULL,
+            is_deleted INTEGER NOT NULL DEFAULT 0,
+            deleted_at TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS uk_host_ip_bindings_host_ip
+        ON host_ip_bindings(host_id, ip_id) WHERE is_deleted = 0;
+        CREATE INDEX IF NOT EXISTS idx_host_ip_bindings_host
+        ON host_ip_bindings(host_id) WHERE is_deleted = 0;
+        CREATE INDEX IF NOT EXISTS idx_host_ip_bindings_ip
+        ON host_ip_bindings(ip_id) WHERE is_deleted = 0;
+
+        INSERT INTO ip_addresses (id, ip_address, env, is_vip, real_ips, description, is_deleted, deleted_at, created_at, updated_at)
+        SELECT lower(hex(randomblob(16))), h.ip_address, h.env, 0, NULL, NULL, 0, NULL, h.created_at, h.updated_at
+        FROM hosts h
+        WHERE h.is_deleted = 0
+          AND TRIM(COALESCE(h.ip_address, '')) <> ''
+          AND NOT EXISTS (
+            SELECT 1 FROM ip_addresses ia
+            WHERE ia.ip_address = h.ip_address
+              AND ia.env = h.env
+              AND ia.is_deleted = 0
+          );
+
+        INSERT INTO host_ip_bindings (id, host_id, ip_id, is_deleted, deleted_at, created_at, updated_at)
+        SELECT lower(hex(randomblob(16))), h.id, ia.id, 0, NULL, h.created_at, h.updated_at
+        FROM hosts h
+        JOIN ip_addresses ia
+          ON ia.ip_address = h.ip_address
+         AND ia.env = h.env
+         AND ia.is_deleted = 0
+        LEFT JOIN host_ip_bindings hb
+          ON hb.host_id = h.id
+         AND hb.ip_id = ia.id
+         AND hb.is_deleted = 0
+        WHERE h.is_deleted = 0
+          AND TRIM(COALESCE(h.ip_address, '')) <> ''
+          AND hb.id IS NULL;
+    "#,
+    ),
+    (
+        8,
+        r#"
+        ALTER TABLE ip_addresses ADD COLUMN tags TEXT;
+    "#,
+    ),
 ];
 
 #[cfg(test)]
@@ -270,6 +348,93 @@ mod tests {
         assert!(
             columns.iter().any(|col| col == "address"),
             "nginx_configs table should contain address column"
+        );
+    }
+
+    #[test]
+    fn ip_addresses_and_bindings_tables_should_exist_after_migrations() {
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        apply_all_migrations(&conn);
+
+        let ip_exists: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='ip_addresses'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("query ip_addresses");
+        let binding_exists: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='host_ip_bindings'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("query host_ip_bindings");
+
+        assert_eq!(ip_exists, 1, "ip_addresses table should exist");
+        assert_eq!(binding_exists, 1, "host_ip_bindings table should exist");
+    }
+
+    #[test]
+    fn migration_should_move_existing_host_ip_to_ip_resources() {
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        for (version, sql) in MIGRATIONS.iter() {
+            if *version == 1 {
+                conn.execute_batch(sql)
+                    .unwrap_or_else(|e| panic!("Migration v{} failed: {}", version, e));
+                conn.execute(
+                    "INSERT INTO hosts (id, hostname, ip_address, status, is_deleted, created_at, updated_at)
+                     VALUES ('h1', 'server-1', '10.8.0.1', 'running', 0, datetime('now'), datetime('now'))",
+                    [],
+                )
+                .expect("seed host");
+                continue;
+            }
+
+            conn.execute_batch(sql)
+                .unwrap_or_else(|e| panic!("Migration v{} failed: {}", version, e));
+        }
+
+        let ip_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM ip_addresses WHERE ip_address='10.8.0.1' AND env='prod' AND is_deleted=0",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count migrated ip");
+        let binding_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM host_ip_bindings hb
+                 JOIN ip_addresses ia ON ia.id = hb.ip_id
+                 WHERE hb.host_id='h1' AND ia.ip_address='10.8.0.1' AND hb.is_deleted=0",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count migrated binding");
+
+        assert_eq!(ip_count, 1, "host ip should be migrated into ip_addresses");
+        assert_eq!(
+            binding_count, 1,
+            "host should be bound with migrated ip address"
+        );
+    }
+
+    #[test]
+    fn ip_addresses_table_should_have_tags_column_after_migrations() {
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        apply_all_migrations(&conn);
+
+        let mut stmt = conn
+            .prepare("PRAGMA table_info(ip_addresses)")
+            .expect("prepare table info query");
+        let rows = stmt
+            .query_map([], |row| row.get::<_, String>(1))
+            .expect("query table info");
+        let columns: Vec<String> = rows.filter_map(|r| r.ok()).collect();
+
+        assert!(
+            columns.iter().any(|col| col == "tags"),
+            "ip_addresses table should contain tags column"
         );
     }
 }

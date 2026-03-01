@@ -79,15 +79,16 @@ describe("applications API", () => {
           owners: ["alice", "bob"],
         },
       });
-      return undefined;
+      return "app-123";
     });
 
-    await saveApplication({
+    const result = await saveApplication({
       name: "payment-api",
       type: "backend",
       env: "prod",
       status: "running",
       owners: ["alice", "bob"],
     });
+    expect(result).toBe("app-123");
   });
 });

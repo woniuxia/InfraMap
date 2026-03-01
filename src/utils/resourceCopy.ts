@@ -33,10 +33,12 @@ export function stripSystemFields<T extends object>(row: T): Partial<T> {
 }
 
 export function buildHostCopyDraft(row: Host, date: Date = new Date()): Partial<Host> {
+  const draft = stripSystemFields(row) as Partial<Host>;
+  delete draft.ip_address;
+  delete draft.ip_display;
   return {
-    ...stripSystemFields(row),
+    ...draft,
     hostname: buildCopyName(row.hostname, date),
-    ip_address: "",
   };
 }
 

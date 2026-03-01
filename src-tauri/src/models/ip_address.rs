@@ -5,22 +5,15 @@ fn default_env() -> String {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Host {
+pub struct IpAddress {
     #[serde(default)]
     pub id: String,
-    pub hostname: String,
-    pub ip_address: Option<String>,
-    pub ip_display: Option<String>,
+    pub ip_address: String,
     #[serde(default = "default_env")]
     pub env: String,
-    pub os_type: Option<String>,
-    pub cpu_model: Option<String>,
-    pub cpu_cores: Option<i64>,
-    pub cpu_threads: Option<i64>,
-    pub cpu_freq: Option<String>,
-    pub ram_gb: Option<i64>,
-    pub disk_gb: Option<i64>,
-    pub status: String,
+    #[serde(default)]
+    pub is_vip: bool,
+    pub real_ips: Option<String>,
     pub tags: Option<String>,
     pub description: Option<String>,
     #[serde(default)]

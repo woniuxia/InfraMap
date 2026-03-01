@@ -127,6 +127,14 @@ impl AppError {
     pub fn from_db_error(command: &str, action: &str, err: impl ToString) -> Self {
         let raw = err.to_string();
 
+        if raw.contains("UNIQUE constraint failed: ip_addresses.ip_address, ip_addresses.env") {
+            return Self::conflict(
+                command,
+                "保存失败，IP 地址与环境组合已存在，请勿重复创建。",
+                Some(raw),
+            );
+        }
+
         if raw.contains("UNIQUE constraint failed: hosts.ip_address") {
             return Self::conflict(
                 command,
@@ -196,6 +204,20 @@ mod tests {
         );
         assert_eq!(err.code, AppErrorCode::Conflict);
         assert_eq!(err.message, "保存失败，IP 地址已存在，请使用其他 IP 地址。");
+    }
+
+    #[test]
+    fn map_ip_address_resource_unique_constraint_to_conflict() {
+        let err = AppError::from_db_error(
+            "save_ip_address",
+            "保存IP资源",
+            "UNIQUE constraint failed: ip_addresses.ip_address, ip_addresses.env",
+        );
+        assert_eq!(err.code, AppErrorCode::Conflict);
+        assert_eq!(
+            err.message,
+            "保存失败，IP 地址与环境组合已存在，请勿重复创建。"
+        );
     }
 
     #[test]

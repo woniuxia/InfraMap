@@ -13,7 +13,20 @@ pub fn get_topology_graph_inner(conn: &Connection) -> Result<TopologyGraph, Stri
     let mut combos: Vec<TopologyCombo> = Vec::new();
     {
         let mut stmt = conn
-            .prepare("SELECT id, hostname, ip_address, status FROM hosts WHERE is_deleted = 0")
+            .prepare(
+                "SELECT h.id, h.hostname,
+                        COALESCE((
+                            SELECT GROUP_CONCAT(ia.ip_address, ', ')
+                            FROM host_ip_bindings hb
+                            JOIN ip_addresses ia ON ia.id = hb.ip_id
+                            WHERE hb.host_id = h.id
+                              AND hb.is_deleted = 0
+                              AND ia.is_deleted = 0
+                        ), '') AS ip_display,
+                        h.status
+                 FROM hosts h
+                 WHERE h.is_deleted = 0",
+            )
             .map_err(|e| e.to_string())?;
         let rows = stmt
             .query_map([], |row| {

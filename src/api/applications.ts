@@ -21,8 +21,8 @@ export function listApplicationOwnerCandidates(limit = 100): Promise<string[]> {
   return tauriInvoke<string[]>('list_application_owner_candidates', { limit })
 }
 
-export function saveApplication(data: Partial<Application>): Promise<void> {
-  return tauriInvoke<void>('save_application', { data })
+export function saveApplication(data: Partial<Application>): Promise<string> {
+  return tauriInvoke<string>('save_application', { data })
 }
 
 export function softDeleteApplication(id: string): Promise<void> {

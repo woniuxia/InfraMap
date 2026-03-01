@@ -150,19 +150,47 @@ fn build_resource_deploy_context(
     let parsed_ip = address.as_deref().and_then(extract_ipv4_from_address);
 
     let (matched_host_id, matched_host_name) = if let Some(ref ip) = parsed_ip {
-        conn.query_row(
-            "SELECT id, hostname FROM hosts WHERE ip_address = ?1 AND is_deleted = 0 LIMIT 1",
-            rusqlite::params![ip],
-            |row| {
-                Ok((
-                    Some(row.get::<_, String>(0)?),
-                    Some(row.get::<_, String>(1)?),
-                ))
-            },
-        )
-        .optional()
-        .map_err(|e| AppError::from_db_error(command, "查询匹配服务器", e))?
-        .unwrap_or((None, None))
+        if let Some(env) = resource_env.as_deref() {
+            conn.query_row(
+                "SELECT h.id, h.hostname
+                 FROM ip_addresses ia
+                 JOIN host_ip_bindings hb ON hb.ip_id = ia.id AND hb.is_deleted = 0
+                 JOIN hosts h ON h.id = hb.host_id AND h.is_deleted = 0
+                 WHERE ia.ip_address = ?1 AND ia.is_deleted = 0
+                 ORDER BY CASE WHEN ia.env = ?2 THEN 0 ELSE 1 END, ia.created_at ASC, h.created_at ASC
+                 LIMIT 1",
+                rusqlite::params![ip, env],
+                |row| {
+                    Ok((
+                        Some(row.get::<_, String>(0)?),
+                        Some(row.get::<_, String>(1)?),
+                    ))
+                },
+            )
+            .optional()
+            .map_err(|e| AppError::from_db_error(command, "查询匹配服务器", e))?
+            .unwrap_or((None, None))
+        } else {
+            conn.query_row(
+                "SELECT h.id, h.hostname
+                 FROM ip_addresses ia
+                 JOIN host_ip_bindings hb ON hb.ip_id = ia.id AND hb.is_deleted = 0
+                 JOIN hosts h ON h.id = hb.host_id AND h.is_deleted = 0
+                 WHERE ia.ip_address = ?1 AND ia.is_deleted = 0
+                 ORDER BY ia.created_at ASC, h.created_at ASC
+                 LIMIT 1",
+                rusqlite::params![ip],
+                |row| {
+                    Ok((
+                        Some(row.get::<_, String>(0)?),
+                        Some(row.get::<_, String>(1)?),
+                    ))
+                },
+            )
+            .optional()
+            .map_err(|e| AppError::from_db_error(command, "查询匹配服务器", e))?
+            .unwrap_or((None, None))
+        }
     } else {
         (None, None)
     };
@@ -429,5 +457,53 @@ mod tests {
         let err = build_resource_deploy_context("test", &conn, "invalid", "x")
             .expect_err("invalid type should fail");
         assert_eq!(err.code, AppErrorCode::ValidationError);
+    }
+
+    #[test]
+    fn build_resource_deploy_context_should_prefer_same_env_host_when_ip_reused() {
+        let conn = setup_test_db();
+        insert_test_host(&conn, "h-prod", "redis-prod", "10.0.0.9");
+        insert_test_host(&conn, "h-dev", "redis-dev", "10.0.0.9");
+        conn.execute("UPDATE hosts SET env='prod' WHERE id='h-prod'", [])
+            .expect("update prod env");
+        conn.execute("UPDATE hosts SET env='dev' WHERE id='h-dev'", [])
+            .expect("update dev env");
+        let ip_prod_id: String = conn
+            .query_row(
+                "SELECT id FROM ip_addresses WHERE ip_address='10.0.0.9' AND env='prod' AND is_deleted=0 LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .expect("query prod ip id");
+        conn.execute(
+            "INSERT INTO ip_addresses (id, ip_address, env, is_vip, real_ips, is_deleted, created_at, updated_at)
+             VALUES ('ip-dev', '10.0.0.9', 'dev', 0, NULL, 0, datetime('now'), datetime('now'))",
+            [],
+        )
+        .expect("insert ip addresses");
+        conn.execute(
+            "DELETE FROM host_ip_bindings WHERE host_id IN ('h-prod','h-dev')",
+            [],
+        )
+        .expect("clear existing bindings");
+        conn.execute(
+            "INSERT INTO host_ip_bindings (id, host_id, ip_id, is_deleted, created_at, updated_at)
+             VALUES ('hb-prod', 'h-prod', ?1, 0, datetime('now'), datetime('now')),
+                    ('hb-dev', 'h-dev', 'ip-dev', 0, datetime('now'), datetime('now'))",
+            rusqlite::params![ip_prod_id],
+        )
+        .expect("insert bindings");
+        insert_test_middleware(&conn, "mw2", "redis-env", "cache");
+        conn.execute(
+            "UPDATE middlewares SET address = 'redis://10.0.0.9:6379', env = 'dev' WHERE id = 'mw2'",
+            [],
+        )
+        .expect("update middleware");
+
+        let context = build_resource_deploy_context("test", &conn, "middleware", "mw2")
+            .expect("build context");
+        assert_eq!(context.parsed_ip.as_deref(), Some("10.0.0.9"));
+        assert_eq!(context.matched_host_id.as_deref(), Some("h-dev"));
+        assert_eq!(context.resource_env.as_deref(), Some("dev"));
     }
 }

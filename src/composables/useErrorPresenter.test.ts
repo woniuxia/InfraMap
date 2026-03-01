@@ -47,18 +47,21 @@ describe("useErrorPresenter", () => {
     vi.useRealTimers();
   });
 
-  it("records full error history and shows collapsed badge after 4 seconds", () => {
+  it("records full error history and shows collapsed badge immediately", () => {
     const presenter = errorPresenter.useErrorPresenter() as Record<string, any>;
     const error = createInfraError("one");
 
     errorPresenter.presentInfraError(error);
 
     expect(ElMessage.error).toHaveBeenCalledTimes(1);
+    expect(ElMessage.error).toHaveBeenCalledWith(
+      expect.objectContaining({
+        duration: 3000,
+        zIndex: 30000,
+        appendTo: "body",
+      }),
+    );
     expect(presenter.state.history).toHaveLength(1);
-    expect(presenter.state.collapsedVisible).toBe(false);
-
-    vi.advanceTimersByTime(4000);
-
     expect(presenter.state.collapsedVisible).toBe(true);
   });
 
@@ -71,6 +74,20 @@ describe("useErrorPresenter", () => {
 
     expect(ElMessage.error).toHaveBeenCalledTimes(1);
     expect(presenter.state.history).toHaveLength(2);
+  });
+
+  it("restores collapsed badge after closing detail dialog", () => {
+    const presenter = errorPresenter.useErrorPresenter() as Record<string, any>;
+    const error = createInfraError("detail");
+
+    errorPresenter.presentInfraError(error);
+    errorPresenter.openInfraErrorDetail(0);
+    expect(presenter.state.detailVisible).toBe(true);
+    expect(presenter.state.collapsedVisible).toBe(false);
+
+    errorPresenter.closeInfraErrorDetail();
+    expect(presenter.state.detailVisible).toBe(false);
+    expect(presenter.state.collapsedVisible).toBe(true);
   });
 
   it("provides clearInfraErrorHistory and fully resets state", () => {

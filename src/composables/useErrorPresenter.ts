@@ -1,10 +1,9 @@
-import { ElMessage } from "element-plus";
 import { reactive, readonly } from "vue";
 import { formatInfraErrorToast } from "@/utils/error";
+import { showErrorMessage } from "@/utils/message";
 import type { InfraError } from "@/types/error";
 
 const DEDUPE_WINDOW_MS = 1800;
-const COLLAPSE_DELAY_MS = 4000;
 
 interface ErrorPresenterState {
   latestError: InfraError | null;
@@ -25,7 +24,6 @@ const state = reactive<ErrorPresenterState>({
 });
 
 const lastShownMap = new Map<string, number>();
-let collapseTimer: ReturnType<typeof setTimeout> | null = null;
 
 function getErrorKey(error: InfraError): string {
   return [error.code, error.command, error.message, error.details ?? ""].join("::");
@@ -43,34 +41,17 @@ function shouldSuppress(error: InfraError): boolean {
   return false;
 }
 
-function clearCollapseTimer() {
-  if (collapseTimer) {
-    clearTimeout(collapseTimer);
-    collapseTimer = null;
-  }
-}
-
-function scheduleCollapseBadge() {
-  clearCollapseTimer();
-  collapseTimer = setTimeout(() => {
-    state.collapsedVisible = state.history.length > 0;
-    collapseTimer = null;
-  }, COLLAPSE_DELAY_MS);
-}
-
 export function presentInfraError(error: InfraError) {
   state.history.unshift(error);
   state.latestError = error;
   state.activeErrorIndex = 0;
-  state.collapsedVisible = false;
+  state.collapsedVisible = !state.detailVisible && state.history.length > 0;
   if (state.detailVisible) {
     state.detailError = error;
   }
 
-  scheduleCollapseBadge();
-
   if (!shouldSuppress(error)) {
-    ElMessage.error(formatInfraErrorToast(error));
+    showErrorMessage(formatInfraErrorToast(error));
   }
 }
 
@@ -111,10 +92,10 @@ export function setActiveError(index: number) {
 
 export function closeInfraErrorDetail() {
   state.detailVisible = false;
+  state.collapsedVisible = state.history.length > 0;
 }
 
 export function clearInfraErrorHistory() {
-  clearCollapseTimer();
   lastShownMap.clear();
   state.latestError = null;
   state.history = [];

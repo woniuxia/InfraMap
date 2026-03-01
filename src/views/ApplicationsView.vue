@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, onMounted } from "vue";
 import { ElMessage } from "element-plus";
-import type { Application } from "@/types";
+import type { Application, Dependency, Middleware, NginxConfig, RelationDirection } from "@/types";
 import type { SearchFieldConfig, SearchToolbarQueryPayload } from "@/types/searchToolbar";
 import {
   listApplicationOwnerCandidates,
@@ -11,6 +11,9 @@ import {
   softDeleteApplication,
 } from "@/api/applications";
 import type { ApplicationTechStackSide } from "@/api/applications";
+import { saveDependenciesBatch } from "@/api/dependencies";
+import { listMiddlewares } from "@/api/middlewares";
+import { listNginxConfigs } from "@/api/nginx-configs";
 import { useResourceList } from "@/composables/useResourceList";
 import { buildTechStackSuggestions, parseTechStack, techStackToText } from "@/utils/techStack";
 import { buildApplicationCopyDraft } from "@/utils/resourceCopy";
@@ -51,6 +54,21 @@ const techStackSuggestions = computed(() =>
   )
 );
 const ownerSuggestions = computed(() => normalizeOwners([...ownerOptions.value, ...ownerList.value], ""));
+
+type DependencyTargetType = "application" | "middleware" | "nginx";
+
+interface DependencyTargetOption {
+  id: string;
+  name: string;
+  type: DependencyTargetType;
+}
+
+const dependencyTargetOptions = ref<DependencyTargetOption[]>([]);
+const dependencyTargetLoading = ref(false);
+const selectedDependencyTargetIds = ref<string[]>([]);
+const dependencyDirection = ref<RelationDirection>("downstream");
+const dependencyRelationType = ref<Dependency["relation_type"]>("http_call");
+const dependencyDescription = ref("");
 
 interface ApplicationListFilters {
   type: string[];
@@ -173,6 +191,59 @@ function applyDefaultPortByType(type: Application["type"] | undefined) {
   }
 }
 
+function resetDependencyDraft() {
+  selectedDependencyTargetIds.value = [];
+  dependencyDirection.value = "downstream";
+  dependencyRelationType.value = "http_call";
+  dependencyDescription.value = "";
+}
+
+async function fetchDependencyTargetOptions(currentResourceId?: string) {
+  dependencyTargetLoading.value = true;
+  try {
+    const [apps, mws, ngs] = await Promise.all([
+      listApplications({ page: 1, page_size: 999 }),
+      listMiddlewares({ page: 1, page_size: 999 }),
+      listNginxConfigs({ page: 1, page_size: 999 }),
+    ]);
+    const currentId = currentResourceId ?? "";
+    const options: DependencyTargetOption[] = [];
+    apps.data.forEach((item) => {
+      if (item.id !== currentId) {
+        options.push({ id: item.id, name: item.name, type: "application" });
+      }
+    });
+    mws.data.forEach((item: Middleware) => {
+      options.push({ id: item.id, name: item.name, type: "middleware" });
+    });
+    ngs.data.forEach((item: NginxConfig) => {
+      options.push({ id: item.id, name: item.name, type: "nginx" });
+    });
+    dependencyTargetOptions.value = options;
+  } catch {
+    // error shown by tauriInvoke
+  } finally {
+    dependencyTargetLoading.value = false;
+  }
+}
+
+function buildBatchDependencyItems() {
+  const targetMap = new Map(dependencyTargetOptions.value.map((item) => [item.id, item]));
+  return selectedDependencyTargetIds.value
+    .map((targetId) => {
+      const target = targetMap.get(targetId);
+      if (!target) return null;
+      return {
+        target_id: target.id,
+        target_type: target.type,
+        relation_type: dependencyRelationType.value,
+        direction: dependencyDirection.value,
+        description: dependencyDescription.value.trim() || undefined,
+      };
+    })
+    .filter((item): item is NonNullable<typeof item> => item !== null);
+}
+
 function openAdd() {
   editingApp.value = {
     id: "",
@@ -188,30 +259,36 @@ function openAdd() {
   ownerList.value = [];
   topTechStackOptions.value = [];
   ownerOptions.value = [];
+  resetDependencyDraft();
   isEditing.value = false;
   drawerVisible.value = true;
   fetchTopTechStackOptions(editingApp.value.type);
   fetchOwnerOptions();
+  fetchDependencyTargetOptions();
 }
 
 function openEdit(row: Application) {
   editingApp.value = { ...row };
   techStackList.value = parseTechStack(row.tech_stack);
   ownerList.value = normalizeOwners(row.owners, row.owner);
+  resetDependencyDraft();
   isEditing.value = true;
   drawerVisible.value = true;
   fetchTopTechStackOptions(editingApp.value.type);
   fetchOwnerOptions();
+  fetchDependencyTargetOptions(row.id);
 }
 
 function openCopy(row: Application) {
   editingApp.value = buildApplicationCopyDraft(row);
   techStackList.value = parseTechStack(editingApp.value.tech_stack);
   ownerList.value = normalizeOwners(editingApp.value.owners, editingApp.value.owner);
+  resetDependencyDraft();
   isEditing.value = false;
   drawerVisible.value = true;
   fetchTopTechStackOptions(editingApp.value.type);
   fetchOwnerOptions();
+  fetchDependencyTargetOptions();
 }
 
 function handleTypeChange(type: Application["type"] | undefined) {
@@ -249,12 +326,30 @@ async function handleSave() {
   };
   saveLoading.value = true;
   try {
-    await saveApplication(payload);
+    const appId = await saveApplication(payload);
+    const batchItems = buildBatchDependencyItems();
+    let skippedCount = 0;
+    if (batchItems.length > 0) {
+      try {
+        const result = await saveDependenciesBatch({
+          resource_id: appId,
+          resource_type: "application",
+          items: batchItems,
+        });
+        skippedCount = result.skipped_count;
+      } catch {
+        ElMessage.warning("应用已保存，部分依赖关系创建失败，请在编辑页补充。");
+      }
+    }
     ElMessage.success(isEditing.value ? "更新成功" : "创建成功");
+    if (skippedCount > 0) {
+      ElMessage.info(`已跳过 ${skippedCount} 条重复依赖关系`);
+    }
     drawerVisible.value = false;
     fetchData();
     fetchTopTechStackOptions((payload.type as Application["type"] | undefined) ?? editingApp.value.type);
     fetchOwnerOptions();
+    fetchDependencyTargetOptions();
   } catch {
     // error shown by tauriInvoke
   } finally {
@@ -445,6 +540,61 @@ onMounted(() => {
           >
             <el-option v-for="item in ownerSuggestions" :key="item" :label="item" :value="item" />
           </el-select>
+        </el-form-item>
+
+        <el-divider content-position="left">调用关系</el-divider>
+        <el-form-item label="目标资源">
+          <el-select
+            v-model="selectedDependencyTargetIds"
+            class="w-full"
+            multiple
+            filterable
+            :loading="dependencyTargetLoading"
+            placeholder="可选择已添加的应用/中间件/Nginx"
+          >
+            <el-option-group
+              v-for="group in [
+                { label: '应用', type: 'application' },
+                { label: '中间件', type: 'middleware' },
+                { label: '负载均衡', type: 'nginx' },
+              ]"
+              :key="group.type"
+              :label="group.label"
+            >
+              <el-option
+                v-for="option in dependencyTargetOptions.filter((item) => item.type === group.type)"
+                :key="option.id"
+                :label="option.name"
+                :value="option.id"
+              />
+            </el-option-group>
+          </el-select>
+        </el-form-item>
+        <el-form-item label="调用方向">
+          <el-radio-group v-model="dependencyDirection">
+            <el-radio-button value="upstream">上游</el-radio-button>
+            <el-radio-button value="downstream">下游</el-radio-button>
+            <el-radio-button value="bidirectional">互相调用</el-radio-button>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item label="关系类型">
+          <el-select v-model="dependencyRelationType" class="w-full">
+            <el-option label="HTTP调用" value="http_call" />
+            <el-option label="TCP连接" value="tcp" />
+            <el-option label="MQ生产" value="mq_produce" />
+            <el-option label="MQ消费" value="mq_consume" />
+            <el-option label="gRPC调用" value="grpc_call" />
+            <el-option label="数据库访问" value="db_query" />
+            <el-option label="缓存访问" value="cache_access" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="关系说明">
+          <el-input
+            v-model="dependencyDescription"
+            placeholder="选填，对本次添加的关系统一生效"
+            maxlength="120"
+            show-word-limit
+          />
         </el-form-item>
 
         <el-divider content-position="left">运维信息</el-divider>

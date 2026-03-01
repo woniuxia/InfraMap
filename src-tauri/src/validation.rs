@@ -4,6 +4,7 @@ use crate::models::application::Application;
 use crate::models::dependency::Dependency;
 use crate::models::deployment::Deployment;
 use crate::models::host::Host;
+use crate::models::ip_address::IpAddress;
 use crate::models::middleware::Middleware;
 use crate::models::nginx_config::NginxConfig;
 
@@ -72,13 +73,22 @@ pub fn validate_positive_int(value: i64, field_name: &str) -> Result<(), String>
     }
 }
 
+fn parse_string_array(value: &str, field_name: &str) -> Result<Vec<String>, String> {
+    let parsed: Vec<String> = serde_json::from_str(value)
+        .map_err(|_| format!("{} must be a JSON string array", field_name))?;
+    let normalized: Vec<String> = parsed
+        .into_iter()
+        .map(|item| item.trim().to_string())
+        .filter(|item| !item.is_empty())
+        .collect();
+    Ok(normalized)
+}
+
 // --- Entity-specific validation ---
 
 pub fn validate_host(host: &Host) -> Result<(), String> {
     validate_required(&host.hostname, "hostname")?;
     validate_string_length(&host.hostname, 1, 200, "hostname")?;
-    validate_required(&host.ip_address, "ip_address")?;
-    validate_ipv4(&host.ip_address)?;
     validate_enum(&host.env, &["prod", "dev", "test"], "env")?;
     validate_enum(
         &host.status,
@@ -102,6 +112,35 @@ pub fn validate_host(host: &Host) -> Result<(), String> {
     if let Some(threads) = host.cpu_threads {
         validate_positive_int(threads, "cpu_threads")?;
     }
+    Ok(())
+}
+
+pub fn validate_ip_address_resource(ip: &IpAddress) -> Result<(), String> {
+    validate_required(&ip.ip_address, "ip_address")?;
+    validate_ipv4(&ip.ip_address)?;
+    validate_enum(&ip.env, &["prod", "dev", "test"], "env")?;
+    if let Some(tags) = ip.tags.as_deref() {
+        if !tags.trim().is_empty() {
+            validate_json_array(tags, "tags")?;
+        }
+    }
+
+    let real_ips: Vec<String> = match ip.real_ips.as_deref() {
+        Some(raw) if !raw.trim().is_empty() => parse_string_array(raw, "real_ips")?,
+        _ => Vec::new(),
+    };
+
+    if ip.is_vip {
+        if real_ips.is_empty() {
+            return Err("real_ips must contain at least one IPv4 when is_vip is true".into());
+        }
+        for real_ip in &real_ips {
+            validate_ipv4(real_ip)?;
+        }
+    } else if !real_ips.is_empty() {
+        return Err("real_ips must be empty when is_vip is false".into());
+    }
+
     Ok(())
 }
 
@@ -333,7 +372,8 @@ mod tests {
         Host {
             id: "h1".into(),
             hostname: "server1".into(),
-            ip_address: "192.168.1.1".into(),
+            ip_address: Some("192.168.1.1".into()),
+            ip_display: Some("192.168.1.1".into()),
             env: "prod".into(),
             os_type: None,
             cpu_model: None,
@@ -358,10 +398,11 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_host_invalid_ip() {
+    fn test_validate_host_without_ip_is_allowed() {
         let mut host = make_test_host();
-        host.ip_address = "invalid".into();
-        assert!(validate_host(&host).is_err());
+        host.ip_address = None;
+        host.ip_display = None;
+        assert!(validate_host(&host).is_ok());
     }
 
     #[test]
@@ -580,5 +621,58 @@ mod tests {
         let mut dep = make_test_dependency();
         dep.relation_type = "invalid_relation".into();
         assert!(validate_dependency(&dep).is_err());
+    }
+
+    // --- validate_ip_address_resource ---
+    fn make_test_ip_address() -> IpAddress {
+        IpAddress {
+            id: "ip1".into(),
+            ip_address: "10.0.0.10".into(),
+            env: "prod".into(),
+            is_vip: false,
+            real_ips: None,
+            tags: None,
+            description: None,
+            is_deleted: 0,
+            deleted_at: None,
+            created_at: "2024-01-01T00:00:00Z".into(),
+            updated_at: "2024-01-01T00:00:00Z".into(),
+        }
+    }
+
+    #[test]
+    fn test_validate_ip_address_resource_valid_normal_ip() {
+        assert!(validate_ip_address_resource(&make_test_ip_address()).is_ok());
+    }
+
+    #[test]
+    fn test_validate_ip_address_resource_vip_requires_real_ips() {
+        let mut ip = make_test_ip_address();
+        ip.is_vip = true;
+        ip.real_ips = Some("[]".into());
+        assert!(validate_ip_address_resource(&ip).is_err());
+    }
+
+    #[test]
+    fn test_validate_ip_address_resource_vip_real_ips_must_be_ipv4() {
+        let mut ip = make_test_ip_address();
+        ip.is_vip = true;
+        ip.real_ips = Some(r#"["10.0.0.11","invalid-ip"]"#.into());
+        assert!(validate_ip_address_resource(&ip).is_err());
+    }
+
+    #[test]
+    fn test_validate_ip_address_resource_non_vip_should_not_have_real_ips() {
+        let mut ip = make_test_ip_address();
+        ip.is_vip = false;
+        ip.real_ips = Some(r#"["10.0.0.11"]"#.into());
+        assert!(validate_ip_address_resource(&ip).is_err());
+    }
+
+    #[test]
+    fn test_validate_ip_address_resource_tags_should_be_json_array() {
+        let mut ip = make_test_ip_address();
+        ip.tags = Some(r#"{"bad":"json"}"#.into());
+        assert!(validate_ip_address_resource(&ip).is_err());
     }
 }

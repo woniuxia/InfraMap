@@ -60,7 +60,8 @@ describe("resourceCopy", () => {
     const draft = buildHostCopyDraft(host, fixedDate);
 
     expect(draft.hostname).toBe("db-host（副本-20260228090507）");
-    expect(draft.ip_address).toBe("");
+    expect(draft.ip_address).toBeUndefined();
+    expect(draft.ip_display).toBeUndefined();
     expect(draft.os_type).toBe("Ubuntu 22.04");
     expect(draft.tags).toBe("[\"db\"]");
     expect(draft.id).toBeUndefined();

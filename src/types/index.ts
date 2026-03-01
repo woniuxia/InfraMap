@@ -1,7 +1,8 @@
 export interface Host {
   id: string;
   hostname: string;
-  ip_address: string;
+  ip_address?: string;
+  ip_display?: string;
   env: "prod" | "dev" | "test";
   os_type?: string;
   cpu_model?: string;
@@ -17,6 +18,38 @@ export interface Host {
   deleted_at?: string;
   created_at: string;
   updated_at: string;
+}
+
+export interface IpAddress {
+  id: string;
+  ip_address: string;
+  env: "prod" | "dev" | "test";
+  is_vip: boolean;
+  real_ips?: string;
+  tags?: string;
+  description?: string;
+  is_deleted: number;
+  deleted_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BatchCreateIpParams {
+  start_ip: string;
+  end_ip: string;
+  env: "prod" | "dev" | "test";
+  tags?: string;
+  description?: string;
+}
+
+export interface BatchCreateIpResult {
+  created_count: number;
+  skipped_count: number;
+}
+
+export interface HostIpBindingPayload {
+  host_id: string;
+  ip_id: string;
 }
 
 export interface Application {
@@ -114,6 +147,27 @@ export interface Dependency {
   deleted_at?: string;
   created_at: string;
   updated_at: string;
+}
+
+export type RelationDirection = "upstream" | "downstream" | "bidirectional";
+
+export interface SaveDependencyBatchItem {
+  target_id: string;
+  target_type: "application" | "middleware" | "nginx";
+  relation_type: Dependency["relation_type"];
+  direction: RelationDirection;
+  description?: string;
+}
+
+export interface SaveDependenciesBatchParams {
+  resource_id: string;
+  resource_type: "application" | "middleware" | "nginx";
+  items: SaveDependencyBatchItem[];
+}
+
+export interface SaveDependenciesBatchResult {
+  created_count: number;
+  skipped_count: number;
 }
 
 export interface AuditLog {

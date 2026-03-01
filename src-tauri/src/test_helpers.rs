@@ -41,6 +41,28 @@ pub fn insert_test_host(conn: &Connection, id: &str, hostname: &str, ip: &str) {
         rusqlite::params![id, hostname, ip, now, now],
     )
     .unwrap_or_else(|e| panic!("insert_test_host failed: {}", e));
+
+    conn.execute(
+        "INSERT OR IGNORE INTO ip_addresses (id, ip_address, env, is_vip, real_ips, is_deleted, created_at, updated_at)
+         VALUES (?1, ?2, 'prod', 0, NULL, 0, ?3, ?4)",
+        rusqlite::params![format!("ip-{}", id), ip, now, now],
+    )
+    .unwrap_or_else(|e| panic!("insert_test_host ip insert failed: {}", e));
+
+    let ip_id: String = conn
+        .query_row(
+            "SELECT id FROM ip_addresses WHERE ip_address = ?1 AND env = 'prod' AND is_deleted = 0 LIMIT 1",
+            rusqlite::params![ip],
+            |row| row.get(0),
+        )
+        .unwrap_or_else(|e| panic!("insert_test_host query ip id failed: {}", e));
+
+    conn.execute(
+        "INSERT OR IGNORE INTO host_ip_bindings (id, host_id, ip_id, is_deleted, created_at, updated_at)
+         VALUES (?1, ?2, ?3, 0, ?4, ?5)",
+        rusqlite::params![format!("hb-{}-{}", id, ip_id), id, ip_id, now, now],
+    )
+    .unwrap_or_else(|e| panic!("insert_test_host binding insert failed: {}", e));
 }
 
 pub fn insert_test_application(conn: &Connection, id: &str, name: &str, env: &str) {

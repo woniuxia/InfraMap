@@ -467,9 +467,11 @@ pub fn get_application(pool: State<DbPool>, id: String) -> AppResult<Application
     Ok(app)
 }
 
-#[tauri::command]
-pub fn save_application(pool: State<DbPool>, data: Application) -> AppResult<()> {
-    let command = "save_application";
+fn save_application_inner(
+    command: &str,
+    conn: &rusqlite::Connection,
+    data: Application,
+) -> AppResult<String> {
     let owners_input = if data.owners.is_some() {
         data.owners.clone()
     } else {
@@ -481,10 +483,6 @@ pub fn save_application(pool: State<DbPool>, data: Application) -> AppResult<()>
     normalized_data.owners = Some(normalized_owners.clone());
     normalized_data.owner = normalized_owners.first().cloned();
     validate_application(&normalized_data).map_err(|e| AppError::validation(command, e))?;
-
-    let conn = pool
-        .get()
-        .map_err(|e| AppError::db_unavailable(command, format!("Pool error: {}", e)))?;
     let now = chrono::Utc::now().to_rfc3339();
 
     let is_new = normalized_data.id.is_empty() || {
@@ -501,9 +499,9 @@ pub fn save_application(pool: State<DbPool>, data: Application) -> AppResult<()>
     conn.execute_batch("BEGIN TRANSACTION;")
         .map_err(|e| AppError::from_db_error(command, "开启事务", e))?;
 
-    let result: AppResult<()> = (|| {
+    let result: AppResult<String> = (|| {
         if is_new {
-            let id = if normalized_data.id.is_empty() {
+            let persisted_id = if normalized_data.id.is_empty() {
                 uuid::Uuid::new_v4().to_string()
             } else {
                 normalized_data.id.clone()
@@ -513,7 +511,7 @@ pub fn save_application(pool: State<DbPool>, data: Application) -> AppResult<()>
                                            env, git_repo, owner, status, description, is_deleted, deleted_at, created_at, updated_at)
                  VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,0,NULL,?13,?13)",
                 rusqlite::params![
-                    id,
+                    persisted_id,
                     normalized_data.name,
                     normalized_data.app_type,
                     normalized_data.address,
@@ -529,17 +527,18 @@ pub fn save_application(pool: State<DbPool>, data: Application) -> AppResult<()>
                 ],
             )
             .map_err(|e| AppError::from_db_error(command, "创建应用", e))?;
-            replace_application_owners(&conn, &id, &normalized_owners, &now)
+            replace_application_owners(conn, &persisted_id, &normalized_owners, &now)
                 .map_err(|e| AppError::from_db_error(command, "保存应用负责人", e))?;
             insert_audit_log(
-                &conn,
+                conn,
                 "create",
                 "application",
-                &id,
+                &persisted_id,
                 Some(&normalized_data.name),
                 None,
             )
             .map_err(|e| AppError::from_db_error(command, "写入审计日志", e))?;
+            Ok(persisted_id)
         } else {
             conn.execute(
                 "UPDATE applications SET name=?1, type=?2, address=?3, port=?4, tech_stack=?5, deploy_mode=?6,
@@ -562,10 +561,10 @@ pub fn save_application(pool: State<DbPool>, data: Application) -> AppResult<()>
                 ],
             )
             .map_err(|e| AppError::from_db_error(command, "更新应用", e))?;
-            replace_application_owners(&conn, &normalized_data.id, &normalized_owners, &now)
+            replace_application_owners(conn, &normalized_data.id, &normalized_owners, &now)
                 .map_err(|e| AppError::from_db_error(command, "保存应用负责人", e))?;
             insert_audit_log(
-                &conn,
+                conn,
                 "update",
                 "application",
                 &normalized_data.id,
@@ -573,21 +572,30 @@ pub fn save_application(pool: State<DbPool>, data: Application) -> AppResult<()>
                 None,
             )
             .map_err(|e| AppError::from_db_error(command, "写入审计日志", e))?;
+            Ok(normalized_data.id.clone())
         }
-        Ok(())
     })();
 
     match result {
-        Ok(()) => {
+        Ok(persisted_id) => {
             conn.execute_batch("COMMIT;")
                 .map_err(|e| AppError::from_db_error(command, "提交事务", e))?;
-            Ok(())
+            Ok(persisted_id)
         }
         Err(error) => {
             let _ = conn.execute_batch("ROLLBACK;");
             Err(error)
         }
     }
+}
+
+#[tauri::command]
+pub fn save_application(pool: State<DbPool>, data: Application) -> AppResult<String> {
+    let command = "save_application";
+    let conn = pool
+        .get()
+        .map_err(|e| AppError::db_unavailable(command, format!("Pool error: {}", e)))?;
+    save_application_inner(command, &conn, data)
 }
 
 #[tauri::command]
@@ -638,9 +646,11 @@ pub fn soft_delete_application(pool: State<DbPool>, id: String) -> AppResult<()>
 mod tests {
     use super::{
         build_applications_where_clause, collect_top_tech_stacks, normalize_owner_names,
-        parse_owner_filter_values, resolve_tech_stack_side,
+        parse_owner_filter_values, resolve_tech_stack_side, save_application_inner,
     };
+    use crate::models::application::Application;
     use crate::models::common::QueryParams;
+    use crate::test_helpers::setup_test_db;
     use std::collections::HashMap;
 
     #[test]
@@ -714,5 +724,60 @@ mod tests {
         assert!(where_clause.contains("EXISTS"));
         assert!(where_clause.contains("application_owners"));
         assert!(sql_params.len() >= 6);
+    }
+
+    fn make_new_application(name: &str) -> Application {
+        Application {
+            id: "".into(),
+            name: name.into(),
+            app_type: "backend".into(),
+            address: Some("127.0.0.1".into()),
+            port: Some(8080),
+            tech_stack: Some("Rust".into()),
+            deploy_mode: Some("docker".into()),
+            env: "prod".into(),
+            git_repo: None,
+            owner: Some("alice".into()),
+            owners: Some(vec!["alice".into()]),
+            status: "running".into(),
+            description: None,
+            is_deleted: 0,
+            deleted_at: None,
+            created_at: "".into(),
+            updated_at: "".into(),
+        }
+    }
+
+    #[test]
+    fn save_application_inner_should_return_generated_id_for_create() {
+        let conn = setup_test_db();
+        let app = make_new_application("app-create");
+
+        let id =
+            save_application_inner("test", &conn, app).expect("create application should pass");
+        assert!(!id.is_empty());
+
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM applications WHERE id = ?1 AND is_deleted = 0",
+                rusqlite::params![id],
+                |row| row.get(0),
+            )
+            .expect("query inserted app");
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn save_application_inner_should_return_original_id_for_update() {
+        let conn = setup_test_db();
+        let created_id = save_application_inner("test", &conn, make_new_application("app-update"))
+            .expect("create");
+
+        let mut updated = make_new_application("app-update-renamed");
+        updated.id = created_id.clone();
+        updated.owners = Some(vec!["alice".into(), "bob".into()]);
+
+        let returned_id = save_application_inner("test", &conn, updated).expect("update");
+        assert_eq!(returned_id, created_id);
     }
 }

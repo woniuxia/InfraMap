@@ -147,7 +147,7 @@ describe("DeploymentPanel", () => {
             {
               id: "h-created",
               hostname: "temp-host-20260228090507",
-              ip_address: "10.0.0.8",
+              ip_display: "10.0.0.8",
               env: "dev",
               status: "running",
               is_deleted: 0,
@@ -173,10 +173,38 @@ describe("DeploymentPanel", () => {
     }));
     __setMockHandler("save_host", (_cmd, args) => {
       const payload = (args?.data ?? {}) as Record<string, unknown>;
-      expect(payload.ip_address).toBe("10.0.0.8");
       expect(payload.env).toBe("dev");
       expect(payload.status).toBe("running");
       expect(String(payload.hostname)).toContain("temp-host-");
+      return undefined;
+    });
+    __setMockHandler("save_ip_address", (_cmd, args) => {
+      const payload = (args?.data ?? {}) as Record<string, unknown>;
+      expect(payload.ip_address).toBe("10.0.0.8");
+      expect(payload.env).toBe("dev");
+      return undefined;
+    });
+    __setMockHandler("list_ip_addresses", () => ({
+      data: [
+        {
+          id: "ip-8",
+          ip_address: "10.0.0.8",
+          env: "dev",
+          is_vip: false,
+          is_deleted: 0,
+          created_at: "2026-02-28T09:05:07Z",
+          updated_at: "2026-02-28T09:05:07Z",
+        },
+      ],
+      total: 1,
+      page: 1,
+      page_size: 50,
+    }));
+    __setMockHandler("bind_host_ip", (_cmd, args) => {
+      expect(args).toEqual({
+        hostId: expect.any(String),
+        ipId: "ip-8",
+      });
       return undefined;
     });
 

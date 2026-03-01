@@ -9,6 +9,8 @@ import {
   softDeleteDeployment,
 } from "@/api/deployments";
 import { listHosts, saveHost } from "@/api/hosts";
+import { listIpAddresses, saveIpAddress } from "@/api/ip-addresses";
+import { bindHostIp } from "@/api/host-ip-bindings";
 
 const props = defineProps<{
   resourceId: string;
@@ -44,6 +46,14 @@ function formatTempHostName(date: Date = new Date()) {
   return `temp-host-${date.getFullYear()}${pad2(date.getMonth() + 1)}${pad2(date.getDate())}${pad2(date.getHours())}${pad2(date.getMinutes())}${pad2(date.getSeconds())}`;
 }
 
+function splitIpDisplay(value?: string): string[] {
+  if (!value) return [];
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+}
+
 async function fetchDeployments() {
   if (!props.resourceId) return;
   loading.value = true;
@@ -72,7 +82,7 @@ async function fetchHosts() {
 
 function hostName(hostId: string) {
   const h = hosts.value.find((h) => h.id === hostId);
-  return h ? `${h.hostname} (${h.ip_address})` : hostId;
+  return h ? `${h.hostname} (${h.ip_display || "-"})` : hostId;
 }
 
 async function loadResourceDeployContext() {
@@ -110,22 +120,62 @@ async function handleQuickCreateHost() {
   if (!ip) return;
 
   quickCreateLoading.value = true;
+  const normalizedEnv = normalizeHostEnv(resourceContext.value?.resource_env);
   try {
-    await saveHost({
-      id: "",
-      hostname: formatTempHostName(),
-      ip_address: ip,
-      env: normalizeHostEnv(resourceContext.value?.resource_env),
-      status: "running",
-      is_deleted: 0,
-      created_at: "",
-      updated_at: "",
+    await fetchHosts();
+    const existingHost = hosts.value.find((host) => {
+      const hostIps = splitIpDisplay(host.ip_display);
+      return host.env === normalizedEnv && hostIps.includes(ip);
     });
+    const hostId = existingHost?.id ?? `host-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+
+    if (!existingHost) {
+      await saveHost({
+        id: hostId,
+        hostname: formatTempHostName(),
+        env: normalizedEnv,
+        status: "running",
+        is_deleted: 0,
+        created_at: "",
+        updated_at: "",
+      });
+    }
+
+    try {
+      await saveIpAddress({
+        id: "",
+        ip_address: ip,
+        env: normalizedEnv,
+        is_vip: false,
+        real_ips: undefined,
+        is_deleted: 0,
+        created_at: "",
+        updated_at: "",
+      });
+    } catch {
+      // ignore duplicate conflicts and reuse existing one
+    }
+
+    const ipResult = await listIpAddresses({
+      page: 1,
+      page_size: 50,
+      search: ip,
+      filters: { env: normalizedEnv },
+    });
+    const ipResource = ipResult.data.find((item) => item.ip_address === ip && item.env === normalizedEnv);
+    if (!ipResource) {
+      ElMessage.warning("快捷创建失败，未找到对应 IP 资源，请手动处理");
+      return;
+    }
+
+    await bindHostIp({ host_id: hostId, ip_id: ipResource.id });
   } catch {
     // if created concurrently by others, continue to refresh and reuse
   } finally {
     await fetchHosts();
-    const matched = hosts.value.find((h) => h.ip_address === ip);
+    const matched = hosts.value.find(
+      (h) => h.env === normalizedEnv && splitIpDisplay(h.ip_display).includes(ip)
+    );
     if (matched) {
       newDeploy.value.host_id = matched.id;
       hostLocked.value = true;
@@ -240,7 +290,7 @@ onMounted(() => {
             <el-option
               v-for="h in hosts"
               :key="h.id"
-              :label="`${h.hostname} (${h.ip_address})`"
+              :label="`${h.hostname} (${h.ip_display || '-'})`"
               :value="h.id"
             />
           </el-select>

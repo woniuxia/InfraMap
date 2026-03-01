@@ -1,4 +1,6 @@
 export * from './hosts'
+export * from './ip-addresses'
+export * from './host-ip-bindings'
 export * from './applications'
 export * from './middlewares'
 export * from './nginx-configs'

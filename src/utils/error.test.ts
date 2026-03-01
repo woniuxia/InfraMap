@@ -57,6 +57,19 @@ describe("normalizeInvokeError", () => {
     });
   });
 
+  it("maps ip resource unique constraint errors", () => {
+    const error = normalizeInvokeError(
+      "Update failed: UNIQUE constraint failed: ip_addresses.ip_address, ip_addresses.env",
+      "save_ip_address",
+    );
+
+    expect(error).toMatchObject({
+      code: "CONFLICT",
+      message: "保存失败，IP 地址与环境组合已存在，请勿重复创建。",
+      command: "save_ip_address",
+    });
+  });
+
   it("falls back to internal error for unknown payloads", () => {
     const error = normalizeInvokeError({ x: 1 }, "list_hosts");
 

@@ -5,6 +5,8 @@ pub mod dashboard;
 pub mod dependency;
 pub mod deployment;
 pub mod host;
+pub mod host_ip_binding;
+pub mod ip_address;
 pub mod middleware;
 pub mod nginx_config;
 pub mod settings;

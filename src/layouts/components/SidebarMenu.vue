@@ -19,6 +19,7 @@ const appStore = useAppStore();
 
 const menuItems: { path: string; name: string; icon: Component }[] = [
   { path: "/", name: "仪表盘", icon: markRaw(DataAnalysis) },
+  { path: "/ip-addresses", name: "IP地址", icon: markRaw(Connection) },
   { path: "/hosts", name: "服务器", icon: markRaw(Monitor) },
   { path: "/applications", name: "应用服务", icon: markRaw(IconMenu) },
   { path: "/middlewares", name: "中间件", icon: markRaw(Connection) },

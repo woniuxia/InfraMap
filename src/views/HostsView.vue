@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { ref, onMounted, nextTick } from "vue";
+import { computed, onMounted, nextTick, ref } from "vue";
 import { ElMessage } from "element-plus";
 import type { FormInstance, FormRules } from "element-plus";
-import type { Host } from "@/types";
+import type { Host, IpAddress } from "@/types";
 import type { SearchFieldConfig, SearchToolbarQueryPayload } from "@/types/searchToolbar";
 import { listHosts, saveHost, softDeleteHost } from "@/api/hosts";
+import { listIpAddresses, saveIpAddress } from "@/api/ip-addresses";
+import { bindHostIp, listHostIpBindings, unbindHostIp } from "@/api/host-ip-bindings";
 import { useResourceList } from "@/composables/useResourceList";
 import { buildHostCopyDraft } from "@/utils/resourceCopy";
 import SearchToolbar from "@/components/filters/SearchToolbar.vue";
@@ -40,6 +42,24 @@ const editingHost = ref<Partial<Host>>({});
 const isEditing = ref(false);
 const saveLoading = ref(false);
 const formRef = ref<FormInstance>();
+const availableIps = ref<IpAddress[]>([]);
+const selectedIpIds = ref<string[]>([]);
+const originalIpIds = ref<string[]>([]);
+const bindingLoading = ref(false);
+const allowCrossEnv = ref(false);
+const bindingSearchKeyword = ref("");
+const quickIpDialogVisible = ref(false);
+const quickIpSaving = ref(false);
+const quickIpFormRef = ref<FormInstance>();
+const quickRealIpList = ref<string[]>([]);
+const quickIpForm = ref<Partial<IpAddress>>({
+  id: "",
+  ip_address: "",
+  env: "prod",
+  is_vip: false,
+  real_ips: undefined,
+  description: undefined,
+});
 
 interface HostListFilters {
   env: string[];
@@ -83,7 +103,6 @@ const toolbarFields: SearchFieldConfig[] = [
     options: statusOptions,
   },
 ];
-
 const ipv4Pattern = /^((25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(25[0-5]|2[0-4]\d|[01]?\d\d?)$/;
 
 const validateOptionalPositiveInteger = (
@@ -113,10 +132,6 @@ const formRules: FormRules = {
   hostname: [
     { required: true, message: "请输入主机名", trigger: "blur" },
     { min: 1, max: 200, message: "长度 1-200 个字符", trigger: "blur" },
-  ],
-  ip_address: [
-    { required: true, message: "请输入 IP 地址", trigger: "blur" },
-    { pattern: ipv4Pattern, message: "请输入有效的 IPv4 地址，如 192.168.1.100", trigger: "blur" },
   ],
   env: [{ required: true, message: "请选择环境", trigger: "change" }],
   cpu_cores: [{ validator: validateOptionalPositiveInteger, trigger: "change" }],
@@ -149,6 +164,41 @@ const tagList = ref<string[]>([]);
 const tagInputVisible = ref(false);
 const tagInputValue = ref("");
 const tagInputRef = ref<InstanceType<typeof import("element-plus")["ElInput"]>>();
+const filteredIpOptions = computed(() => {
+  const keyword = bindingSearchKeyword.value.trim().toLowerCase();
+  const candidates = allowCrossEnv.value
+    ? availableIps.value
+    : availableIps.value.filter(
+        (ip) => !editingHost.value.env || ip.env === editingHost.value.env || selectedIpIds.value.includes(ip.id)
+      );
+
+  if (!keyword) {
+    return candidates;
+  }
+
+  return candidates.filter((ip) => {
+    const label = formatIpOptionLabel(ip).toLowerCase();
+    return ip.ip_address.toLowerCase().includes(keyword) || label.includes(keyword);
+  });
+});
+
+const searchedIpKeyword = computed(() => bindingSearchKeyword.value.trim());
+const canQuickCreateIp = computed(() => {
+  if (!searchedIpKeyword.value || !ipv4Pattern.test(searchedIpKeyword.value)) {
+    return false;
+  }
+
+  const env = editingHost.value.env;
+  return !availableIps.value.some((ip) => ip.ip_address === searchedIpKeyword.value && (!env || ip.env === env));
+});
+
+const quickIpFormRules: FormRules = {
+  ip_address: [
+    { required: true, message: "请输入 IP 地址", trigger: "blur" },
+    { pattern: ipv4Pattern, message: "请输入有效 IPv4 地址", trigger: "blur" },
+  ],
+  env: [{ required: true, message: "请选择环境", trigger: "change" }],
+};
 
 function parseTags(json?: string): string[] {
   if (!json) return [];
@@ -190,26 +240,193 @@ function handleToolbarQuery(payload: SearchToolbarQueryPayload) {
   handleQuery(payload);
 }
 
-function openAdd() {
-  editingHost.value = { status: "running", env: "prod", hostname: "", ip_address: "" };
-  tagList.value = [];
-  isEditing.value = false;
-  dialogVisible.value = true;
+function generateHostId() {
+  return `host-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
 }
 
-function openEdit(row: Host) {
+function formatIpOptionLabel(ip: IpAddress) {
+  const vipLabel = ip.is_vip ? "VIP" : "普通";
+  return `${ip.ip_address} [${envLabel(ip.env)} | ${vipLabel}]`;
+}
+
+async function loadIpOptions() {
+  const result = await listIpAddresses({ page: 1, page_size: 999 });
+  availableIps.value = result.data;
+}
+
+async function loadHostBindings(hostId: string) {
+  const bindings = await listHostIpBindings(hostId);
+  selectedIpIds.value = bindings.map((item) => item.id);
+  originalIpIds.value = [...selectedIpIds.value];
+}
+
+async function syncHostBindings(hostId: string) {
+  const current = new Set(selectedIpIds.value);
+  const original = new Set(originalIpIds.value);
+  const addIds = [...current].filter((id) => !original.has(id));
+  const removeIds = [...original].filter((id) => !current.has(id));
+
+  for (const ipId of addIds) {
+    await bindHostIp({ host_id: hostId, ip_id: ipId });
+  }
+  for (const ipId of removeIds) {
+    await unbindHostIp({ host_id: hostId, ip_id: ipId });
+  }
+
+  originalIpIds.value = [...selectedIpIds.value];
+}
+
+async function refreshBindingContext(hostId?: string) {
+  bindingLoading.value = true;
+  try {
+    await loadIpOptions();
+    if (hostId) {
+      await loadHostBindings(hostId);
+    } else {
+      selectedIpIds.value = [];
+      originalIpIds.value = [];
+    }
+  } catch {
+    // error shown by tauriInvoke
+  } finally {
+    bindingLoading.value = false;
+  }
+}
+
+function handleBindingSearch(keyword: string) {
+  bindingSearchKeyword.value = keyword.trim();
+}
+
+function handleBindingDropdownVisible(visible: boolean) {
+  if (!visible) {
+    bindingSearchKeyword.value = "";
+  }
+}
+
+function normalizeQuickRealIps(): string[] {
+  return Array.from(
+    new Set(
+      quickRealIpList.value
+        .map((item) => item.trim())
+        .filter((item) => item.length > 0)
+    )
+  );
+}
+
+function validateQuickVipIps(): boolean {
+  if (!quickIpForm.value.is_vip) {
+    return true;
+  }
+
+  const normalized = normalizeQuickRealIps();
+  if (normalized.length === 0) {
+    ElMessage.warning("VIP 模式下至少需要 1 个真实 IP");
+    return false;
+  }
+
+  for (const ip of normalized) {
+    if (!ipv4Pattern.test(ip)) {
+      ElMessage.warning(`真实 IP 无效：${ip}`);
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function addQuickRealIp() {
+  quickRealIpList.value.push("");
+}
+
+function removeQuickRealIp(index: number) {
+  quickRealIpList.value.splice(index, 1);
+}
+
+function openQuickCreateIpDialog() {
+  const ip = searchedIpKeyword.value;
+  if (!ipv4Pattern.test(ip)) {
+    ElMessage.warning("请输入有效 IPv4 地址后再新增");
+    return;
+  }
+
+  quickIpForm.value = {
+    id: "",
+    ip_address: ip,
+    env: (editingHost.value.env as IpAddress["env"]) || "prod",
+    is_vip: false,
+    real_ips: undefined,
+    description: undefined,
+  };
+  quickRealIpList.value = [];
+  quickIpDialogVisible.value = true;
+}
+
+async function handleQuickCreateIpSave() {
+  const valid = await quickIpFormRef.value?.validate().catch(() => false);
+  if (!valid) return;
+  if (!validateQuickVipIps()) return;
+
+  const normalizedRealIps = normalizeQuickRealIps();
+  const payload: Partial<IpAddress> = {
+    id: "",
+    ip_address: quickIpForm.value.ip_address?.trim() ?? "",
+    env: (quickIpForm.value.env as IpAddress["env"]) || "prod",
+    is_vip: Boolean(quickIpForm.value.is_vip),
+    real_ips: quickIpForm.value.is_vip ? JSON.stringify(normalizedRealIps) : undefined,
+    description: quickIpForm.value.description?.trim() || undefined,
+  };
+
+  quickIpSaving.value = true;
+  try {
+    await saveIpAddress(payload);
+    await loadIpOptions();
+
+    const created = availableIps.value.find(
+      (ip) => ip.ip_address === payload.ip_address && ip.env === payload.env
+    );
+    if (created && !selectedIpIds.value.includes(created.id)) {
+      selectedIpIds.value.push(created.id);
+    }
+
+    quickIpDialogVisible.value = false;
+    bindingSearchKeyword.value = "";
+    ElMessage.success("IP 资源新增成功，已自动回填到绑定列表");
+  } catch {
+    // error shown by tauriInvoke
+  } finally {
+    quickIpSaving.value = false;
+  }
+}
+
+async function openAdd() {
+  editingHost.value = { id: "", status: "running", env: "prod", hostname: "" };
+  tagList.value = [];
+  allowCrossEnv.value = false;
+  bindingSearchKeyword.value = "";
+  isEditing.value = false;
+  dialogVisible.value = true;
+  await refreshBindingContext();
+}
+
+async function openEdit(row: Host) {
   editingHost.value = { ...row };
   tagList.value = parseTags(row.tags);
+  allowCrossEnv.value = false;
+  bindingSearchKeyword.value = "";
   isEditing.value = true;
   dialogVisible.value = true;
+  await refreshBindingContext(row.id);
 }
 
-function openCopy(row: Host) {
+async function openCopy(row: Host) {
   editingHost.value = buildHostCopyDraft(row);
   tagList.value = parseTags(editingHost.value.tags);
+  allowCrossEnv.value = false;
+  bindingSearchKeyword.value = "";
   isEditing.value = false;
   dialogVisible.value = true;
-  ElMessage.info("已生成副本草稿，请填写新 IP 后保存");
+  await refreshBindingContext();
+  ElMessage.info("已生成副本草稿，请在下方绑定 IP 后保存");
 }
 
 function hasInputValue(value: unknown): boolean {
@@ -270,9 +487,18 @@ async function handleSave() {
   if (!validateHardwareFields()) return;
 
   normalizeHardwareFields();
+  const hostId = editingHost.value.id || generateHostId();
+  editingHost.value.id = hostId;
+  const payload: Partial<Host> = {
+    ...editingHost.value,
+    ip_address: undefined,
+    ip_display: undefined,
+  };
+
   saveLoading.value = true;
   try {
-    await saveHost(editingHost.value);
+    await saveHost(payload);
+    await syncHostBindings(hostId);
     ElMessage.success(isEditing.value ? "更新成功" : "创建成功");
     dialogVisible.value = false;
     fetchData();
@@ -329,7 +555,9 @@ onMounted(() => fetchData());
     </SearchToolbar>
     <el-table :data="data" v-loading="loading" border stripe class="w-full im-table-fixed-ops">
       <el-table-column prop="hostname" label="主机名" min-width="150" align="center" />
-      <el-table-column prop="ip_address" label="IP地址" width="150" align="center" />
+      <el-table-column label="IP地址" min-width="220" align="center">
+        <template #default="{ row }">{{ row.ip_display || "-" }}</template>
+      </el-table-column>
       <el-table-column prop="env" label="环境" width="90" align="center">
         <template #default="{ row }">
           <el-tag :type="envTagType(row.env)" size="small">{{ envLabel(row.env) }}</el-tag>
@@ -380,13 +608,61 @@ onMounted(() => fetchData());
         <el-form-item label="主机名" prop="hostname" required>
           <el-input v-model="editingHost.hostname" placeholder="请输入主机名，例如 web-prod-01" />
         </el-form-item>
-        <el-form-item label="IP地址" prop="ip_address" required>
-          <el-input v-model="editingHost.ip_address" placeholder="如 192.168.1.100" />
-        </el-form-item>
         <el-form-item label="环境" prop="env" required>
           <el-select v-model="editingHost.env" class="w-full">
             <el-option v-for="option in envOptions" :key="option.value" :label="option.label" :value="option.value" />
           </el-select>
+        </el-form-item>
+        <el-form-item label="绑定IP">
+          <div class="binding-editor">
+            <div class="binding-toolbar">
+              <el-switch
+                v-model="allowCrossEnv"
+                inline-prompt
+                :active-text="'跨环境'"
+                :inactive-text="'同环境'"
+              />
+              <el-button text size="small" :loading="bindingLoading" @click="refreshBindingContext(editingHost.id)">
+                刷新IP列表
+              </el-button>
+            </div>
+            <el-select
+              v-model="selectedIpIds"
+              multiple
+              filterable
+              remote
+              clearable
+              collapse-tags
+              collapse-tags-tooltip
+              class="w-full"
+              placeholder="选择绑定IP（支持多选）"
+              :loading="bindingLoading"
+              :remote-method="handleBindingSearch"
+              @visible-change="handleBindingDropdownVisible"
+            >
+              <el-option
+                v-for="ip in filteredIpOptions"
+                :key="ip.id"
+                :label="formatIpOptionLabel(ip)"
+                :value="ip.id"
+              />
+              <template #empty>
+                <div class="binding-empty">
+                  <template v-if="!searchedIpKeyword">暂无可选 IP</template>
+                  <template v-else-if="canQuickCreateIp">
+                    <span>当前环境尚未录入 IP：{{ searchedIpKeyword }}</span>
+                    <el-button type="primary" text @click="openQuickCreateIpDialog">
+                      点击新增并回填
+                    </el-button>
+                  </template>
+                  <template v-else>未找到匹配 IP</template>
+                </div>
+              </template>
+            </el-select>
+            <div class="binding-hint">
+              默认仅显示与服务器同环境 IP，开启“跨环境”可查看全部。支持在下拉框中输入 IP，未录入时可直接新增。
+            </div>
+          </div>
         </el-form-item>
         <el-form-item label="操作系统">
           <el-select
@@ -565,6 +841,65 @@ onMounted(() => fetchData());
         <el-button type="primary" :loading="saveLoading" @click="handleSave">保存</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog
+      v-model="quickIpDialogVisible"
+      title="新增IP资源"
+      width="620px"
+      align-center
+      destroy-on-close
+    >
+      <el-form ref="quickIpFormRef" :model="quickIpForm" :rules="quickIpFormRules" label-width="96px">
+        <el-form-item label="IP地址" prop="ip_address" required>
+          <el-input v-model="quickIpForm.ip_address" placeholder="如 10.0.0.21" />
+        </el-form-item>
+        <el-form-item label="环境" prop="env" required>
+          <el-select v-model="quickIpForm.env" class="w-full">
+            <el-option
+              v-for="option in envOptions"
+              :key="option.value"
+              :label="option.label"
+              :value="option.value"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="是否VIP">
+          <el-radio-group v-model="quickIpForm.is_vip">
+            <el-radio :value="false">否</el-radio>
+            <el-radio :value="true">是</el-radio>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item v-if="quickIpForm.is_vip" label="真实IP列表" required>
+          <div class="quick-real-ip-editor">
+            <div
+              v-for="(_ip, index) in quickRealIpList"
+              :key="`quick-real-ip-${index}`"
+              class="quick-real-ip-row"
+            >
+              <el-input v-model="quickRealIpList[index]" placeholder="如 10.0.0.31" />
+              <el-button text type="danger" @click="removeQuickRealIp(index)">删除</el-button>
+            </div>
+            <el-button size="small" @click="addQuickRealIp">+ 添加真实IP</el-button>
+          </div>
+        </el-form-item>
+        <el-form-item label="描述">
+          <el-input
+            v-model="quickIpForm.description"
+            type="textarea"
+            :rows="3"
+            maxlength="300"
+            show-word-limit
+            placeholder="可填写用途、备注等信息"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="quickIpDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="quickIpSaving" @click="handleQuickCreateIpSave">
+          保存并回填
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -678,6 +1013,43 @@ onMounted(() => fetchData());
 }
 .inline-input {
   width: 100%;
+}
+.binding-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+.binding-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.binding-hint {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+.binding-empty {
+  padding: 8px 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  text-align: center;
+}
+.quick-real-ip-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+.quick-real-ip-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
 }
 </style>
 

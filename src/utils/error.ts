@@ -35,6 +35,16 @@ function toPayload(value: Record<string, unknown>, fallbackCommand: string): Inf
 }
 
 function fromLegacyMessage(message: string, command: string): InfraErrorPayload {
+  if (message.includes("UNIQUE constraint failed: ip_addresses.ip_address, ip_addresses.env")) {
+    return {
+      code: "CONFLICT",
+      message: "保存失败，IP 地址与环境组合已存在，请勿重复创建。",
+      details: message,
+      command,
+      retryable: false,
+    };
+  }
+
   if (message.includes("UNIQUE constraint failed: hosts.ip_address")) {
     return {
       code: "CONFLICT",
