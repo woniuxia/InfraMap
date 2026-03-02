@@ -1,11 +1,10 @@
 use crate::db::DbPool;
+use crate::storage::StoragePaths;
 use rusqlite::backup::Backup;
 use std::path::{Path, PathBuf};
 
-pub struct AppDataDir(pub PathBuf);
-
-pub fn get_backup_dir(app_data_dir: &Path) -> Result<PathBuf, String> {
-    let dir = app_data_dir.join("backups");
+pub fn get_backup_dir(storage_root: &Path) -> Result<PathBuf, String> {
+    let dir = storage_root.join("backups");
     std::fs::create_dir_all(&dir)
         .map_err(|e| format!("Failed to create backup directory: {}", e))?;
     Ok(dir)
@@ -69,7 +68,7 @@ pub fn read_backup_settings(pool: &DbPool) -> Result<(bool, i64, i64, Option<Str
     .map_err(|e| format!("Failed to read backup settings: {}", e))
 }
 
-pub fn start_auto_backup_thread(pool: DbPool, app_data_dir: PathBuf) {
+pub fn start_auto_backup_thread(pool: DbPool, storage_paths: StoragePaths) {
     std::thread::spawn(move || loop {
         let settings = match read_backup_settings(&pool) {
             Ok(s) => s,
@@ -95,7 +94,7 @@ pub fn start_auto_backup_thread(pool: DbPool, app_data_dir: PathBuf) {
             };
 
             if should_backup {
-                if let Ok(backup_dir) = get_backup_dir(&app_data_dir) {
+                if let Ok(backup_dir) = get_backup_dir(&storage_paths.active_root_path) {
                     let now = chrono::Utc::now().format("%Y%m%d_%H%M%S");
                     let filename = format!("backup_auto_{}.db", now);
                     let dest = backup_dir.join(&filename);

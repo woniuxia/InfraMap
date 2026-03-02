@@ -1,196 +1,226 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
-import TopologyCanvas from '@/components/topology/TopologyCanvas.vue'
-import TopologyToolbar from '@/components/topology/TopologyToolbar.vue'
-import TopologyDetailPanel from '@/components/topology/TopologyDetailPanel.vue'
-import { findPaths, analyzeImpact } from '@/api/topology'
-import { useTopologyStore } from '@/stores/topology'
-import type { TopologyNode, PathResult, ImpactResult } from '@/types'
+import { ref, computed, onMounted, onBeforeUnmount } from "vue";
+import { ElMessage } from "element-plus";
+import TopologyCanvas from "@/components/topology/TopologyCanvas.vue";
+import TopologyToolbar from "@/components/topology/TopologyToolbar.vue";
+import TopologyDetailPanel from "@/components/topology/TopologyDetailPanel.vue";
+import TopologyLegend from "@/components/topology/TopologyLegend.vue";
+import { findPaths, analyzeImpact } from "@/api/topology";
+import { useTopologyStore } from "@/stores/topology";
+import type { TopologyNode, PathResult, ImpactResult } from "@/types";
+import {
+  DEFAULT_TOPOLOGY_FILTER,
+  filterTopologyGraph,
+  isExternalTopologyNode,
+  type TopologyFilterState,
+} from "@/components/topology/topologyGraph.utils";
 
-// Store
-const topologyStore = useTopologyStore()
+const topologyStore = useTopologyStore();
 
-// Data (from store)
-const graphData = computed(() => topologyStore.graphData)
-const loading = computed(() => topologyStore.loading)
-const canvasRef = ref<InstanceType<typeof TopologyCanvas>>()
+const rawGraphData = computed(() => topologyStore.graphData);
+const loading = computed(() => topologyStore.loading);
+const activeFilter = ref<TopologyFilterState>({ ...DEFAULT_TOPOLOGY_FILTER });
+const graphData = computed(() => filterTopologyGraph(rawGraphData.value, activeFilter.value));
+const canvasRef = ref<InstanceType<typeof TopologyCanvas>>();
 
-// Panel state
-const panelMode = ref<'detail' | 'path' | 'impact' | null>(null)
-const selectedNode = ref<TopologyNode | null>(null)
-const pathResult = ref<PathResult | null>(null)
-const impactResult = ref<ImpactResult | null>(null)
+const panelMode = ref<"detail" | "path" | "impact" | null>(null);
+const selectedNode = ref<TopologyNode | null>(null);
+const pathResult = ref<PathResult | null>(null);
+const impactResult = ref<ImpactResult | null>(null);
 
-// Path tracing state
-const pathTraceMode = ref(false)
-const pathSource = ref<string | null>(null)
-const pathTraceHint = ref('')
+const pathTraceMode = ref(false);
+const pathSource = ref<string | null>(null);
+const pathTraceHint = ref("");
 
-// Context menu
-const contextMenuVisible = ref(false)
-const contextMenuPos = ref({ x: 0, y: 0 })
-const contextMenuNode = ref<TopologyNode | null>(null)
+const contextMenuVisible = ref(false);
+const contextMenuPos = ref({ x: 0, y: 0 });
+const contextMenuNode = ref<TopologyNode | null>(null);
 
-// Fullscreen
-const isFullscreen = ref(false)
-const containerRef = ref<HTMLDivElement>()
+const isFullscreen = ref(false);
+const containerRef = ref<HTMLDivElement>();
 
-// Node name map for detail panel
 const nodeNameMap = computed(() => {
-  const map: Record<string, string> = {}
-  if (graphData.value) {
-    graphData.value.nodes.forEach((n) => (map[n.id] = n.name))
-    graphData.value.combos.forEach((c) => (map[c.id] = c.label))
+  const map: Record<string, string> = {};
+  if (rawGraphData.value) {
+    rawGraphData.value.nodes.forEach((node) => {
+      map[node.id] = node.name;
+    });
+    rawGraphData.value.lanes.forEach((lane) => {
+      map[lane.id] = lane.label;
+    });
   }
-  return map
-})
+  return map;
+});
+
+function isExternalNode(node: TopologyNode | null): boolean {
+  if (!node) return false;
+  return isExternalTopologyNode(node);
+}
 
 async function loadData() {
-  await topologyStore.fetchGraph(true)
+  await topologyStore.fetchGraph(true);
 }
 
-// Node click handler
 function handleNodeClick(node: TopologyNode) {
   if (pathTraceMode.value) {
-    if (!pathSource.value) {
-      pathSource.value = node.id
-      pathTraceHint.value = `已选起点: ${node.name}，请 Ctrl+点击终点`
-      ElMessage.info(pathTraceHint.value)
-    } else {
-      // Second click -> find paths
-      handleFindPaths(pathSource.value, node.id)
-      pathTraceMode.value = false
-      pathSource.value = null
-      pathTraceHint.value = ''
+    if (isExternalNode(node)) {
+      ElMessage.info("跨环境外部节点不支持路径追踪，请选择当前环境内节点");
+      return;
     }
-    return
+
+    if (!pathSource.value) {
+      pathSource.value = node.id;
+      pathTraceHint.value = `已选起点: ${node.name}，请点击终点`;
+      ElMessage.info(pathTraceHint.value);
+    } else {
+      handleFindPaths(pathSource.value, node.id);
+      pathTraceMode.value = false;
+      pathSource.value = null;
+      pathTraceHint.value = "";
+    }
+    return;
   }
 
-  selectedNode.value = node
-  panelMode.value = 'detail'
+  selectedNode.value = node;
+  panelMode.value = "detail";
 }
 
-// Ctrl+click to enter path trace mode
 function handleCanvasNodeClick(node: TopologyNode) {
-  // We'll check for ctrl key on the canvas event
-  // For now, regular clicks just show detail
-  handleNodeClick(node)
+  handleNodeClick(node);
 }
 
-// Right-click context menu
 function handleContextMenu(payload: { node: TopologyNode; x: number; y: number }) {
-  contextMenuNode.value = payload.node
-  contextMenuPos.value = { x: payload.x, y: payload.y }
-  contextMenuVisible.value = true
+  if (isExternalNode(payload.node)) {
+    ElMessage.info("外部节点仅用于展示跨环境依赖，不支持操作");
+    return;
+  }
+  contextMenuNode.value = payload.node;
+  contextMenuPos.value = { x: payload.x, y: payload.y };
+  contextMenuVisible.value = true;
 }
 
 function closeContextMenu() {
-  contextMenuVisible.value = false
+  contextMenuVisible.value = false;
 }
 
-// Path tracing
 function startPathTrace() {
-  closeContextMenu()
-  pathTraceMode.value = true
-  pathSource.value = contextMenuNode.value?.id || null
+  if (isExternalNode(contextMenuNode.value)) {
+    closeContextMenu();
+    ElMessage.info("外部节点不支持路径追踪");
+    return;
+  }
+
+  closeContextMenu();
+  pathTraceMode.value = true;
+  pathSource.value = contextMenuNode.value?.id || null;
   if (pathSource.value) {
-    pathTraceHint.value = `已选起点: ${contextMenuNode.value?.name}，请点击终点`
-    ElMessage.info(pathTraceHint.value)
+    pathTraceHint.value = `已选起点: ${contextMenuNode.value?.name}，请点击终点`;
+    ElMessage.info(pathTraceHint.value);
   }
 }
 
 async function handleFindPaths(sourceId: string, targetId: string) {
   try {
-    pathResult.value = await findPaths(sourceId, targetId)
-    panelMode.value = 'path'
+    pathResult.value = await findPaths(sourceId, targetId);
+    panelMode.value = "path";
     if (pathResult.value.paths.length > 0) {
-      canvasRef.value?.highlightPaths(pathResult.value.paths)
+      canvasRef.value?.highlightPaths(pathResult.value.paths);
     } else {
-      ElMessage.warning('未找到连接路径')
+      ElMessage.warning("未找到连接路径");
     }
   } catch {
     // error shown by tauriInvoke
   }
 }
 
-// Impact analysis
 async function handleAnalyzeImpact() {
-  const node = contextMenuNode.value
-  closeContextMenu()
-  if (!node) return
+  const node = contextMenuNode.value;
+  closeContextMenu();
+  if (!node) return;
+  if (isExternalNode(node)) {
+    ElMessage.info("外部节点不支持影响分析");
+    return;
+  }
 
   try {
-    impactResult.value = await analyzeImpact(node.id)
-    selectedNode.value = node
-    panelMode.value = 'impact'
-    canvasRef.value?.highlightImpact(node.id, impactResult.value)
+    impactResult.value = await analyzeImpact(node.id);
+    selectedNode.value = node;
+    panelMode.value = "impact";
+    canvasRef.value?.highlightImpact(node.id, impactResult.value);
   } catch {
     // error shown by tauriInvoke
   }
 }
 
-// Search
 function handleSearch(payload: { matchIds: string[]; focusId?: string }) {
   if (payload.matchIds.length === 0) {
-    canvasRef.value?.clearHighlight()
-    return
+    canvasRef.value?.clearHighlight();
+    return;
   }
-  canvasRef.value?.highlightSearch(payload.matchIds, payload.focusId)
+  canvasRef.value?.highlightSearch(payload.matchIds, payload.focusId);
 }
 
-// Filter
-function handleFilter(payload: { types: string[]; env: string }) {
-  canvasRef.value?.applyFilter(payload)
+function handleFilter(payload: { nodeKinds: TopologyFilterState["nodeKinds"]; env: TopologyFilterState["env"] }) {
+  activeFilter.value = {
+    ...activeFilter.value,
+    nodeKinds: payload.nodeKinds,
+    env: payload.env,
+  };
 }
 
-// Layout
-function handleLayoutChange(type: 'force' | 'dagre') {
-  canvasRef.value?.setLayout(type)
+function handleLegendChange(payload: Partial<TopologyFilterState>) {
+  activeFilter.value = {
+    ...activeFilter.value,
+    ...payload,
+  };
 }
 
-// Export
-async function handleExport(type: 'png' | 'svg') {
-  const dataURL = await canvasRef.value?.exportImage(type)
-  if (!dataURL) return
-
-  const link = document.createElement('a')
-  link.download = `topology.${type}`
-  link.href = dataURL
-  link.click()
-  ElMessage.success('导出成功')
+function handleLayoutChange(type: "force" | "dagre") {
+  canvasRef.value?.setLayout(type);
 }
 
-// Panel close
+async function handleExport(type: "png" | "svg") {
+  const dataURL = await canvasRef.value?.exportImage(type);
+  if (!dataURL) return;
+
+  const link = document.createElement("a");
+  link.download = `topology.${type}`;
+  link.href = dataURL;
+  link.click();
+  ElMessage.success("导出成功");
+}
+
 function handlePanelClose() {
-  panelMode.value = null
-  selectedNode.value = null
-  pathResult.value = null
-  impactResult.value = null
-  canvasRef.value?.clearHighlight()
+  panelMode.value = null;
+  selectedNode.value = null;
+  pathResult.value = null;
+  impactResult.value = null;
+  canvasRef.value?.clearHighlight();
 }
 
-// Fullscreen toggle
 function toggleFullscreen() {
-  if (!containerRef.value) return
+  if (!containerRef.value) return;
   if (!isFullscreen.value) {
-    containerRef.value.requestFullscreen?.()
-    isFullscreen.value = true
+    containerRef.value.requestFullscreen?.();
+    isFullscreen.value = true;
   } else {
-    document.exitFullscreen?.()
-    isFullscreen.value = false
+    document.exitFullscreen?.();
+    isFullscreen.value = false;
   }
 }
 
-// Listen for fullscreen change
 function handleFullscreenChange() {
-  isFullscreen.value = !!document.fullscreenElement
+  isFullscreen.value = !!document.fullscreenElement;
 }
 
 onMounted(() => {
-  loadData()
-  document.addEventListener('fullscreenchange', handleFullscreenChange)
-})
+  loadData();
+  document.addEventListener("fullscreenchange", handleFullscreenChange);
+});
+
+onBeforeUnmount(() => {
+  document.removeEventListener("fullscreenchange", handleFullscreenChange);
+});
 </script>
 
 <template>
@@ -232,9 +262,15 @@ onMounted(() => {
 
         <!-- Empty state -->
         <div v-if="graphData && graphData.nodes.length === 0 && !loading" class="empty-overlay">
-          <el-empty description="暂无拓扑数据，请先添加资源和关系" />
+          <el-empty :description="(rawGraphData?.nodes.length || 0) > 0 ? '当前筛选无数据，请调整图例筛选项' : '暂无拓扑数据，请先添加资源和关系'" />
         </div>
       </div>
+
+      <TopologyLegend
+        :stats="graphData?.legend_stats || null"
+        :filter="activeFilter"
+        @change="handleLegendChange"
+      />
 
       <!-- Detail panel -->
       <TopologyDetailPanel
@@ -324,5 +360,11 @@ onMounted(() => {
 .context-menu-item:hover {
   background: var(--im-surface-2);
   color: var(--im-accent);
+}
+
+@media (max-width: 1080px) {
+  .topology-content {
+    flex-direction: column;
+  }
 }
 </style>

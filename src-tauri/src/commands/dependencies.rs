@@ -5,6 +5,7 @@ use tauri::State;
 
 use crate::db::audit::insert_audit_log;
 use crate::db::crud::{build_where_clause, count_query};
+use crate::db::transaction::with_transaction;
 use crate::db::DbPool;
 use crate::error::{AppError, AppResult};
 use crate::models::call_relation::CallRelation;
@@ -174,7 +175,57 @@ fn query_owner_pair_keys(
         })
         .map_err(|e| AppError::from_db_error(command, "读取历史关系键", e))?;
 
-    Ok(rows.filter_map(|row| row.ok()).collect())
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| AppError::from_db_error(command, "读取历史关系键", e))
+}
+
+fn resource_exists(
+    conn: &rusqlite::Connection,
+    resource_type: &str,
+    resource_id: &str,
+) -> Result<bool, rusqlite::Error> {
+    let count: i64 = match resource_type {
+        "application" => conn.query_row(
+            "SELECT COUNT(*) FROM applications WHERE id = ?1 AND is_deleted = 0",
+            rusqlite::params![resource_id],
+            |row| row.get(0),
+        )?,
+        "middleware" => conn.query_row(
+            "SELECT COUNT(*) FROM middlewares WHERE id = ?1 AND is_deleted = 0",
+            rusqlite::params![resource_id],
+            |row| row.get(0),
+        )?,
+        "nginx" => conn.query_row(
+            "SELECT COUNT(*) FROM nginx_configs WHERE id = ?1 AND is_deleted = 0",
+            rusqlite::params![resource_id],
+            |row| row.get(0),
+        )?,
+        _ => 0,
+    };
+    Ok(count > 0)
+}
+
+fn ensure_resource_exists(
+    command: &str,
+    conn: &rusqlite::Connection,
+    resource_type: &str,
+    resource_id: &str,
+    role: &str,
+) -> AppResult<()> {
+    if resource_exists(conn, resource_type, resource_id)
+        .map_err(|e| AppError::from_db_error(command, "校验资源存在性", e))?
+    {
+        return Ok(());
+    }
+
+    Err(AppError::not_found(
+        command,
+        format!("{}资源不存在或已删除。", role),
+        Some(format!(
+            "resource_type={}, resource_id={}",
+            resource_type, resource_id
+        )),
+    ))
 }
 
 fn soft_delete_pairs_by_keys(
@@ -259,12 +310,19 @@ fn replace_resource_call_relations_inner(
     .map_err(|e| AppError::validation(command, e))?;
 
     let (normalized_items, deduplicated_count) = normalize_items(command, &params.items)?;
+    ensure_resource_exists(
+        command,
+        conn,
+        &params.resource_type,
+        &params.resource_id,
+        "owner",
+    )?;
+    for item in &normalized_items {
+        ensure_resource_exists(command, conn, &item.peer_type, &item.peer_id, "peer")?;
+    }
     let now = chrono::Utc::now().to_rfc3339();
 
-    conn.execute_batch("BEGIN TRANSACTION;")
-        .map_err(|e| AppError::from_db_error(command, "开启事务", e))?;
-
-    let result: AppResult<ReplaceResourceCallRelationsResult> = (|| {
+    with_transaction(conn, command, |conn| {
         let pair_keys =
             query_owner_pair_keys(command, conn, &params.resource_id, &params.resource_type)?;
         let deleted_count = soft_delete_pairs_by_keys(command, conn, &pair_keys, &now)?;
@@ -322,19 +380,7 @@ fn replace_resource_call_relations_inner(
             deleted_count,
             deduplicated_count,
         })
-    })();
-
-    match result {
-        Ok(result) => {
-            conn.execute_batch("COMMIT;")
-                .map_err(|e| AppError::from_db_error(command, "提交事务", e))?;
-            Ok(result)
-        }
-        Err(error) => {
-            let _ = conn.execute_batch("ROLLBACK;");
-            Err(error)
-        }
-    }
+    })
 }
 
 #[tauri::command]
@@ -383,7 +429,9 @@ pub fn list_call_relations(
         .query_map(refs.as_slice(), row_to_call_relation)
         .map_err(|e| AppError::from_db_error(command, "读取调用关系列表", e))?;
 
-    let data: Vec<CallRelation> = rows.filter_map(|row| row.ok()).collect();
+    let data: Vec<CallRelation> = rows
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| AppError::from_db_error(command, "读取调用关系列表", e))?;
 
     Ok(PagedResult {
         data,
@@ -411,6 +459,7 @@ mod tests {
         replace_resource_call_relations_inner, ReplaceCallRelationItem,
         ReplaceResourceCallRelationsParams,
     };
+    use crate::error::AppErrorCode;
     use crate::test_helpers::{insert_test_application, setup_test_db};
 
     fn base_params() -> ReplaceResourceCallRelationsParams {
@@ -584,5 +633,25 @@ mod tests {
 
         assert_eq!(result.created_count, 2);
         assert_eq!(result.deduplicated_count, 1);
+    }
+
+    #[test]
+    fn replace_resource_call_relations_should_reject_missing_owner_resource() {
+        let conn = setup_test_db();
+        insert_test_application(&conn, "app-b", "App-B", "prod");
+
+        let err = replace_resource_call_relations_inner("test", &conn, base_params())
+            .expect_err("missing owner resource should fail");
+        assert_eq!(err.code, AppErrorCode::NotFound);
+    }
+
+    #[test]
+    fn replace_resource_call_relations_should_reject_missing_peer_resource() {
+        let conn = setup_test_db();
+        insert_test_application(&conn, "app-a", "App-A", "prod");
+
+        let err = replace_resource_call_relations_inner("test", &conn, base_params())
+            .expect_err("missing peer resource should fail");
+        assert_eq!(err.code, AppErrorCode::NotFound);
     }
 }

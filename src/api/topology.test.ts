@@ -20,7 +20,26 @@ describe('topology API', () => {
   })
 
   it('getTopologyGraph should invoke get_topology_graph', async () => {
-    const mockGraph = { nodes: [], edges: [], combos: [] }
+    const mockGraph = {
+      lanes: [
+        { id: 'prod', label: '生产', order: 0, node_count: 0, app_count: 0 },
+        { id: 'test', label: '测试', order: 1, node_count: 0, app_count: 0 },
+        { id: 'dev', label: '开发', order: 2, node_count: 0, app_count: 0 },
+      ],
+      nodes: [],
+      edges: [],
+      legend_stats: {
+        env_counts: [],
+        node_type_counts: [],
+        edge_type_counts: [],
+        application_service_count: 0,
+      },
+      layout_hints: {
+        lane_order: ['prod', 'test', 'dev'],
+        default_collapsed_groups: [],
+        high_density_mode: false,
+      },
+    }
     __setMockHandler('get_topology_graph', () => mockGraph)
 
     const result = await getTopologyGraph()

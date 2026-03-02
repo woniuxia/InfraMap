@@ -1,80 +1,86 @@
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
-import { Graph } from '@antv/g6'
-import type { GraphData, NodeData, EdgeData, ComboData, IElementEvent } from '@antv/g6'
-import type { TopologyGraph, TopologyNode } from '@/types'
-import { getMiddlewareIconByType } from '@/utils/middlewareCatalog'
-
-interface FilterConfig {
-  types: string[]
-  env: string
-}
+import { ref, onMounted, onBeforeUnmount, watch, nextTick } from "vue";
+import { Graph } from "@antv/g6";
+import type { ComboData, EdgeData, GraphData, IElementEvent, NodeData } from "@antv/g6";
+import type { TopologyGraph, TopologyNode } from "@/types";
+import {
+  buildTopologyG6Data,
+  toExternalNodeId,
+} from "@/components/topology/topologyGraph.utils";
+import { getMiddlewareIconByType } from "@/utils/middlewareCatalog";
 
 const props = defineProps<{
-  graphData: TopologyGraph | null
-}>()
+  graphData: TopologyGraph | null;
+}>();
 
 const emit = defineEmits<{
-  (e: 'node-click', node: TopologyNode): void
-  (e: 'node-contextmenu', payload: { node: TopologyNode; x: number; y: number }): void
-}>()
+  (e: "node-click", node: TopologyNode): void;
+  (e: "node-contextmenu", payload: { node: TopologyNode; x: number; y: number }): void;
+}>();
 
-const containerRef = ref<HTMLDivElement>()
-let graph: Graph | null = null
-let resizeObserver: ResizeObserver | null = null
-let themeObserver: MutationObserver | null = null
+const containerRef = ref<HTMLDivElement>();
+const activeLayout = ref<"force" | "dagre">("force");
+
+let graph: Graph | null = null;
+let resizeObserver: ResizeObserver | null = null;
+let themeObserver: MutationObserver | null = null;
 
 interface GraphTheme {
-  statusColors: Record<string, string>
-  edgeStyles: Record<string, { stroke: string; lineDash?: number[] }>
-  labelPrimary: string
-  labelSecondary: string
-  labelMuted: string
-  labelBg: string
-  highlight: string
-  impact: string
+  statusColors: Record<string, string>;
+  envColors: Record<string, string>;
+  edgeStyles: Record<string, { stroke: string; lineDash?: number[] }>;
+  labelPrimary: string;
+  labelSecondary: string;
+  labelMuted: string;
+  labelBg: string;
+  highlight: string;
+  impact: string;
 }
 
 function cssVar(name: string, fallback: string): string {
-  const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
-  return value || fallback
+  const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return value || fallback;
 }
 
 function withAlpha(hex: string, alphaHex: string): string {
-  if (!hex.startsWith('#') || (hex.length !== 7 && hex.length !== 4)) return hex
+  if (!hex.startsWith("#") || (hex.length !== 7 && hex.length !== 4)) return hex;
   if (hex.length === 4) {
-    const r = hex[1]
-    const g = hex[2]
-    const b = hex[3]
-    return `#${r}${r}${g}${g}${b}${b}${alphaHex}`
+    const r = hex[1];
+    const g = hex[2];
+    const b = hex[3];
+    return `#${r}${r}${g}${g}${b}${b}${alphaHex}`;
   }
-  return `${hex}${alphaHex}`
+  return `${hex}${alphaHex}`;
 }
 
 function buildGraphTheme(): GraphTheme {
-  const accent = cssVar('--im-accent', '#6fa8ff')
-  const success = cssVar('--im-success', '#41c58a')
-  const warning = cssVar('--im-warning', '#f2b645')
-  const danger = cssVar('--im-danger', '#ef6b73')
-  const textPrimary = cssVar('--im-text-primary', '#e6eefc')
-  const textSecondary = cssVar('--im-text-secondary', '#93a4c4')
-  const textMuted = cssVar('--im-text-muted', '#6f7f9c')
-  const surface = cssVar('--im-surface-0', '#0f1728')
-
+  const accent = cssVar("--im-accent", "#5ca3ff");
+  const success = cssVar("--im-success", "#41c58a");
+  const warning = cssVar("--im-warning", "#f2b645");
+  const danger = cssVar("--im-danger", "#ef6b73");
+  const textPrimary = cssVar("--im-text-primary", "#e6eefc");
+  const textSecondary = cssVar("--im-text-secondary", "#93a4c4");
+  const textMuted = cssVar("--im-text-muted", "#6f7f9c");
+  const surface = cssVar("--im-surface-0", "#0f1728");
   return {
     statusColors: {
       running: success,
       stopped: textMuted,
       maintenance: warning,
     },
+    envColors: {
+      prod: cssVar("--im-danger", "#ef6b73"),
+      test: cssVar("--im-accent", "#5ca3ff"),
+      dev: cssVar("--im-success", "#41c58a"),
+    },
     edgeStyles: {
       http_call: { stroke: accent },
-      tcp: { stroke: cssVar('--el-color-info', '#5ca3ff') },
+      tcp: { stroke: cssVar("--el-color-info", "#5ca3ff") },
       mq_produce: { stroke: warning, lineDash: [4, 4] },
       mq_consume: { stroke: warning, lineDash: [4, 4] },
-      grpc_call: { stroke: cssVar('--el-color-primary', '#409eff'), lineDash: [6, 3] },
-      db_query: { stroke: cssVar('--el-color-success', '#67c23a') },
-      cache_access: { stroke: cssVar('--el-color-warning', '#e6a23c'), lineDash: [2, 4] },
+      grpc_call: { stroke: cssVar("--el-color-primary", "#409eff"), lineDash: [6, 3] },
+      db_query: { stroke: cssVar("--el-color-success", "#67c23a") },
+      cache_access: { stroke: cssVar("--el-color-warning", "#e6a23c"), lineDash: [2, 4] },
     },
     labelPrimary: textPrimary,
     labelSecondary: textSecondary,
@@ -82,168 +88,205 @@ function buildGraphTheme(): GraphTheme {
     labelBg: surface,
     highlight: accent,
     impact: danger,
-  }
+  };
 }
 
-function getNodeType(datum: NodeData, isLargeGraph: boolean): string {
-  const nodeType = datum.data?.node_type as string
-  if (nodeType === 'middleware') return 'image'
-  if (isLargeGraph) return 'circle'
-  if (nodeType === 'nginx') return 'hexagon'
-  return 'circle' // application
+function isExternalDatum(datum: NodeData): boolean {
+  return datum.data?.is_external === true;
+}
+
+function getNodeType(datum: NodeData): string {
+  const nodeType = datum.data?.node_type as string;
+  if (nodeType === "middleware") return "image";
+  if (nodeType === "nginx") return "hexagon";
+  return "circle";
 }
 
 function getNodeStyle(datum: NodeData, isLargeGraph: boolean): Record<string, unknown> {
-  const theme = buildGraphTheme()
-  const nodeType = datum.data?.node_type as string
-  const nodeSize = isLargeGraph ? 20 : 32
-  const labelFontSize = isLargeGraph ? 9 : 11
+  const theme = buildGraphTheme();
+  const nodeType = datum.data?.node_type as string;
+  const groupKind = datum.data?.group_kind as string;
+  const env = (datum.data?.env as string) || "prod";
+  const external = isExternalDatum(datum);
 
-  if (nodeType === 'middleware') {
-    const extra = (datum.data?.extra as Record<string, unknown> | undefined) ?? {}
-    const category = typeof extra.category === 'string' ? extra.category : undefined
-    const middlewareType = typeof extra.type === 'string' ? extra.type : undefined
-    const icon = getMiddlewareIconByType(middlewareType, category)
+  const size = isLargeGraph ? 20 : groupKind === "application_service" ? 38 : 30;
+  const labelFontSize = isLargeGraph ? 9 : groupKind === "application_service" ? 12 : 10;
+  const envColor = theme.envColors[env] || theme.envColors.prod;
+
+  if (nodeType === "middleware") {
+    const extra = (datum.data?.extra as Record<string, unknown> | undefined) ?? {};
+    const category = typeof extra.category === "string" ? extra.category : undefined;
+    const middlewareType = typeof extra.type === "string" ? extra.type : undefined;
+    const icon = getMiddlewareIconByType(middlewareType, category);
     return {
       img: icon.src,
       src: icon.src,
-      size: nodeSize,
-      labelText: datum.data?.name as string || datum.id,
-      labelPlacement: 'bottom',
+      size,
+      opacity: external ? 0.78 : 1,
+      labelText: (datum.data?.name as string) || datum.id,
+      labelPlacement: "bottom",
       labelFontSize,
-      labelFill: theme.labelPrimary,
-      labelOffsetY: 4,
-    }
+      labelFill: external ? theme.labelSecondary : theme.labelPrimary,
+      labelOffsetY: 5,
+      lineWidth: 1.5,
+      stroke: external ? withAlpha(envColor, "88") : withAlpha(envColor, "DD"),
+      lineDash: external ? [4, 4] : [],
+    };
   }
 
-  const status = datum.data?.status as string
-  const fill = theme.statusColors[status] || theme.labelMuted
+  const status = datum.data?.status as string;
+  const baseFill = nodeType === "application"
+    ? withAlpha(envColor, external ? "66" : "CC")
+    : theme.statusColors[status] || theme.labelMuted;
+
   return {
-    fill,
-    stroke: fill,
-    lineWidth: 2,
-    labelText: datum.data?.name as string || datum.id,
-    labelPlacement: 'bottom',
+    fill: baseFill,
+    stroke: external ? withAlpha(envColor, "88") : withAlpha(envColor, "EE"),
+    lineWidth: groupKind === "application_service" ? 2.6 : 1.8,
+    lineDash: external ? [4, 4] : [],
+    opacity: external ? 0.82 : 1,
+    labelText: (datum.data?.name as string) || datum.id,
+    labelPlacement: "bottom",
     labelFontSize,
-    labelFill: theme.labelPrimary,
+    labelFill: external ? theme.labelSecondary : theme.labelPrimary,
     labelOffsetY: 4,
-    size: nodeSize,
-  }
+    size,
+  };
 }
 
-function getEdgeStyle(datum: EdgeData): Record<string, unknown> {
-  const theme = buildGraphTheme()
-  const edgeType = datum.data?.edge_type as string
-  const edgeConf = theme.edgeStyles[edgeType] || theme.edgeStyles.http_call
+function getEdgeStyle(datum: EdgeData, hideLabels: boolean): Record<string, unknown> {
+  const theme = buildGraphTheme();
+  const edgeType = datum.data?.edge_type as string;
+  const edgeConf = theme.edgeStyles[edgeType] || theme.edgeStyles.http_call;
+  const strength = Number((datum.data?.strength as number) || 1);
+  const crossEnv = Boolean(datum.data?.cross_env);
+
   return {
-    stroke: edgeConf.stroke,
-    lineWidth: 1.5,
-    lineDash: edgeConf.lineDash || [],
+    stroke: crossEnv ? theme.impact : edgeConf.stroke,
+    lineWidth: Math.min(4, 1 + strength * 0.45),
+    lineDash: crossEnv ? [6, 4] : (edgeConf.lineDash || []),
     endArrow: true,
     endArrowSize: 8,
-    labelText: datum.data?.label as string || '',
+    labelText: hideLabels ? "" : ((datum.data?.label as string) || ""),
     labelFontSize: 10,
     labelFill: theme.labelSecondary,
     labelBackground: true,
-    labelBackgroundFill: withAlpha(theme.labelBg, 'E6'),
+    labelBackgroundFill: withAlpha(theme.labelBg, "E6"),
     labelBackgroundOpacity: 0.85,
     labelPadding: [2, 4],
-  }
+  };
 }
 
 function getComboStyle(datum: ComboData): Record<string, unknown> {
-  const theme = buildGraphTheme()
-  const status = datum.data?.status as string
-  const color = theme.statusColors[status] || theme.labelMuted
+  const theme = buildGraphTheme();
+  const kind = datum.data?.kind as string;
+
+  if (kind === "external") {
+    return {
+      fill: withAlpha(theme.impact, "10"),
+      stroke: withAlpha(theme.impact, "B8"),
+      lineWidth: 1.4,
+      lineDash: [8, 4],
+      radius: 12,
+      labelText: (datum.data?.label as string) || "跨环境依赖",
+      labelPlacement: "top-left",
+      labelOffsetX: 8,
+      labelOffsetY: 8,
+      labelFontSize: 12,
+      labelFill: theme.impact,
+      padding: [20, 12, 12, 12],
+    };
+  }
+
   return {
-    fill: color + '10',
-    stroke: color,
+    fill: withAlpha(theme.labelBg, "20"),
+    stroke: withAlpha(theme.labelMuted, "CC"),
     lineWidth: 1,
-    lineDash: [6, 3],
-    collapsedSize: [120, 50],
-    labelText: `${datum.data?.label || datum.id}\n${datum.data?.ip || ''}`,
+    lineDash: [6, 4],
+    collapsedSize: [140, 48],
+    labelText: `${(datum.data?.label as string) || datum.id}`,
     labelFontSize: 11,
     labelFill: theme.labelSecondary,
-  }
+    labelPlacement: "top",
+    labelOffsetY: 4,
+    padding: [14, 10, 10, 10],
+  };
 }
 
-function transformToG6Data(raw: TopologyGraph): GraphData {
-  const nodes: NodeData[] = raw.nodes.map((n) => ({
-    id: n.id,
-    combo: n.parent_id || undefined,
-    data: {
-      name: n.name,
-      node_type: n.node_type,
-      status: n.status,
-      env: n.env,
-      extra: n.extra,
-    },
-  }))
+function getLayoutConfig(g6Data: GraphData, layoutType: "force" | "dagre") {
+  if (layoutType === "dagre") {
+    return {
+      type: "dagre" as const,
+      rankdir: "LR" as const,
+      nodesep: 42,
+      ranksep: 120,
+      controlPoints: true,
+      sortByCombo: true,
+    };
+  }
 
-  const edges: EdgeData[] = raw.edges.map((e) => ({
-    id: e.id,
-    source: e.source,
-    target: e.target,
-    data: {
-      edge_type: e.edge_type,
-      label: e.label,
-    },
-  }))
+  if ((g6Data.nodes?.length || 0) > 500) {
+    return {
+      type: "fruchterman" as const,
+      maxIteration: 260,
+      gravity: 4.8,
+      speed: 5,
+    };
+  }
 
-  const combos: ComboData[] = raw.combos.map((c) => ({
-    id: c.id,
-    type: 'rect',
-    data: {
-      label: c.label,
-      ip: c.ip,
-      status: c.status,
+  return {
+    type: "force" as const,
+    preventOverlap: true,
+    nodeSize: 44,
+    linkDistance: 155,
+    nodeStrength: (datum: NodeData) => {
+      const groupKind = datum.data?.group_kind as string;
+      const external = Boolean(datum.data?.is_external);
+      if (external) return -35;
+      return groupKind === "application_service" ? -85 : -70;
     },
-  }))
+    edgeStrength: (datum: EdgeData) => {
+      const isCrossEnv = Boolean(datum.data?.cross_env);
+      const strength = Number((datum.data?.strength as number) || 1);
+      if (isCrossEnv) return Math.min(0.72, 0.34 + strength * 0.08);
+      return Math.min(0.92, 0.55 + strength * 0.1);
+    },
+  };
+}
 
-  return { nodes, edges, combos }
+function resolveRenderableNodeId(rawNodeId: string): string | null {
+  const allNodeIds = new Set((props.graphData?.nodes || []).map((node) => node.id));
+  if (allNodeIds.has(rawNodeId)) return rawNodeId;
+  const externalId = toExternalNodeId(rawNodeId);
+  if (allNodeIds.has(externalId)) return externalId;
+  return null;
 }
 
 function initGraph() {
-  if (!containerRef.value || !props.graphData) return
+  if (!containerRef.value || !props.graphData) return;
 
-  const container = containerRef.value
-  const { width, height } = container.getBoundingClientRect()
-  const theme = buildGraphTheme()
+  const container = containerRef.value;
+  const { width, height } = container.getBoundingClientRect();
+  const g6Data = buildTopologyG6Data(props.graphData);
+  const hideEdgeLabels = props.graphData.layout_hints.high_density_mode;
+  const isLargeGraph = (g6Data.nodes?.length || 0) > 500;
+  const theme = buildGraphTheme();
 
   if (graph) {
-    graph.destroy()
-    graph = null
+    graph.destroy();
+    graph = null;
   }
-
-  const g6Data = transformToG6Data(props.graphData)
-  const nodeCount = g6Data.nodes?.length || 0
-  const isLargeGraph = nodeCount > 500
-
-  // Dynamic layout based on node count
-  const layoutConfig = isLargeGraph
-    ? {
-        type: 'fruchterman' as const,
-        maxIteration: 300,
-        gravity: 5,
-        speed: 5,
-      }
-    : {
-        type: 'force' as const,
-        preventOverlap: true,
-        nodeSize: 50,
-        linkDistance: 150,
-      }
 
   graph = new Graph({
     container,
     width: width || 800,
     height: height || 600,
-    autoFit: 'view',
+    autoFit: "view",
     animation: false,
     data: g6Data,
-    layout: layoutConfig,
+    layout: getLayoutConfig(g6Data, activeLayout.value),
     node: {
-      type: (datum: NodeData) => getNodeType(datum, isLargeGraph),
+      type: getNodeType,
       style: (datum: NodeData) => getNodeStyle(datum, isLargeGraph),
       state: {
         highlight: {
@@ -253,7 +296,7 @@ function initGraph() {
         },
         dim: {
           opacity: 0.2,
-          labelOpacity: 0.3,
+          labelOpacity: 0.35,
         },
         impact: {
           lineWidth: 3,
@@ -263,8 +306,8 @@ function initGraph() {
       },
     },
     edge: {
-      type: 'line',
-      style: getEdgeStyle,
+      type: "line",
+      style: (datum: EdgeData) => getEdgeStyle(datum, hideEdgeLabels),
       state: {
         highlight: {
           lineWidth: 3,
@@ -272,12 +315,12 @@ function initGraph() {
           shadowBlur: 6,
         },
         dim: {
-          opacity: 0.15,
+          opacity: 0.13,
         },
       },
     },
     combo: {
-      type: 'rect',
+      type: "rect",
       style: getComboStyle,
       state: {
         highlight: {
@@ -286,247 +329,183 @@ function initGraph() {
           shadowBlur: 8,
         },
         dim: {
-          opacity: 0.2,
+          opacity: 0.18,
         },
       },
     },
-    behaviors: ['drag-canvas', 'zoom-canvas', 'drag-element', 'collapse-expand'],
-    transforms: ['process-parallel-edges'],
-  })
+    behaviors: ["drag-canvas", "zoom-canvas", "drag-element"],
+    transforms: ["process-parallel-edges"],
+  });
 
-  graph.on('node:click', (evt: IElementEvent) => {
-    const id = evt.target?.id as string
-    if (!id) return
-    const node = props.graphData?.nodes.find((n) => n.id === id)
-    if (node) emit('node-click', node)
-  })
+  graph.on("node:click", (evt: IElementEvent) => {
+    const id = evt.target?.id as string;
+    if (!id) return;
+    const node = props.graphData?.nodes.find((item) => item.id === id);
+    if (node) emit("node-click", node);
+  });
 
-  graph.on('node:contextmenu', (evt: IElementEvent) => {
-    const id = evt.target?.id as string
-    if (!id) return
-    const node = props.graphData?.nodes.find((n) => n.id === id)
+  graph.on("node:contextmenu", (evt: IElementEvent) => {
+    const id = evt.target?.id as string;
+    if (!id) return;
+    const node = props.graphData?.nodes.find((item) => item.id === id);
     if (node) {
-      emit('node-contextmenu', { node, x: evt.client.x, y: evt.client.y })
+      emit("node-contextmenu", { node, x: evt.client.x, y: evt.client.y });
     }
-  })
+  });
 
-  graph.render()
+  graph.render();
 }
 
 watch(
   () => props.graphData,
   () => {
-    nextTick(initGraph)
+    nextTick(initGraph);
   },
-)
+);
 
 onMounted(() => {
-  nextTick(initGraph)
+  nextTick(initGraph);
 
   if (containerRef.value) {
     resizeObserver = new ResizeObserver(() => {
       if (graph && containerRef.value) {
-        const { width, height } = containerRef.value.getBoundingClientRect()
-        graph.resize(width, height)
+        const { width, height } = containerRef.value.getBoundingClientRect();
+        graph.resize(width, height);
       }
-    })
-    resizeObserver.observe(containerRef.value)
+    });
+    resizeObserver.observe(containerRef.value);
   }
 
   themeObserver = new MutationObserver((mutations) => {
     const changed = mutations.some(
-      (m) => m.type === 'attributes' && m.attributeName === 'data-theme',
-    )
-    if (changed) {
-      nextTick(initGraph)
-    }
-  })
+      (mutation) => mutation.type === "attributes" && mutation.attributeName === "data-theme",
+    );
+    if (changed) nextTick(initGraph);
+  });
   themeObserver.observe(document.documentElement, {
     attributes: true,
-    attributeFilter: ['data-theme'],
-  })
-})
+    attributeFilter: ["data-theme"],
+  });
+});
 
 onBeforeUnmount(() => {
-  resizeObserver?.disconnect()
-  themeObserver?.disconnect()
-  themeObserver = null
+  resizeObserver?.disconnect();
+  themeObserver?.disconnect();
+  themeObserver = null;
   if (graph) {
-    graph.destroy()
-    graph = null
+    graph.destroy();
+    graph = null;
   }
-})
+});
 
-// Exposed methods
+function clearHighlight() {
+  if (!graph) return;
+  const allNodes = graph.getNodeData();
+  const allEdges = graph.getEdgeData();
+  const allCombos = graph.getComboData();
+
+  allNodes.forEach((node) => graph!.setElementState(node.id, []));
+  allEdges.forEach((edge) => {
+    if (edge.id) graph!.setElementState(edge.id, []);
+  });
+  allCombos.forEach((combo) => graph!.setElementState(combo.id, []));
+}
+
 function highlightPaths(paths: string[][]) {
-  if (!graph) return
-  clearHighlight()
+  if (!graph) return;
+  clearHighlight();
 
-  const nodeIds = new Set<string>()
-  const edgeIds = new Set<string>()
+  const nodeIds = new Set<string>();
+  const edgeIds = new Set<string>();
+
   paths.forEach((path) => {
-    path.forEach((id) => nodeIds.add(id))
-    for (let i = 0; i < path.length - 1; i++) {
-      // Find matching edge
-      const edges = props.graphData?.edges || []
-      const edge = edges.find((e) => e.source === path[i] && e.target === path[i + 1])
-      if (edge) edgeIds.add(edge.id)
-    }
-  })
+    path.forEach((rawId) => {
+      const renderId = resolveRenderableNodeId(rawId);
+      if (renderId) nodeIds.add(renderId);
+    });
 
-  const allNodes = graph.getNodeData()
-  const allEdges = graph.getEdgeData()
-
-  allNodes.forEach((n) => {
-    if (nodeIds.has(n.id as string)) {
-      graph!.setElementState(n.id, 'highlight')
-    } else {
-      graph!.setElementState(n.id, 'dim')
+    for (let index = 0; index < path.length - 1; index += 1) {
+      const source = resolveRenderableNodeId(path[index]);
+      const target = resolveRenderableNodeId(path[index + 1]);
+      if (!source || !target) continue;
+      const edge = props.graphData?.edges.find((item) => item.source === source && item.target === target);
+      if (edge) edgeIds.add(edge.id);
     }
-  })
+  });
 
-  allEdges.forEach((e) => {
-    if (e.id && edgeIds.has(e.id as string)) {
-      graph!.setElementState(e.id, 'highlight')
-    } else if (e.id) {
-      graph!.setElementState(e.id, 'dim')
-    }
-  })
+  graph.getNodeData().forEach((node) => {
+    graph!.setElementState(node.id, nodeIds.has(node.id as string) ? "highlight" : "dim");
+  });
+  graph.getEdgeData().forEach((edge) => {
+    if (!edge.id) return;
+    graph!.setElementState(edge.id, edgeIds.has(edge.id as string) ? "highlight" : "dim");
+  });
 }
 
 function highlightImpact(nodeId: string, result: { affected_nodes: { id: string; depth: number }[] }) {
-  if (!graph) return
-  clearHighlight()
+  if (!graph) return;
+  clearHighlight();
 
-  const affectedIds = new Set<string>([nodeId])
-  result.affected_nodes.forEach((n) => affectedIds.add(n.id))
+  const focusNodeId = resolveRenderableNodeId(nodeId) || nodeId;
+  const affectedIds = new Set<string>([focusNodeId]);
+  result.affected_nodes.forEach((item) => {
+    const renderId = resolveRenderableNodeId(item.id);
+    if (renderId) affectedIds.add(renderId);
+  });
 
-  const allNodes = graph.getNodeData()
-  allNodes.forEach((n) => {
-    if (n.id === nodeId) {
-      graph!.setElementState(n.id, 'impact')
-    } else if (affectedIds.has(n.id as string)) {
-      graph!.setElementState(n.id, 'highlight')
+  graph.getNodeData().forEach((node) => {
+    if (node.id === focusNodeId) {
+      graph!.setElementState(node.id, "impact");
+    } else if (affectedIds.has(node.id as string)) {
+      graph!.setElementState(node.id, "highlight");
     } else {
-      graph!.setElementState(n.id, 'dim')
+      graph!.setElementState(node.id, "dim");
     }
-  })
+  });
 
-  const allEdges = graph.getEdgeData()
-  allEdges.forEach((e) => {
-    if (e.id) {
-      const srcAffected = affectedIds.has(e.source as string)
-      const tgtAffected = affectedIds.has(e.target as string)
-      if (srcAffected && tgtAffected) {
-        graph!.setElementState(e.id, 'highlight')
-      } else {
-        graph!.setElementState(e.id, 'dim')
-      }
-    }
-  })
+  graph.getEdgeData().forEach((edge) => {
+    if (!edge.id) return;
+    const sourceHit = affectedIds.has(edge.source as string);
+    const targetHit = affectedIds.has(edge.target as string);
+    graph!.setElementState(edge.id, sourceHit && targetHit ? "highlight" : "dim");
+  });
 }
 
 function highlightSearch(nodeIds: string[], focusId?: string) {
-  if (!graph) return
-  clearHighlight()
+  if (!graph) return;
+  clearHighlight();
 
-  const matchSet = new Set(nodeIds)
+  const matchSet = new Set<string>();
+  nodeIds.forEach((id) => {
+    const renderId = resolveRenderableNodeId(id);
+    if (renderId) matchSet.add(renderId);
+  });
 
-  const allNodes = graph.getNodeData()
-  allNodes.forEach((n) => {
-    if (matchSet.has(n.id as string)) {
-      graph!.setElementState(n.id, 'highlight')
-    } else {
-      graph!.setElementState(n.id, 'dim')
-    }
-  })
+  graph.getNodeData().forEach((node) => {
+    graph!.setElementState(node.id, matchSet.has(node.id as string) ? "highlight" : "dim");
+  });
 
   if (focusId) {
-    graph.focusElement(focusId, true)
+    const renderFocusId = resolveRenderableNodeId(focusId);
+    if (renderFocusId) graph.focusElement(renderFocusId, true);
   }
 }
 
-function applyFilter(filter: FilterConfig) {
-  if (!graph || !props.graphData) return
-
-  const g6Data = transformToG6Data(props.graphData)
-
-  // Filter nodes by type and env
-  const filteredNodes = g6Data.nodes!.filter((n) => {
-    const nodeType = n.data?.node_type as string
-    const category = (n.data?.extra as Record<string, unknown>)?.category as string
-    const env = n.data?.env as string
-
-    // Type filter
-    if (filter.types.length > 0) {
-      let match = false
-      if (nodeType === 'application' && filter.types.includes('application')) match = true
-      if (nodeType === 'nginx' && filter.types.includes('nginx')) match = true
-      if (nodeType === 'middleware') {
-        if (filter.types.includes(category || 'other')) match = true
-      }
-      if (!match) return false
-    }
-
-    // Env filter
-    if (filter.env && filter.env !== 'all') {
-      if (env && env !== filter.env) return false
-    }
-
-    return true
-  })
-
-  const visibleNodeIds = new Set(filteredNodes.map((n) => n.id))
-
-  // Filter edges where both endpoints are visible
-  const filteredEdges = g6Data.edges!.filter(
-    (e) => visibleNodeIds.has(e.source as string) && visibleNodeIds.has(e.target as string),
-  )
-
-  // Keep combos that have at least one visible node
-  const usedCombos = new Set(filteredNodes.map((n) => n.combo).filter(Boolean))
-  const filteredCombos = g6Data.combos!.filter((c) => usedCombos.has(c.id))
-
-  graph.setData({ nodes: filteredNodes, edges: filteredEdges, combos: filteredCombos })
-  graph.render()
+function setLayout(type: "force" | "dagre") {
+  if (activeLayout.value === type) return;
+  activeLayout.value = type;
+  nextTick(initGraph);
 }
 
-function setLayout(type: 'force' | 'dagre') {
-  if (!graph) return
-  if (type === 'dagre') {
-    graph.setLayout({
-      type: 'antv-dagre',
-      rankdir: 'LR',
-      nodesep: 40,
-      ranksep: 80,
-    })
-  } else {
-    graph.setLayout({
-      type: 'force',
-      preventOverlap: true,
-      nodeSize: 50,
-      linkDistance: 150,
-    })
-  }
-  graph.layout()
+function applyFilter(_payload: unknown) {
+  nextTick(initGraph);
 }
 
-async function exportImage(_type: 'png' | 'svg'): Promise<string | undefined> {
-  if (!graph) return
-  // G6 5.x toDataURL only supports raster formats; always export as PNG
-  const dataURL = await graph.toDataURL({ type: 'image/png' })
-  return dataURL
-}
-
-function clearHighlight() {
-  if (!graph) return
-  const allNodes = graph.getNodeData()
-  const allEdges = graph.getEdgeData()
-  const allCombos = graph.getComboData()
-
-  allNodes.forEach((n) => graph!.setElementState(n.id, []))
-  allEdges.forEach((e) => { if (e.id) graph!.setElementState(e.id, []) })
-  allCombos.forEach((c) => graph!.setElementState(c.id, []))
+async function exportImage(type: "png" | "svg"): Promise<string | undefined> {
+  if (!graph) return;
+  // G6 dataURL export does not support SVG mime in current runtime, fallback to PNG payload.
+  if (type === "svg") return graph.toDataURL({ type: "image/png" });
+  return graph.toDataURL({ type: "image/png" });
 }
 
 defineExpose({
@@ -537,7 +516,7 @@ defineExpose({
   setLayout,
   exportImage,
   clearHighlight,
-})
+});
 </script>
 
 <template>
@@ -548,6 +527,6 @@ defineExpose({
 .topology-canvas {
   width: 100%;
   height: 100%;
-  min-height: 400px;
+  min-height: 420px;
 }
 </style>

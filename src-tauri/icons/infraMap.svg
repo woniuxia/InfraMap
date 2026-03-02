@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 150 150">
+  <!-- Background: Transparent -->
+
+  <!-- Icon Group -->
+  <g transform="translate(20, 15)">
+    <!-- Server Stack - Left side -->
+    <rect x="0" y="18" width="45" height="10" rx="2" fill="#0ea5e9"/>
+    <rect x="0" y="32" width="45" height="10" rx="2" fill="#0ea5e9"/>
+    <rect x="0" y="46" width="45" height="10" rx="2" fill="#0ea5e9"/>
+
+    <!-- Server indicator lights -->
+    <circle cx="8" cy="23" r="1.5" fill="#ffffff"/>
+    <circle cx="8" cy="37" r="1.5" fill="#ffffff"/>
+    <circle cx="8" cy="51" r="1.5" fill="#ffffff"/>
+
+    <!-- Circuit Lines - Extending to right -->
+    <path d="M45 23 h8 l6 8 h10" stroke="#0ea5e9" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+
+    <path d="M45 51 h10 l4 -8 h8" stroke="#0ea5e9" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+
+    <!-- Network Node Cluster - Moved slightly lower -->
+    <circle cx="82" cy="38" r="6" fill="#0284c7"/>
+    <circle cx="100" cy="26" r="4.5" fill="#0ea5e9"/>
+    <circle cx="100" cy="50" r="4.5" fill="#38bdf8"/>
+
+    <!-- Connecting lines between nodes -->
+    <line x1="86" y1="39" x2="96" y2="28" stroke="#0ea5e9" stroke-width="1.5"/>
+    <line x1="86" y1="37" x2="96" y2="48" stroke="#0ea5e9" stroke-width="1.5"/>
+    <line x1="100" y1="30" x2="100" y2="46" stroke="#0ea5e9" stroke-width="1.5"/>
+
+    <!-- Circuit endpoint nodes -->
+    <circle cx="69" cy="31" r="2.5" fill="#0ea5e9"/>
+    <circle cx="67" cy="43" r="2.5" fill="#0ea5e9"/>
+  </g>
+
+  <!-- Text: infraMap - Below -->
+  <text x="75" y="115" font-family="system-ui, -apple-system, sans-serif" font-weight="600" font-size="20" fill="#1e293b" text-anchor="middle" letter-spacing="-0.5">infra<tspan fill="#0ea5e9">Map</tspan></text>
+</svg>

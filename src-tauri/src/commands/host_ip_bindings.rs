@@ -1,6 +1,7 @@
 use tauri::State;
 
 use crate::db::audit::insert_audit_log;
+use crate::db::transaction::with_transaction;
 use crate::db::DbPool;
 use crate::error::{AppError, AppResult};
 use crate::models::ip_address::IpAddress;
@@ -48,7 +49,8 @@ fn list_host_ip_bindings_inner(
         })
         .map_err(|e| AppError::from_db_error(command, "读取主机IP绑定", e))?;
 
-    Ok(rows.filter_map(|row| row.ok()).collect())
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| AppError::from_db_error(command, "读取主机IP绑定", e))
 }
 
 fn bind_host_ip_inner(
@@ -80,10 +82,7 @@ fn bind_host_ip_inner(
     }
 
     let now = chrono::Utc::now().to_rfc3339();
-    conn.execute_batch("BEGIN TRANSACTION;")
-        .map_err(|e| AppError::from_db_error(command, "开启事务", e))?;
-
-    let result: AppResult<()> = (|| {
+    with_transaction(conn, command, |conn| {
         let existing = conn
             .query_row(
                 "SELECT id, is_deleted FROM host_ip_bindings WHERE host_id = ?1 AND ip_id = ?2 LIMIT 1",
@@ -130,19 +129,7 @@ fn bind_host_ip_inner(
         .map_err(|e| AppError::from_db_error(command, "写入审计日志", e))?;
 
         Ok(())
-    })();
-
-    match result {
-        Ok(()) => {
-            conn.execute_batch("COMMIT;")
-                .map_err(|e| AppError::from_db_error(command, "提交事务", e))?;
-            Ok(())
-        }
-        Err(error) => {
-            let _ = conn.execute_batch("ROLLBACK;");
-            Err(error)
-        }
-    }
+    })
 }
 
 fn unbind_host_ip_inner(
@@ -152,10 +139,7 @@ fn unbind_host_ip_inner(
     ip_id: &str,
 ) -> AppResult<()> {
     let now = chrono::Utc::now().to_rfc3339();
-    conn.execute_batch("BEGIN TRANSACTION;")
-        .map_err(|e| AppError::from_db_error(command, "开启事务", e))?;
-
-    let result: AppResult<()> = (|| {
+    with_transaction(conn, command, |conn| {
         let affected = conn
             .execute(
                 "UPDATE host_ip_bindings
@@ -182,19 +166,7 @@ fn unbind_host_ip_inner(
         )
         .map_err(|e| AppError::from_db_error(command, "写入审计日志", e))?;
         Ok(())
-    })();
-
-    match result {
-        Ok(()) => {
-            conn.execute_batch("COMMIT;")
-                .map_err(|e| AppError::from_db_error(command, "提交事务", e))?;
-            Ok(())
-        }
-        Err(error) => {
-            let _ = conn.execute_batch("ROLLBACK;");
-            Err(error)
-        }
-    }
+    })
 }
 
 #[tauri::command]

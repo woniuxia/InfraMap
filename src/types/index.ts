@@ -256,15 +256,94 @@ export interface DashboardStats {
   env_distribution: { env: string; count: number }[];
 }
 
+export interface DashboardTotals {
+  host_total: number;
+  host_abnormal: number;
+  application_total: number;
+  application_abnormal: number;
+  middleware_total: number;
+  nginx_total: number;
+  nginx_abnormal: number;
+  deployment_total: number;
+  dependency_total: number;
+}
+
+export interface DashboardHealth {
+  abnormal_total: number;
+  abnormal_rate: number;
+  score: number;
+}
+
+export interface DashboardCoverage {
+  deployable_total: number;
+  deployed_total: number;
+  undeployed_total: number;
+  deployment_coverage: number;
+  relatable_total: number;
+  related_total: number;
+  isolated_total: number;
+  relation_coverage: number;
+  undeployed_application_total: number;
+  undeployed_middleware_total: number;
+  undeployed_nginx_total: number;
+}
+
+export type DashboardRiskSeverity = "critical" | "warning" | "info";
+
+export interface DashboardRiskItem {
+  key: string;
+  label: string;
+  count: number;
+  severity: DashboardRiskSeverity;
+  target_route: string;
+  target_filters: Record<string, string>;
+}
+
+export interface DashboardRecentChange {
+  id: string;
+  action: "create" | "update" | "delete";
+  resource_type: string;
+  resource_id: string;
+  resource_name?: string;
+  created_at: string;
+}
+
+export interface DashboardOverview {
+  totals: DashboardTotals;
+  health: DashboardHealth;
+  coverage: DashboardCoverage;
+  env_distribution: { env: string; count: number }[];
+  risk_items: DashboardRiskItem[];
+  recent_changes: DashboardRecentChange[];
+}
+
 // Topology types
+export type TopologyEnv = "prod" | "test" | "dev";
+
+export type TopologyNodeType = "application" | "middleware" | "nginx";
+
+export type TopologyGroupKind = "application_service" | "middleware" | "nginx";
+
+export interface TopologyLane {
+  id: TopologyEnv;
+  label: string;
+  order: number;
+  node_count: number;
+  app_count: number;
+}
+
 export interface TopologyNode {
   id: string;
   name: string;
-  node_type: "application" | "middleware" | "nginx";
+  node_type: TopologyNodeType;
+  env: TopologyEnv;
+  group_kind: TopologyGroupKind;
+  host_id?: string;
   status?: string;
-  env?: string;
-  parent_id?: string;
+  importance: number;
   extra?: Record<string, unknown>;
+  is_external?: boolean;
+  external_ref_id?: string;
 }
 
 export interface TopologyEdge {
@@ -280,19 +359,43 @@ export interface TopologyEdge {
     | "db_query"
     | "cache_access";
   label?: string;
+  strength: number;
+  cross_env: boolean;
 }
 
-export interface TopologyCombo {
-  id: string;
-  label: string;
-  ip: string;
-  status: string;
+export interface TopologyEnvCount {
+  env: TopologyEnv;
+  count: number;
+  app_count: number;
+}
+
+export interface TopologyKindCount {
+  kind: string;
+  count: number;
+}
+
+export interface TopologyLegendStats {
+  env_counts: TopologyEnvCount[];
+  node_type_counts: TopologyKindCount[];
+  edge_type_counts: TopologyKindCount[];
+  application_service_count: number;
+  current_env?: TopologyEnv;
+  external_node_count?: number;
+  cross_env_edge_count?: number;
+}
+
+export interface TopologyLayoutHints {
+  lane_order: TopologyEnv[];
+  default_collapsed_groups: string[];
+  high_density_mode: boolean;
 }
 
 export interface TopologyGraph {
+  lanes: TopologyLane[];
   nodes: TopologyNode[];
   edges: TopologyEdge[];
-  combos: TopologyCombo[];
+  legend_stats: TopologyLegendStats;
+  layout_hints: TopologyLayoutHints;
 }
 
 export interface PathResult {
@@ -328,6 +431,22 @@ export interface UpdateSettingsInput {
   auto_backup_enabled: boolean;
   backup_interval_hours: number;
   max_backups: number;
+}
+
+export interface StorageProfile {
+  active_root_path: string;
+  db_path: string;
+  backup_dir: string;
+  is_default_path: boolean;
+}
+
+export interface UpdateStoragePathInput {
+  root_path: string;
+}
+
+export interface UpdateStoragePathResult {
+  restart_required: boolean;
+  migrated: boolean;
 }
 
 export interface BackupEntry {

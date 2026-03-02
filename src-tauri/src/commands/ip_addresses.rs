@@ -6,6 +6,7 @@ use crate::commands::taxonomy::{
 };
 use crate::db::audit::insert_audit_log;
 use crate::db::crud::{build_where_clause, count_query, soft_delete};
+use crate::db::transaction::with_transaction;
 use crate::db::DbPool;
 use crate::error::{AppError, AppErrorCode, AppResult};
 use crate::models::common::{PagedResult, QueryParams};
@@ -102,10 +103,7 @@ fn save_ip_address_inner(
         count == 0
     };
 
-    conn.execute_batch("BEGIN TRANSACTION;")
-        .map_err(|e| AppError::from_db_error(command, "开启事务", e))?;
-
-    let result: AppResult<()> = (|| {
+    with_transaction(conn, command, |conn| {
         if is_new {
             let id = if data.id.is_empty() {
                 uuid::Uuid::new_v4().to_string()
@@ -174,19 +172,7 @@ fn save_ip_address_inner(
         }
 
         Ok(())
-    })();
-
-    match result {
-        Ok(()) => {
-            conn.execute_batch("COMMIT;")
-                .map_err(|e| AppError::from_db_error(command, "提交事务", e))?;
-            Ok(())
-        }
-        Err(error) => {
-            let _ = conn.execute_batch("ROLLBACK;");
-            Err(error)
-        }
-    }
+    })
 }
 
 fn batch_create_ip_addresses_inner(
@@ -292,7 +278,9 @@ pub fn list_ip_addresses(
     let rows = stmt
         .query_map(param_refs.as_slice(), row_to_ip_address)
         .map_err(|e| AppError::from_db_error(command, "读取IP资源列表", e))?;
-    let data: Vec<IpAddress> = rows.filter_map(|row| row.ok()).collect();
+    let data: Vec<IpAddress> = rows
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| AppError::from_db_error(command, "读取IP资源列表", e))?;
 
     Ok(PagedResult {
         data,
@@ -366,30 +354,16 @@ fn soft_delete_ip_address_inner(
         ));
     }
 
-    conn.execute_batch("BEGIN TRANSACTION;")
-        .map_err(|e| AppError::from_db_error(command, "开启事务", e))?;
-
-    match soft_delete(&conn, "ip_addresses", &id) {
-        Ok(()) => match insert_audit_log(&conn, "delete", "ip_address", &id, name.as_deref(), None)
-        {
-            Ok(()) => {
-                let now = chrono::Utc::now().to_rfc3339();
-                soft_delete_resource_terms(&conn, "ip_address", &id, &now)
-                    .map_err(|e| AppError::from_db_error(command, "删除标签绑定", e))?;
-                conn.execute_batch("COMMIT;")
-                    .map_err(|e| AppError::from_db_error(command, "提交事务", e))?;
-                Ok(())
-            }
-            Err(e) => {
-                let _ = conn.execute_batch("ROLLBACK;");
-                Err(AppError::from_db_error(command, "写入审计日志", e))
-            }
-        },
-        Err(e) => {
-            let _ = conn.execute_batch("ROLLBACK;");
-            Err(AppError::from_db_error(command, "删除IP资源", e))
-        }
-    }
+    with_transaction(conn, command, |conn| {
+        soft_delete(conn, "ip_addresses", &id)
+            .map_err(|e| AppError::from_db_error(command, "删除IP资源", e))?;
+        insert_audit_log(conn, "delete", "ip_address", &id, name.as_deref(), None)
+            .map_err(|e| AppError::from_db_error(command, "写入审计日志", e))?;
+        let now = chrono::Utc::now().to_rfc3339();
+        soft_delete_resource_terms(conn, "ip_address", &id, &now)
+            .map_err(|e| AppError::from_db_error(command, "删除标签绑定", e))?;
+        Ok(())
+    })
 }
 
 #[tauri::command]

@@ -3,12 +3,17 @@ import { ref, onMounted } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { save, open } from "@tauri-apps/plugin-dialog";
 import type {
+  StorageProfile,
+  UpdateStoragePathInput,
   UpdateSettingsInput,
   BackupEntry,
   DbPreviewSummary,
   ImportResult,
 } from "@/types";
 import {
+  getStorageProfile,
+  updateStoragePath,
+  restartApp,
   getSettings,
   updateSettings,
   createBackup,
@@ -19,6 +24,76 @@ import {
   exportJson,
   importJson,
 } from "@/api/settings";
+
+// --- Storage Path ---
+const storageLoading = ref(false);
+const storageSaving = ref(false);
+const storageProfile = ref<StorageProfile | null>(null);
+const storageForm = ref<UpdateStoragePathInput>({
+  root_path: "",
+});
+
+async function loadStorageProfile() {
+  storageLoading.value = true;
+  try {
+    const profile = await getStorageProfile();
+    storageProfile.value = profile;
+    storageForm.value.root_path = profile.active_root_path;
+  } catch {
+    // error shown by tauriInvoke
+  } finally {
+    storageLoading.value = false;
+  }
+}
+
+async function handleSelectStoragePath() {
+  try {
+    const selected = await open({
+      title: "选择数据与配置保存路径",
+      directory: true,
+      multiple: false,
+    });
+    if (!selected || Array.isArray(selected)) return;
+    storageForm.value.root_path = selected;
+  } catch {
+    // cancelled or error shown by tauriInvoke
+  }
+}
+
+async function handleSaveStoragePath() {
+  const nextRoot = storageForm.value.root_path?.trim();
+  if (!nextRoot) {
+    ElMessage.warning("请先选择保存路径");
+    return;
+  }
+
+  try {
+    await ElMessageBox.confirm(
+      "切换路径将自动迁移数据库和备份文件，完成后会自动重启应用。确定继续？",
+      "保存并重启",
+      { type: "warning" }
+    );
+  } catch {
+    // cancelled
+    return;
+  }
+
+  storageSaving.value = true;
+  try {
+    const result = await updateStoragePath({ root_path: nextRoot });
+    if (!result.restart_required) {
+      ElMessage.success("保存路径未变化");
+      await loadStorageProfile();
+      return;
+    }
+    ElMessage.success("保存成功，应用即将重启");
+    await restartApp();
+  } catch {
+    // error shown by tauriInvoke
+  } finally {
+    storageSaving.value = false;
+  }
+}
 
 // --- Settings ---
 const settingsLoading = ref(false);
@@ -216,6 +291,7 @@ const intervalOptions = [
 ];
 
 onMounted(() => {
+  loadStorageProfile();
   loadSettings();
   loadBackups();
 });
@@ -223,6 +299,55 @@ onMounted(() => {
 
 <template>
   <div class="settings-view">
+    <!-- 存储路径 -->
+    <el-card shadow="never" class="settings-card">
+      <template #header>
+        <span class="card-title">数据与配置路径</span>
+      </template>
+      <el-form
+        :model="storageForm"
+        label-width="140px"
+        v-loading="storageLoading"
+      >
+        <el-form-item label="当前根目录">
+          <span class="text-secondary">
+            {{ storageProfile?.active_root_path || "--" }}
+          </span>
+        </el-form-item>
+        <el-form-item label="数据库文件">
+          <span class="text-secondary">{{ storageProfile?.db_path || "--" }}</span>
+        </el-form-item>
+        <el-form-item label="备份目录">
+          <span class="text-secondary">{{ storageProfile?.backup_dir || "--" }}</span>
+        </el-form-item>
+        <el-form-item label="新根目录">
+          <div class="storage-path-row">
+            <el-input
+              v-model="storageForm.root_path"
+              clearable
+              placeholder="请选择保存路径"
+            />
+            <el-button @click="handleSelectStoragePath">选择目录</el-button>
+          </div>
+        </el-form-item>
+        <el-form-item>
+          <el-button
+            type="primary"
+            :loading="storageSaving"
+            @click="handleSaveStoragePath"
+          >
+            保存并重启
+          </el-button>
+        </el-form-item>
+        <el-form-item>
+          <p class="path-tip">
+            保存后会自动迁移数据库与备份文件；若目标目录包含 inframap.db 或
+            backups 目录，将阻止覆盖并提示重新选择。
+          </p>
+        </el-form-item>
+      </el-form>
+    </el-card>
+
     <!-- 备份设置 -->
     <el-card shadow="never" class="settings-card">
       <template #header>
@@ -408,6 +533,24 @@ onMounted(() => {
 }
 
 .text-secondary {
+  color: var(--im-text-secondary);
+}
+
+.storage-path-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+
+  :deep(.el-input) {
+    flex: 1;
+  }
+}
+
+.path-tip {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
   color: var(--im-text-secondary);
 }
 

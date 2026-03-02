@@ -3,6 +3,7 @@ use tauri::State;
 
 use crate::db::audit::insert_audit_log;
 use crate::db::crud::{build_where_clause, count_query, soft_delete};
+use crate::db::transaction::with_transaction;
 use crate::db::DbPool;
 use crate::error::{AppError, AppResult};
 use crate::models::common::{PagedResult, QueryParams};
@@ -206,6 +207,67 @@ fn build_resource_deploy_context(
     })
 }
 
+fn deployment_resource_exists(
+    conn: &rusqlite::Connection,
+    resource_type: &str,
+    resource_id: &str,
+) -> Result<bool, rusqlite::Error> {
+    let count: i64 = match resource_type {
+        "application" => conn.query_row(
+            "SELECT COUNT(*) FROM applications WHERE id = ?1 AND is_deleted = 0",
+            rusqlite::params![resource_id],
+            |row| row.get(0),
+        )?,
+        "middleware" => conn.query_row(
+            "SELECT COUNT(*) FROM middlewares WHERE id = ?1 AND is_deleted = 0",
+            rusqlite::params![resource_id],
+            |row| row.get(0),
+        )?,
+        "nginx" => conn.query_row(
+            "SELECT COUNT(*) FROM nginx_configs WHERE id = ?1 AND is_deleted = 0",
+            rusqlite::params![resource_id],
+            |row| row.get(0),
+        )?,
+        _ => 0,
+    };
+    Ok(count > 0)
+}
+
+fn ensure_deployment_refs_exist(
+    command: &str,
+    conn: &rusqlite::Connection,
+    data: &Deployment,
+) -> AppResult<()> {
+    let host_exists: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM hosts WHERE id = ?1 AND is_deleted = 0",
+            rusqlite::params![data.host_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| AppError::from_db_error(command, "查询部署主机", e))?;
+    if host_exists == 0 {
+        return Err(AppError::not_found(
+            command,
+            "部署主机不存在或已删除。",
+            None,
+        ));
+    }
+
+    if deployment_resource_exists(conn, &data.resource_type, &data.resource_id)
+        .map_err(|e| AppError::from_db_error(command, "查询部署资源", e))?
+    {
+        return Ok(());
+    }
+    Err(AppError::not_found(
+        command,
+        "部署资源不存在或已删除。",
+        Some(format!(
+            "resource_type={}, resource_id={}",
+            data.resource_type, data.resource_id
+        )),
+    ))
+}
+
 #[tauri::command]
 pub fn get_resource_deploy_context(
     pool: State<DbPool>,
@@ -259,7 +321,9 @@ pub fn list_deployments(
         .query_map(param_refs.as_slice(), row_to_deployment)
         .map_err(|e| AppError::from_db_error(command, "读取部署关系列表", e))?;
 
-    let data: Vec<Deployment> = rows.filter_map(|r| r.ok()).collect();
+    let data: Vec<Deployment> = rows
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| AppError::from_db_error(command, "读取部署关系列表", e))?;
 
     Ok(PagedResult {
         data,
@@ -269,15 +333,14 @@ pub fn list_deployments(
     })
 }
 
-#[tauri::command]
-pub fn save_deployment(pool: State<DbPool>, data: Deployment) -> AppResult<()> {
-    let command = "save_deployment";
-
+fn save_deployment_inner(
+    command: &str,
+    conn: &rusqlite::Connection,
+    data: Deployment,
+) -> AppResult<()> {
     validate_deployment(&data).map_err(|e| AppError::validation(command, e))?;
+    ensure_deployment_refs_exist(command, conn, &data)?;
 
-    let conn = pool
-        .get()
-        .map_err(|e| AppError::db_unavailable(command, format!("Pool error: {}", e)))?;
     let now = chrono::Utc::now().to_rfc3339();
 
     let is_new = data.id.is_empty() || {
@@ -291,10 +354,7 @@ pub fn save_deployment(pool: State<DbPool>, data: Deployment) -> AppResult<()> {
         count == 0
     };
 
-    conn.execute_batch("BEGIN TRANSACTION;")
-        .map_err(|e| AppError::from_db_error(command, "开启事务", e))?;
-
-    let result: AppResult<()> = (|| {
+    with_transaction(conn, command, |conn| {
         if is_new {
             let id = if data.id.is_empty() {
                 uuid::Uuid::new_v4().to_string()
@@ -315,7 +375,7 @@ pub fn save_deployment(pool: State<DbPool>, data: Deployment) -> AppResult<()> {
                 ],
             )
             .map_err(|e| AppError::from_db_error(command, "创建部署关系", e))?;
-            insert_audit_log(&conn, "create", "deployment", &id, None, None)
+            insert_audit_log(conn, "create", "deployment", &id, None, None)
                 .map_err(|e| AppError::from_db_error(command, "写入审计日志", e))?;
         } else {
             conn.execute(
@@ -324,23 +384,20 @@ pub fn save_deployment(pool: State<DbPool>, data: Deployment) -> AppResult<()> {
                 rusqlite::params![data.resource_id, data.resource_type, data.host_id, data.port, now, data.id],
             )
             .map_err(|e| AppError::from_db_error(command, "更新部署关系", e))?;
-            insert_audit_log(&conn, "update", "deployment", &data.id, None, None)
+            insert_audit_log(conn, "update", "deployment", &data.id, None, None)
                 .map_err(|e| AppError::from_db_error(command, "写入审计日志", e))?;
         }
         Ok(())
-    })();
+    })
+}
 
-    match result {
-        Ok(()) => {
-            conn.execute_batch("COMMIT;")
-                .map_err(|e| AppError::from_db_error(command, "提交事务", e))?;
-            Ok(())
-        }
-        Err(error) => {
-            let _ = conn.execute_batch("ROLLBACK;");
-            Err(error)
-        }
-    }
+#[tauri::command]
+pub fn save_deployment(pool: State<DbPool>, data: Deployment) -> AppResult<()> {
+    let command = "save_deployment";
+    let conn = pool
+        .get()
+        .map_err(|e| AppError::db_unavailable(command, format!("Pool error: {}", e)))?;
+    save_deployment_inner(command, &conn, data)
 }
 
 #[tauri::command]
@@ -350,37 +407,39 @@ pub fn soft_delete_deployment(pool: State<DbPool>, id: String) -> AppResult<()> 
         .get()
         .map_err(|e| AppError::db_unavailable(command, format!("Pool error: {}", e)))?;
 
-    conn.execute_batch("BEGIN TRANSACTION;")
-        .map_err(|e| AppError::from_db_error(command, "开启事务", e))?;
-
-    match soft_delete(&conn, "deployments", &id) {
-        Ok(()) => match insert_audit_log(&conn, "delete", "deployment", &id, None, None) {
-            Ok(()) => {
-                conn.execute_batch("COMMIT;")
-                    .map_err(|e| AppError::from_db_error(command, "提交事务", e))?;
-                Ok(())
-            }
-            Err(e) => {
-                let _ = conn.execute_batch("ROLLBACK;");
-                Err(AppError::from_db_error(command, "写入审计日志", e))
-            }
-        },
-        Err(e) => {
-            let _ = conn.execute_batch("ROLLBACK;");
-            Err(AppError::from_db_error(command, "删除部署关系", e))
-        }
-    }
+    with_transaction(&conn, command, |conn| {
+        soft_delete(conn, "deployments", &id)
+            .map_err(|e| AppError::from_db_error(command, "删除部署关系", e))?;
+        insert_audit_log(conn, "delete", "deployment", &id, None, None)
+            .map_err(|e| AppError::from_db_error(command, "写入审计日志", e))?;
+        Ok(())
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use crate::error::AppErrorCode;
+    use crate::models::deployment::Deployment;
     use crate::test_helpers::{
         insert_test_application, insert_test_host, insert_test_middleware,
         insert_test_nginx_config, setup_test_db,
     };
 
-    use super::{build_resource_deploy_context, extract_ipv4_from_address};
+    use super::{build_resource_deploy_context, extract_ipv4_from_address, save_deployment_inner};
+
+    fn make_deployment(resource_id: &str, resource_type: &str, host_id: &str) -> Deployment {
+        Deployment {
+            id: "".into(),
+            resource_id: resource_id.into(),
+            resource_type: resource_type.into(),
+            host_id: host_id.into(),
+            port: Some(8080),
+            is_deleted: 0,
+            deleted_at: None,
+            created_at: "".into(),
+            updated_at: "".into(),
+        }
+    }
 
     #[test]
     fn extract_ipv4_from_address_should_support_common_patterns() {
@@ -505,5 +564,33 @@ mod tests {
         assert_eq!(context.parsed_ip.as_deref(), Some("10.0.0.9"));
         assert_eq!(context.matched_host_id.as_deref(), Some("h-dev"));
         assert_eq!(context.resource_env.as_deref(), Some("dev"));
+    }
+
+    #[test]
+    fn save_deployment_inner_should_reject_missing_host() {
+        let conn = setup_test_db();
+        insert_test_application(&conn, "app-1", "payment", "prod");
+
+        let err = save_deployment_inner(
+            "test",
+            &conn,
+            make_deployment("app-1", "application", "host-missing"),
+        )
+        .expect_err("missing host should fail");
+        assert_eq!(err.code, AppErrorCode::NotFound);
+    }
+
+    #[test]
+    fn save_deployment_inner_should_reject_missing_resource() {
+        let conn = setup_test_db();
+        insert_test_host(&conn, "host-1", "server-1", "10.0.0.11");
+
+        let err = save_deployment_inner(
+            "test",
+            &conn,
+            make_deployment("app-missing", "application", "host-1"),
+        )
+        .expect_err("missing resource should fail");
+        assert_eq!(err.code, AppErrorCode::NotFound);
     }
 }

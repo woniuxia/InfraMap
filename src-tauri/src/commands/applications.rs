@@ -7,6 +7,7 @@ use crate::commands::taxonomy::{
 };
 use crate::db::audit::insert_audit_log;
 use crate::db::crud::soft_delete;
+use crate::db::transaction::with_transaction;
 use crate::db::DbPool;
 use crate::error::{AppError, AppResult};
 use crate::models::application::Application;
@@ -156,44 +157,6 @@ fn merge_owner_fields(app: &mut Application, owner_map: &HashMap<String, Vec<Str
     }
 }
 
-fn replace_application_owners(
-    conn: &rusqlite::Connection,
-    application_id: &str,
-    owners: &[String],
-    now: &str,
-) -> Result<(), rusqlite::Error> {
-    conn.execute(
-        "UPDATE application_owners
-         SET is_deleted = 1, deleted_at = ?1, updated_at = ?1
-         WHERE application_id = ?2 AND is_deleted = 0",
-        rusqlite::params![now, application_id],
-    )?;
-
-    for owner in owners {
-        conn.execute(
-            "INSERT INTO application_owners (id, application_id, owner_name, is_deleted, deleted_at, created_at, updated_at)
-             VALUES (?1, ?2, ?3, 0, NULL, ?4, ?4)",
-            rusqlite::params![uuid::Uuid::new_v4().to_string(), application_id, owner, now],
-        )?;
-    }
-
-    Ok(())
-}
-
-fn soft_delete_application_owners(
-    conn: &rusqlite::Connection,
-    application_id: &str,
-    now: &str,
-) -> Result<(), rusqlite::Error> {
-    conn.execute(
-        "UPDATE application_owners
-         SET is_deleted = 1, deleted_at = ?1, updated_at = ?1
-         WHERE application_id = ?2 AND is_deleted = 0",
-        rusqlite::params![now, application_id],
-    )?;
-    Ok(())
-}
-
 fn build_applications_where_clause(
     params: &QueryParams,
 ) -> (String, Vec<Box<dyn rusqlite::types::ToSql>>) {
@@ -214,17 +177,11 @@ fn build_applications_where_clause(
               OR applications.git_repo LIKE ? \
               OR applications.owner LIKE ? \
               OR EXISTS ( \
-                    SELECT 1 FROM application_owners ao \
-                    WHERE ao.application_id = applications.id \
-                      AND ao.is_deleted = 0 \
-                      AND ao.owner_name LIKE ? \
-                 ) \
-              OR EXISTS ( \
                     SELECT 1 \
                     FROM taxonomy_bindings tb \
                     JOIN taxonomy_terms tt ON tt.id = tb.term_id \
                     WHERE tb.resource_type = 'application' \
-                      AND tb.resource_id = applications.id \
+                    AND tb.resource_id = applications.id \
                       AND tb.is_deleted = 0 \
                       AND tt.is_deleted = 0 \
                       AND tt.field_key = 'owner' \
@@ -232,7 +189,7 @@ fn build_applications_where_clause(
                  ))"
             .to_string(),
         );
-        for _ in 0..7 {
+        for _ in 0..6 {
             sql_params.push(Box::new(like_value.clone()));
         }
     }
@@ -324,7 +281,9 @@ pub fn list_applications(
     let rows = stmt
         .query_map(param_refs.as_slice(), row_to_application)
         .map_err(|e| AppError::from_db_error(command, "读取应用列表", e))?;
-    let mut data: Vec<Application> = rows.filter_map(|r| r.ok()).collect();
+    let mut data: Vec<Application> = rows
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| AppError::from_db_error(command, "读取应用列表", e))?;
 
     let app_ids: Vec<String> = data.iter().map(|app| app.id.clone()).collect();
     let owner_map = load_owner_map(&conn, &app_ids)
@@ -392,10 +351,7 @@ fn save_application_inner(
         count == 0
     };
 
-    conn.execute_batch("BEGIN TRANSACTION;")
-        .map_err(|e| AppError::from_db_error(command, "开启事务", e))?;
-
-    let result: AppResult<String> = (|| {
+    with_transaction(conn, command, |conn| {
         if is_new {
             let persisted_id = if normalized_data.id.is_empty() {
                 uuid::Uuid::new_v4().to_string()
@@ -424,8 +380,6 @@ fn save_application_inner(
                 ],
             )
             .map_err(|e| AppError::from_db_error(command, "创建应用", e))?;
-            replace_application_owners(conn, &persisted_id, &normalized_owners, &now)
-                .map_err(|e| AppError::from_db_error(command, "保存应用负责人", e))?;
             save_resource_terms(
                 conn,
                 "application",
@@ -477,8 +431,6 @@ fn save_application_inner(
                 ],
             )
             .map_err(|e| AppError::from_db_error(command, "更新应用", e))?;
-            replace_application_owners(conn, &normalized_data.id, &normalized_owners, &now)
-                .map_err(|e| AppError::from_db_error(command, "保存应用负责人", e))?;
             save_resource_terms(
                 conn,
                 "application",
@@ -508,19 +460,7 @@ fn save_application_inner(
             .map_err(|e| AppError::from_db_error(command, "写入审计日志", e))?;
             Ok(normalized_data.id.clone())
         }
-    })();
-
-    match result {
-        Ok(persisted_id) => {
-            conn.execute_batch("COMMIT;")
-                .map_err(|e| AppError::from_db_error(command, "提交事务", e))?;
-            Ok(persisted_id)
-        }
-        Err(error) => {
-            let _ = conn.execute_batch("ROLLBACK;");
-            Err(error)
-        }
-    }
+    })
 }
 
 #[tauri::command]
@@ -548,36 +488,15 @@ pub fn soft_delete_application(pool: State<DbPool>, id: String) -> AppResult<()>
         .ok();
     let now = chrono::Utc::now().to_rfc3339();
 
-    conn.execute_batch("BEGIN TRANSACTION;")
-        .map_err(|e| AppError::from_db_error(command, "开启事务", e))?;
-
-    match soft_delete(&conn, "applications", &id) {
-        Ok(()) => {
-            if let Err(e) = soft_delete_application_owners(&conn, &id, &now) {
-                let _ = conn.execute_batch("ROLLBACK;");
-                return Err(AppError::from_db_error(command, "删除应用负责人", e));
-            }
-            if let Err(e) = soft_delete_resource_terms(&conn, "application", &id, &now) {
-                let _ = conn.execute_batch("ROLLBACK;");
-                return Err(AppError::from_db_error(command, "删除应用词条绑定", e));
-            }
-            match insert_audit_log(&conn, "delete", "application", &id, name.as_deref(), None) {
-                Ok(()) => {
-                    conn.execute_batch("COMMIT;")
-                        .map_err(|e| AppError::from_db_error(command, "提交事务", e))?;
-                    Ok(())
-                }
-                Err(e) => {
-                    let _ = conn.execute_batch("ROLLBACK;");
-                    Err(AppError::from_db_error(command, "写入审计日志", e))
-                }
-            }
-        }
-        Err(e) => {
-            let _ = conn.execute_batch("ROLLBACK;");
-            Err(AppError::from_db_error(command, "删除应用", e))
-        }
-    }
+    with_transaction(&conn, command, |conn| {
+        soft_delete(conn, "applications", &id)
+            .map_err(|e| AppError::from_db_error(command, "删除应用", e))?;
+        soft_delete_resource_terms(conn, "application", &id, &now)
+            .map_err(|e| AppError::from_db_error(command, "删除应用词条绑定", e))?;
+        insert_audit_log(conn, "delete", "application", &id, name.as_deref(), None)
+            .map_err(|e| AppError::from_db_error(command, "写入审计日志", e))?;
+        Ok(())
+    })
 }
 
 #[cfg(test)]
@@ -631,7 +550,7 @@ mod tests {
     }
 
     #[test]
-    fn build_applications_where_clause_should_include_owner_exists_for_search_and_filter() {
+    fn build_applications_where_clause_should_use_taxonomy_owner_filter_only() {
         let mut filters = HashMap::new();
         filters.insert("owner".to_string(), r#"["alice","bob"]"#.to_string());
         let params = QueryParams {
@@ -642,7 +561,8 @@ mod tests {
 
         let (where_clause, sql_params) = build_applications_where_clause(&params);
         assert!(where_clause.contains("EXISTS"));
-        assert!(where_clause.contains("application_owners"));
+        assert!(where_clause.contains("taxonomy_bindings"));
+        assert!(!where_clause.contains("application_owners"));
         assert!(sql_params.len() >= 6);
     }
 
@@ -701,5 +621,33 @@ mod tests {
 
         let returned_id = save_application_inner("test", &conn, updated).expect("update");
         assert_eq!(returned_id, created_id);
+    }
+
+    #[test]
+    fn save_application_inner_should_not_depend_on_application_owners_table() {
+        let conn = setup_test_db();
+        conn.execute("DROP TABLE IF EXISTS application_owners", [])
+            .expect("drop application_owners");
+
+        let created_id =
+            save_application_inner("test", &conn, make_new_application("app-owner-source"))
+                .expect("create application without owners table");
+        assert!(!created_id.is_empty());
+
+        let owner_binding_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*)
+                 FROM taxonomy_bindings tb
+                 JOIN taxonomy_terms tt ON tt.id = tb.term_id
+                 WHERE tb.resource_type = 'application'
+                   AND tb.resource_id = ?1
+                   AND tb.is_deleted = 0
+                   AND tt.is_deleted = 0
+                   AND tt.field_key = 'owner'",
+                rusqlite::params![created_id],
+                |row| row.get(0),
+            )
+            .expect("query owner taxonomy bindings");
+        assert_eq!(owner_binding_count, 1);
     }
 }

@@ -173,4 +173,22 @@ describe('useResourceList', () => {
     expect(deleteFn).toHaveBeenCalledWith('1')
     expect(ElMessage.success).toHaveBeenCalledWith('删除成功')
   })
+
+  it('handleDelete should not call deleteFn when confirmation is cancelled', async () => {
+    vi.mocked(ElMessageBox.confirm).mockRejectedValueOnce(new Error('cancel'))
+
+    const listFn = createMockListFn()
+    const deleteFn = vi.fn().mockResolvedValue(undefined)
+    const { handleDelete } = useResourceList({
+      listFn,
+      deleteFn,
+      entityLabel: 'Host',
+    })
+
+    await handleDelete('1', 'server1')
+
+    expect(ElMessageBox.confirm).toHaveBeenCalled()
+    expect(deleteFn).not.toHaveBeenCalled()
+    expect(ElMessage.success).not.toHaveBeenCalled()
+  })
 })

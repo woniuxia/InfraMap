@@ -2,6 +2,9 @@ import { tauriInvoke } from '@/utils/invoke'
 import type {
   SystemSettings,
   UpdateSettingsInput,
+  StorageProfile,
+  UpdateStoragePathInput,
+  UpdateStoragePathResult,
   BackupEntry,
   DbPreviewSummary,
   ImportResult,
@@ -14,6 +17,18 @@ export function getSettings(): Promise<SystemSettings> {
 
 export function updateSettings(data: UpdateSettingsInput): Promise<void> {
   return tauriInvoke<void>('update_settings', { data })
+}
+
+export function getStorageProfile(): Promise<StorageProfile> {
+  return tauriInvoke<StorageProfile>('get_storage_profile')
+}
+
+export function updateStoragePath(data: UpdateStoragePathInput): Promise<UpdateStoragePathResult> {
+  return tauriInvoke<UpdateStoragePathResult>('update_storage_path', { data })
+}
+
+export function restartApp(): Promise<void> {
+  return tauriInvoke<void>('restart_app')
 }
 
 // Backup

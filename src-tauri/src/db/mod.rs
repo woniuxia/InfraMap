@@ -3,6 +3,7 @@ pub mod crud;
 pub mod migration;
 pub mod pool;
 pub mod schema;
+pub mod transaction;
 
 pub use migration::run_migrations;
 pub use pool::{init_db_pool, DbPool};

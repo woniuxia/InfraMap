@@ -19,6 +19,25 @@ pub struct UpdateSettingsInput {
 }
 
 #[derive(Debug, Serialize)]
+pub struct StorageProfile {
+    pub active_root_path: String,
+    pub db_path: String,
+    pub backup_dir: String,
+    pub is_default_path: bool,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateStoragePathInput {
+    pub root_path: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct UpdateStoragePathResult {
+    pub restart_required: bool,
+    pub migrated: bool,
+}
+
+#[derive(Debug, Serialize)]
 pub struct BackupEntry {
     pub filename: String,
     pub file_size: u64,

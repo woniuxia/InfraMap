@@ -56,13 +56,13 @@ declare module 'vue' {
     ElTable: typeof import('element-plus/es')['ElTable']
     ElTableColumn: typeof import('element-plus/es')['ElTableColumn']
     ElTag: typeof import('element-plus/es')['ElTag']
-    ElText: typeof import('element-plus/es')['ElText']
     ErrorDetailDialog: typeof import('./components/ErrorDetailDialog.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
     SearchToolbar: typeof import('./components/filters/SearchToolbar.vue')['default']
     TopologyCanvas: typeof import('./components/topology/TopologyCanvas.vue')['default']
     TopologyDetailPanel: typeof import('./components/topology/TopologyDetailPanel.vue')['default']
+    TopologyLegend: typeof import('./components/topology/TopologyLegend.vue')['default']
     TopologyToolbar: typeof import('./components/topology/TopologyToolbar.vue')['default']
   }
   export interface GlobalDirectives {

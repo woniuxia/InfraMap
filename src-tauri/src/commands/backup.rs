@@ -1,17 +1,18 @@
 use tauri::State;
 
-use crate::backup::{self, AppDataDir};
+use crate::backup;
 use crate::db::DbPool;
 use crate::error::{AppError, AppResult};
 use crate::models::settings::{
     BackupEntry, DbPreviewSummary, ExportData, ExportMetadata, ExportPayload, ImportResult,
 };
+use crate::storage::StoragePaths;
 
 #[tauri::command]
-pub fn create_backup(pool: State<DbPool>, app_data_dir: State<AppDataDir>) -> AppResult<String> {
+pub fn create_backup(pool: State<DbPool>, storage_paths: State<StoragePaths>) -> AppResult<String> {
     let command = "create_backup";
 
-    let backup_dir = backup::get_backup_dir(&app_data_dir.0)
+    let backup_dir = backup::get_backup_dir(&storage_paths.active_root_path)
         .map_err(|e| AppError::from_backup_error(command, "创建备份目录", e))?;
 
     let now = chrono::Utc::now().format("%Y%m%d_%H%M%S");
@@ -41,10 +42,10 @@ pub fn create_backup(pool: State<DbPool>, app_data_dir: State<AppDataDir>) -> Ap
 }
 
 #[tauri::command]
-pub fn list_backups(app_data_dir: State<AppDataDir>) -> AppResult<Vec<BackupEntry>> {
+pub fn list_backups(storage_paths: State<StoragePaths>) -> AppResult<Vec<BackupEntry>> {
     let command = "list_backups";
 
-    let backup_dir = backup::get_backup_dir(&app_data_dir.0)
+    let backup_dir = backup::get_backup_dir(&storage_paths.active_root_path)
         .map_err(|e| AppError::from_backup_error(command, "读取备份目录", e))?;
 
     let mut entries: Vec<BackupEntry> = std::fs::read_dir(&backup_dir)
@@ -73,12 +74,12 @@ pub fn list_backups(app_data_dir: State<AppDataDir>) -> AppResult<Vec<BackupEntr
 }
 
 #[tauri::command]
-pub fn delete_backup(app_data_dir: State<AppDataDir>, filename: String) -> AppResult<()> {
+pub fn delete_backup(storage_paths: State<StoragePaths>, filename: String) -> AppResult<()> {
     let command = "delete_backup";
 
     validate_filename(&filename).map_err(|e| AppError::validation(command, e))?;
 
-    let backup_dir = backup::get_backup_dir(&app_data_dir.0)
+    let backup_dir = backup::get_backup_dir(&storage_paths.active_root_path)
         .map_err(|e| AppError::from_backup_error(command, "读取备份目录", e))?;
     let path = backup_dir.join(&filename);
 
@@ -96,14 +97,14 @@ pub fn delete_backup(app_data_dir: State<AppDataDir>, filename: String) -> AppRe
 
 #[tauri::command]
 pub fn preview_restore(
-    app_data_dir: State<AppDataDir>,
+    storage_paths: State<StoragePaths>,
     filename: String,
 ) -> AppResult<DbPreviewSummary> {
     let command = "preview_restore";
 
     validate_filename(&filename).map_err(|e| AppError::validation(command, e))?;
 
-    let backup_dir = backup::get_backup_dir(&app_data_dir.0)
+    let backup_dir = backup::get_backup_dir(&storage_paths.active_root_path)
         .map_err(|e| AppError::from_backup_error(command, "读取备份目录", e))?;
     let path = backup_dir.join(&filename);
 
@@ -156,14 +157,14 @@ pub fn preview_restore(
 #[tauri::command]
 pub fn restore_backup(
     pool: State<DbPool>,
-    app_data_dir: State<AppDataDir>,
+    storage_paths: State<StoragePaths>,
     filename: String,
 ) -> AppResult<()> {
     let command = "restore_backup";
 
     validate_filename(&filename).map_err(|e| AppError::validation(command, e))?;
 
-    let backup_dir = backup::get_backup_dir(&app_data_dir.0)
+    let backup_dir = backup::get_backup_dir(&storage_paths.active_root_path)
         .map_err(|e| AppError::from_backup_error(command, "读取备份目录", e))?;
     let source_path = backup_dir.join(&filename);
 
@@ -181,7 +182,7 @@ pub fn restore_backup(
     backup::perform_backup(&pool, &safety_path)
         .map_err(|e| AppError::from_backup_error(command, "创建恢复前备份", e))?;
 
-    let db_path = app_data_dir.0.join("inframap.db");
+    let db_path = storage_paths.db_path.clone();
     let src_conn = rusqlite::Connection::open_with_flags(
         &source_path,
         rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
@@ -262,12 +263,12 @@ pub fn export_json(pool: State<DbPool>, filepath: String) -> AppResult<()> {
 #[tauri::command]
 pub fn import_json(
     pool: State<DbPool>,
-    app_data_dir: State<AppDataDir>,
+    storage_paths: State<StoragePaths>,
     filepath: String,
 ) -> AppResult<ImportResult> {
     let command = "import_json";
 
-    let backup_dir = backup::get_backup_dir(&app_data_dir.0)
+    let backup_dir = backup::get_backup_dir(&storage_paths.active_root_path)
         .map_err(|e| AppError::from_backup_error(command, "读取备份目录", e))?;
 
     let now = chrono::Utc::now().format("%Y%m%d_%H%M%S");

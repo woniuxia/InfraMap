@@ -1,5 +1,6 @@
 use crate::db::DbPool;
 use crate::error::{AppError, AppResult};
+use crate::storage::StoragePaths;
 use serde::Serialize;
 use tauri::State;
 
@@ -13,7 +14,10 @@ pub struct HealthStatus {
 }
 
 #[tauri::command]
-pub fn health_check(pool: State<DbPool>) -> AppResult<HealthStatus> {
+pub fn health_check(
+    pool: State<DbPool>,
+    storage_paths: State<StoragePaths>,
+) -> AppResult<HealthStatus> {
     let command = "health_check";
     let conn = pool
         .get()
@@ -38,7 +42,7 @@ pub fn health_check(pool: State<DbPool>) -> AppResult<HealthStatus> {
     Ok(HealthStatus {
         status: "ok".to_string(),
         db_connected: true,
-        db_path: "inframap.db".to_string(),
+        db_path: storage_paths.db_path.to_string_lossy().to_string(),
         table_count,
         schema_version,
     })

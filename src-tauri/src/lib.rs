@@ -3,6 +3,7 @@ mod commands;
 mod db;
 mod error;
 mod models;
+mod storage;
 mod validation;
 
 #[cfg(test)]
@@ -17,13 +18,9 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
-            let app_data_dir = app
-                .path()
-                .app_data_dir()
-                .expect("Failed to resolve app data directory");
-            std::fs::create_dir_all(&app_data_dir).expect("Failed to create app data directory");
-
-            let db_path = app_data_dir.join("inframap.db");
+            let storage_paths = storage::resolve_storage_paths(&app.handle())
+                .expect("Failed to resolve storage paths");
+            let db_path = storage_paths.db_path.clone();
             let db_path_str = db_path.to_str().expect("Invalid database path");
 
             let pool =
@@ -32,9 +29,9 @@ pub fn run() {
             run_migrations(&pool).expect("Database migration failed");
 
             app.manage(pool.clone());
-            app.manage(backup::AppDataDir(app_data_dir.clone()));
+            app.manage(storage_paths.clone());
 
-            backup::start_auto_backup_thread(pool, app_data_dir);
+            backup::start_auto_backup_thread(pool, storage_paths);
 
             Ok(())
         })
@@ -80,6 +77,7 @@ pub fn run() {
             commands::deployments::soft_delete_deployment,
             commands::dependencies::list_call_relations,
             commands::dependencies::replace_resource_call_relations,
+            commands::dashboard::get_dashboard_overview,
             commands::dashboard::get_dashboard_stats,
             commands::audit_logs::list_audit_logs,
             commands::topology::get_topology_graph,
@@ -87,6 +85,9 @@ pub fn run() {
             commands::topology::analyze_impact,
             commands::settings::get_settings,
             commands::settings::update_settings,
+            commands::settings::get_storage_profile,
+            commands::settings::update_storage_path,
+            commands::settings::restart_app,
             commands::taxonomy::list_taxonomy_terms,
             commands::taxonomy::save_resource_terms_command,
             commands::taxonomy::list_resource_terms,
