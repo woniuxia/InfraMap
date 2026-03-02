@@ -23,6 +23,7 @@ export function batchCreateIpAddresses(params: BatchCreateIpParams): Promise<Bat
   return tauriInvoke<BatchCreateIpResult>("batch_create_ip_addresses", { params });
 }
 
-export function softDeleteIpAddress(id: string): Promise<void> {
-  return tauriInvoke<void>("soft_delete_ip_address", { id });
+export function deleteIpAddress(id: string): Promise<void> {
+  return tauriInvoke<void>("delete_ip_address", { id });
 }
+

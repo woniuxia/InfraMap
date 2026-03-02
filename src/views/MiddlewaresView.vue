@@ -3,7 +3,7 @@ import { computed, ref, onMounted, watch } from "vue";
 import { ElMessage } from "element-plus";
 import type { Middleware } from "@/types";
 import type { SearchFieldConfig, SearchToolbarQueryPayload } from "@/types/searchToolbar";
-import { listMiddlewares, saveMiddleware, softDeleteMiddleware } from "@/api/middlewares";
+import { listMiddlewares, saveMiddleware, deleteMiddleware } from "@/api/middlewares";
 import { replaceResourceCallRelations } from "@/api/call-relations";
 import { useResourceList } from "@/composables/useResourceList";
 import {
@@ -30,7 +30,7 @@ const {
   handleDelete,
 } = useResourceList<Middleware>({
   listFn: listMiddlewares,
-  deleteFn: softDeleteMiddleware,
+  deleteFn: deleteMiddleware,
   entityLabel: "中间件",
 });
 
@@ -96,7 +96,6 @@ function openAdd() {
     id: "",
     env: "prod",
     category: "database",
-    is_deleted: 0,
     created_at: "",
     updated_at: "",
   };
@@ -126,7 +125,6 @@ async function handleSave() {
 
   const payload: Partial<Middleware> = {
     id: "",
-    is_deleted: 0,
     created_at: "",
     updated_at: "",
     ...editingMw.value,
@@ -508,5 +506,6 @@ watch(
   border-radius: 4px;
 }
 </style>
+
 
 

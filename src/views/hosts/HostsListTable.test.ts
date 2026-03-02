@@ -114,7 +114,6 @@ const hosts: Host[] = [
     ip_display: "10.0.0.1, 10.0.0.2,10.0.0.3",
     env: "prod",
     status: "running",
-    is_deleted: 0,
     created_at: "2026-03-01T00:00:00.000Z",
     updated_at: "2026-03-01T00:00:00.000Z",
   },

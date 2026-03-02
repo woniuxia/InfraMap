@@ -2,11 +2,11 @@ use std::collections::{HashMap, HashSet};
 use tauri::State;
 
 use crate::commands::taxonomy::{
-    build_taxonomy_exists_filter, parse_filter_values, parse_tech_stack_terms, save_resource_terms,
-    soft_delete_resource_terms, FIELD_OWNER, FIELD_TECH_STACK,
+    build_taxonomy_exists_filter, delete_resource_terms, parse_filter_values,
+    parse_tech_stack_terms, save_resource_terms, FIELD_OWNER, FIELD_TECH_STACK,
 };
 use crate::db::audit::insert_audit_log;
-use crate::db::crud::soft_delete;
+use crate::db::crud::delete_by_id;
 use crate::db::transaction::with_transaction;
 use crate::db::DbPool;
 use crate::error::{AppError, AppResult};
@@ -31,17 +31,15 @@ fn row_to_application(row: &rusqlite::Row) -> rusqlite::Result<Application> {
         business_application_name: row.get(11)?,
         status: row.get(12)?,
         description: row.get(13)?,
-        is_deleted: row.get(14)?,
-        deleted_at: row.get(15)?,
-        created_at: row.get(16)?,
-        updated_at: row.get(17)?,
+        created_at: row.get(14)?,
+        updated_at: row.get(15)?,
     })
 }
 
 const SELECT_COLUMNS: &str = "id, name, type, address, port, tech_stack, deploy_mode, \
      env, git_repo, owner, business_application_id, \
      (SELECT ba.name FROM business_applications ba WHERE ba.id = applications.business_application_id AND ba.is_deleted = 0) AS business_application_name, \
-     status, description, is_deleted, deleted_at, created_at, updated_at";
+     status, description, created_at, updated_at";
 
 #[cfg(test)]
 fn parse_tech_stack_items(value: &str) -> Vec<String> {
@@ -473,8 +471,8 @@ pub fn save_application(pool: State<DbPool>, data: Application) -> AppResult<Str
 }
 
 #[tauri::command]
-pub fn soft_delete_application(pool: State<DbPool>, id: String) -> AppResult<()> {
-    let command = "soft_delete_application";
+pub fn delete_application(pool: State<DbPool>, id: String) -> AppResult<()> {
+    let command = "delete_application";
     let conn = pool
         .get()
         .map_err(|e| AppError::db_unavailable(command, format!("Pool error: {}", e)))?;
@@ -489,9 +487,9 @@ pub fn soft_delete_application(pool: State<DbPool>, id: String) -> AppResult<()>
     let now = chrono::Utc::now().to_rfc3339();
 
     with_transaction(&conn, command, |conn| {
-        soft_delete(conn, "applications", &id)
+        delete_by_id(conn, "applications", &id)
             .map_err(|e| AppError::from_db_error(command, "删除应用", e))?;
-        soft_delete_resource_terms(conn, "application", &id, &now)
+        delete_resource_terms(conn, "application", &id, &now)
             .map_err(|e| AppError::from_db_error(command, "删除应用词条绑定", e))?;
         insert_audit_log(conn, "delete", "application", &id, name.as_deref(), None)
             .map_err(|e| AppError::from_db_error(command, "写入审计日志", e))?;
@@ -583,8 +581,6 @@ mod tests {
             business_application_name: None,
             status: "running".into(),
             description: None,
-            is_deleted: 0,
-            deleted_at: None,
             created_at: "".into(),
             updated_at: "".into(),
         }

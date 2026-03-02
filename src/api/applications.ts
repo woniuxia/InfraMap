@@ -13,6 +13,7 @@ export function saveApplication(data: Partial<Application>): Promise<string> {
   return tauriInvoke<string>('save_application', { data })
 }
 
-export function softDeleteApplication(id: string): Promise<void> {
-  return tauriInvoke<void>('soft_delete_application', { id })
+export function deleteApplication(id: string): Promise<void> {
+  return tauriInvoke<void>('delete_application', { id })
 }
+

@@ -23,14 +23,14 @@ fn parse_filter_values(raw: &str) -> Vec<String> {
     vec![trimmed.to_string()]
 }
 
-/// Build WHERE clause for soft-delete filtering + search + filters.
+/// Build WHERE clause for search + filters.
 /// Returns (where_clause_string, params_vec).
 pub fn build_where_clause(
     params: &QueryParams,
     search_columns: &[&str],
     filter_columns: &[&str],
 ) -> (String, Vec<Box<dyn rusqlite::types::ToSql>>) {
-    let mut conditions = vec!["is_deleted = 0".to_string()];
+    let mut conditions: Vec<String> = Vec::new();
     let mut sql_params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
 
     // Search: OR across search_columns with LIKE
@@ -71,7 +71,11 @@ pub fn build_where_clause(
         }
     }
 
-    let where_clause = format!("WHERE {}", conditions.join(" AND "));
+    let where_clause = if conditions.is_empty() {
+        "WHERE 1 = 1".to_string()
+    } else {
+        format!("WHERE {}", conditions.join(" AND "))
+    };
     (where_clause, sql_params)
 }
 
@@ -90,20 +94,16 @@ pub fn count_query(
         .map_err(|e| format!("Count query failed: {}", e))
 }
 
-/// Soft delete: set is_deleted=1, deleted_at=now, updated_at=now.
-pub fn soft_delete(conn: &Connection, table: &str, id: &str) -> Result<(), String> {
-    let now = chrono::Utc::now().to_rfc3339();
+/// Hard delete by id.
+pub fn delete_by_id(conn: &Connection, table: &str, id: &str) -> Result<(), String> {
     let affected = conn
         .execute(
-            &format!(
-                "UPDATE {} SET is_deleted = 1, deleted_at = ?1, updated_at = ?2 WHERE id = ?3 AND is_deleted = 0",
-                table
-            ),
-            rusqlite::params![now, now, id],
+            &format!("DELETE FROM {} WHERE id = ?1", table),
+            rusqlite::params![id],
         )
-        .map_err(|e| format!("Soft delete failed: {}", e))?;
+        .map_err(|e| format!("Delete failed: {}", e))?;
     if affected == 0 {
-        return Err(format!("Record not found or already deleted: {}", id));
+        return Err(format!("Record not found: {}", id));
     }
     Ok(())
 }
@@ -119,7 +119,7 @@ mod tests {
     fn test_build_where_clause_no_filters() {
         let params = QueryParams::default();
         let (clause, sql_params) = build_where_clause(&params, &["name"], &["status"]);
-        assert_eq!(clause, "WHERE is_deleted = 0");
+        assert_eq!(clause, "WHERE 1 = 1");
         assert_eq!(sql_params.len(), 0);
     }
 
@@ -182,7 +182,7 @@ mod tests {
     #[test]
     fn test_count_query_empty_table() {
         let conn = setup_test_db();
-        let count = count_query(&conn, "hosts", "WHERE is_deleted = 0", &[]).unwrap();
+        let count = count_query(&conn, "hosts", "WHERE 1 = 1", &[]).unwrap();
         assert_eq!(count, 0);
     }
 
@@ -191,27 +191,25 @@ mod tests {
         let conn = setup_test_db();
         insert_test_host(&conn, "h1", "server1", "10.0.0.1");
         insert_test_host(&conn, "h2", "server2", "10.0.0.2");
-        let count = count_query(&conn, "hosts", "WHERE is_deleted = 0", &[]).unwrap();
+        let count = count_query(&conn, "hosts", "WHERE 1 = 1", &[]).unwrap();
         assert_eq!(count, 2);
     }
 
     #[test]
-    fn test_soft_delete_success() {
+    fn test_delete_by_id_success() {
         let conn = setup_test_db();
         insert_test_host(&conn, "h1", "server1", "10.0.0.1");
-        assert!(soft_delete(&conn, "hosts", "h1").is_ok());
+        assert!(delete_by_id(&conn, "hosts", "h1").is_ok());
 
-        // Verify it's marked as deleted
-        let count = count_query(&conn, "hosts", "WHERE is_deleted = 0", &[]).unwrap();
+        let count = count_query(&conn, "hosts", "WHERE 1 = 1", &[]).unwrap();
         assert_eq!(count, 0);
     }
 
     #[test]
-    fn test_soft_delete_already_deleted() {
+    fn test_delete_by_id_non_existing_should_fail() {
         let conn = setup_test_db();
         insert_test_host(&conn, "h1", "server1", "10.0.0.1");
-        soft_delete(&conn, "hosts", "h1").unwrap();
-        // Second delete should fail
-        assert!(soft_delete(&conn, "hosts", "h1").is_err());
+        delete_by_id(&conn, "hosts", "h1").unwrap();
+        assert!(delete_by_id(&conn, "hosts", "h1").is_err());
     }
 }

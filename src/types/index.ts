@@ -13,8 +13,6 @@ export interface Host {
   status: "running" | "stopped" | "maintenance";
   tags?: string;
   description?: string;
-  is_deleted: number;
-  deleted_at?: string;
   created_at: string;
   updated_at: string;
 }
@@ -27,8 +25,6 @@ export interface IpAddress {
   real_ips?: string;
   tags?: string;
   description?: string;
-  is_deleted: number;
-  deleted_at?: string;
   created_at: string;
   updated_at: string;
 }
@@ -67,8 +63,6 @@ export interface Application {
   business_application_name?: string;
   status: "running" | "stopped" | "maintenance";
   description?: string;
-  is_deleted: number;
-  deleted_at?: string;
   created_at: string;
   updated_at: string;
 }
@@ -81,8 +75,6 @@ export interface BusinessApplication {
   description?: string;
   env?: "prod" | "dev" | "test";
   status: "active" | "inactive";
-  is_deleted: number;
-  deleted_at?: string;
   created_at: string;
   updated_at: string;
 }
@@ -113,8 +105,6 @@ export interface Middleware {
   version?: string;
   env: "prod" | "dev" | "test";
   description?: string;
-  is_deleted: number;
-  deleted_at?: string;
   created_at: string;
   updated_at: string;
 }
@@ -129,8 +119,6 @@ export interface NginxConfig {
   env: "prod" | "dev" | "test";
   status: "running" | "stopped" | "maintenance";
   description?: string;
-  is_deleted: number;
-  deleted_at?: string;
   created_at: string;
   updated_at: string;
 }
@@ -141,8 +129,6 @@ export interface Deployment {
   resource_type: "application" | "middleware" | "nginx";
   host_id: string;
   port?: number;
-  is_deleted: number;
-  deleted_at?: string;
   created_at: string;
   updated_at: string;
 }
@@ -180,8 +166,6 @@ export interface CallRelation {
   direction: CallDirection;
   relation_type: CallRelationType;
   description?: string;
-  is_deleted: number;
-  deleted_at?: string;
   created_at: string;
   updated_at: string;
 }

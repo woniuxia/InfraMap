@@ -1,7 +1,7 @@
 use tauri::State;
 
 use crate::db::audit::insert_audit_log;
-use crate::db::crud::{build_where_clause, count_query, soft_delete};
+use crate::db::crud::{build_where_clause, count_query, delete_by_id};
 use crate::db::DbPool;
 use crate::error::{AppError, AppResult};
 use crate::models::common::{PagedResult, QueryParams};
@@ -19,15 +19,13 @@ fn row_to_nginx_config(row: &rusqlite::Row) -> rusqlite::Result<NginxConfig> {
         env: row.get(6)?,
         status: row.get(7)?,
         description: row.get(8)?,
-        is_deleted: row.get(9)?,
-        deleted_at: row.get(10)?,
-        created_at: row.get(11)?,
-        updated_at: row.get(12)?,
+        created_at: row.get(9)?,
+        updated_at: row.get(10)?,
     })
 }
 
 const SELECT_COLUMNS: &str = "id, name, address, listen_port, strategy, upstream_servers, \
-     env, status, description, is_deleted, deleted_at, created_at, updated_at";
+     env, status, description, created_at, updated_at";
 
 #[tauri::command]
 pub fn list_nginx_configs(
@@ -185,8 +183,8 @@ pub fn save_nginx_config(pool: State<DbPool>, data: NginxConfig) -> AppResult<St
 }
 
 #[tauri::command]
-pub fn soft_delete_nginx_config(pool: State<DbPool>, id: String) -> AppResult<()> {
-    let command = "soft_delete_nginx_config";
+pub fn delete_nginx_config(pool: State<DbPool>, id: String) -> AppResult<()> {
+    let command = "delete_nginx_config";
     let conn = pool
         .get()
         .map_err(|e| AppError::db_unavailable(command, format!("Pool error: {}", e)))?;
@@ -202,7 +200,7 @@ pub fn soft_delete_nginx_config(pool: State<DbPool>, id: String) -> AppResult<()
     conn.execute_batch("BEGIN TRANSACTION;")
         .map_err(|e| AppError::from_db_error(command, "开启事务", e))?;
 
-    match soft_delete(&conn, "nginx_configs", &id) {
+    match delete_by_id(&conn, "nginx_configs", &id) {
         Ok(()) => match insert_audit_log(&conn, "delete", "nginx", &id, name.as_deref(), None) {
             Ok(()) => {
                 conn.execute_batch("COMMIT;")

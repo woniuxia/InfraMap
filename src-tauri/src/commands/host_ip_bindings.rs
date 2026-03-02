@@ -24,7 +24,7 @@ fn list_host_ip_bindings_inner(
 
     let mut stmt = conn
         .prepare(
-            "SELECT ia.id, ia.ip_address, ia.env, ia.is_vip, ia.real_ips, ia.tags, ia.description, ia.is_deleted, ia.deleted_at, ia.created_at, ia.updated_at
+            "SELECT ia.id, ia.ip_address, ia.env, ia.is_vip, ia.real_ips, ia.tags, ia.description, ia.created_at, ia.updated_at
              FROM host_ip_bindings hb
              JOIN ip_addresses ia ON ia.id = hb.ip_id
              WHERE hb.host_id = ?1 AND hb.is_deleted = 0 AND ia.is_deleted = 0
@@ -41,10 +41,8 @@ fn list_host_ip_bindings_inner(
                 real_ips: row.get(4)?,
                 tags: row.get(5)?,
                 description: row.get(6)?,
-                is_deleted: row.get(7)?,
-                deleted_at: row.get(8)?,
-                created_at: row.get(9)?,
-                updated_at: row.get(10)?,
+                created_at: row.get(7)?,
+                updated_at: row.get(8)?,
             })
         })
         .map_err(|e| AppError::from_db_error(command, "读取主机IP绑定", e))?;
@@ -101,12 +99,16 @@ fn bind_host_ip_inner(
             }
             Some((id, _)) => {
                 conn.execute(
-                    "UPDATE host_ip_bindings
-                     SET is_deleted = 0, deleted_at = NULL, updated_at = ?1
-                     WHERE id = ?2",
-                    rusqlite::params![now, id],
+                    "DELETE FROM host_ip_bindings WHERE id = ?1",
+                    rusqlite::params![id],
                 )
-                .map_err(|e| AppError::from_db_error(command, "恢复IP绑定", e))?;
+                .map_err(|e| AppError::from_db_error(command, "清理旧绑定", e))?;
+                conn.execute(
+                    "INSERT INTO host_ip_bindings (id, host_id, ip_id, is_deleted, deleted_at, created_at, updated_at)
+                     VALUES (?1, ?2, ?3, 0, NULL, ?4, ?4)",
+                    rusqlite::params![uuid::Uuid::new_v4().to_string(), host_id, ip_id, now],
+                )
+                .map_err(|e| AppError::from_db_error(command, "创建IP绑定", e))?;
             }
             None => {
                 conn.execute(
@@ -142,10 +144,9 @@ fn unbind_host_ip_inner(
     with_transaction(conn, command, |conn| {
         let affected = conn
             .execute(
-                "UPDATE host_ip_bindings
-                 SET is_deleted = 1, deleted_at = ?1, updated_at = ?2
-                 WHERE host_id = ?3 AND ip_id = ?4 AND is_deleted = 0",
-                rusqlite::params![now, now, host_id, ip_id],
+                "DELETE FROM host_ip_bindings
+                 WHERE host_id = ?1 AND ip_id = ?2 AND is_deleted = 0",
+                rusqlite::params![host_id, ip_id],
             )
             .map_err(|e| AppError::from_db_error(command, "解绑主机IP", e))?;
         if affected == 0 {
@@ -162,7 +163,7 @@ fn unbind_host_ip_inner(
             "host_ip_binding",
             host_id,
             Some(host_id),
-            Some(&format!("unbind ip_id={}", ip_id)),
+            Some(&format!("unbind ip_id={} at {}", ip_id, now)),
         )
         .map_err(|e| AppError::from_db_error(command, "写入审计日志", e))?;
         Ok(())
@@ -234,7 +235,7 @@ mod tests {
     }
 
     #[test]
-    fn unbind_host_ip_should_soft_delete_relation() {
+    fn unbind_host_ip_should_delete_relation() {
         let conn = setup_test_db();
         seed_test_host_without_binding(&conn, "h1", "server-1");
         seed_test_ip(&conn, "ip-1", "10.0.0.21", "prod");

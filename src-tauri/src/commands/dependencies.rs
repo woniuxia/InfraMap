@@ -23,16 +23,14 @@ fn row_to_call_relation(row: &rusqlite::Row) -> rusqlite::Result<CallRelation> {
         direction: row.get(6)?,
         relation_type: row.get(7)?,
         description: row.get(8)?,
-        is_deleted: row.get(9)?,
-        deleted_at: row.get(10)?,
-        created_at: row.get(11)?,
-        updated_at: row.get(12)?,
+        created_at: row.get(9)?,
+        updated_at: row.get(10)?,
     })
 }
 
 const SELECT_COLUMNS: &str =
     "id, pair_key, owner_id, owner_type, peer_id, peer_type, direction, relation_type, \
-     description, is_deleted, deleted_at, created_at, updated_at";
+     description, created_at, updated_at";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReplaceCallRelationItem {
@@ -228,11 +226,11 @@ fn ensure_resource_exists(
     ))
 }
 
-fn soft_delete_pairs_by_keys(
+fn delete_pairs_by_keys(
     command: &str,
     conn: &rusqlite::Connection,
     pair_keys: &[String],
-    now: &str,
+    _now: &str,
 ) -> AppResult<u64> {
     if pair_keys.is_empty() {
         return Ok(0);
@@ -240,15 +238,12 @@ fn soft_delete_pairs_by_keys(
 
     let placeholders = vec!["?"; pair_keys.len()].join(", ");
     let sql = format!(
-        "UPDATE call_relations
-         SET is_deleted = 1, deleted_at = ?1, updated_at = ?2
+        "DELETE FROM call_relations
          WHERE is_deleted = 0 AND pair_key IN ({})",
         placeholders
     );
 
     let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
-    params.push(Box::new(now.to_string()));
-    params.push(Box::new(now.to_string()));
     for pair_key in pair_keys {
         params.push(Box::new(pair_key.clone()));
     }
@@ -325,7 +320,7 @@ fn replace_resource_call_relations_inner(
     with_transaction(conn, command, |conn| {
         let pair_keys =
             query_owner_pair_keys(command, conn, &params.resource_id, &params.resource_type)?;
-        let deleted_count = soft_delete_pairs_by_keys(command, conn, &pair_keys, &now)?;
+        let deleted_count = delete_pairs_by_keys(command, conn, &pair_keys, &now)?;
 
         let mut created_count: u64 = 0;
         for item in &normalized_items {

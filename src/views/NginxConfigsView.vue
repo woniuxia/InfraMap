@@ -3,7 +3,7 @@ import { ref, onMounted } from "vue";
 import { ElMessage } from "element-plus";
 import type { NginxConfig } from "@/types";
 import type { SearchFieldConfig, SearchToolbarQueryPayload } from "@/types/searchToolbar";
-import { listNginxConfigs, saveNginxConfig, softDeleteNginxConfig } from "@/api/nginx-configs";
+import { listNginxConfigs, saveNginxConfig, deleteNginxConfig } from "@/api/nginx-configs";
 import { replaceResourceCallRelations } from "@/api/call-relations";
 import { useResourceList } from "@/composables/useResourceList";
 import { buildNginxCopyDraft } from "@/utils/resourceCopy";
@@ -23,7 +23,7 @@ const {
   handleDelete,
 } = useResourceList<NginxConfig>({
   listFn: listNginxConfigs,
-  deleteFn: softDeleteNginxConfig,
+  deleteFn: deleteNginxConfig,
   entityLabel: "负载均衡",
 });
 
@@ -105,7 +105,6 @@ function openAdd() {
     status: "running",
     env: "prod",
     strategy: "roundrobin",
-    is_deleted: 0,
     created_at: "",
     updated_at: "",
   };
@@ -133,7 +132,6 @@ async function handleSave() {
 
   const payload: Partial<NginxConfig> = {
     id: "",
-    is_deleted: 0,
     created_at: "",
     updated_at: "",
     ...editingNc.value,
@@ -420,5 +418,6 @@ onMounted(() => fetchData());
   justify-content: flex-end;
 }
 </style>
+
 
 

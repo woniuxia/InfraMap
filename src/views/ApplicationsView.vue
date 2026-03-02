@@ -6,7 +6,7 @@ import type { SearchFieldConfig, SearchToolbarQueryPayload } from "@/types/searc
 import {
   listApplications,
   saveApplication,
-  softDeleteApplication,
+  deleteApplication,
 } from "@/api/applications";
 import { listApplicationOwnerTerms, listApplicationTechStackTerms } from "@/api/taxonomy";
 import type { TaxonomyAppType } from "@/api/taxonomy";
@@ -30,7 +30,7 @@ const {
   handleDelete,
 } = useResourceList<Application>({
   listFn: listApplications,
-  deleteFn: softDeleteApplication,
+  deleteFn: deleteApplication,
   entityLabel: "应用服务",
 });
 
@@ -180,7 +180,6 @@ function openAdd() {
     env: "prod",
     type: "backend",
     port: 8080,
-    is_deleted: 0,
     created_at: "",
     updated_at: "",
   };
@@ -247,7 +246,6 @@ async function handleSave() {
   const owners = normalizeOwners(ownerList.value);
   const payload: Partial<Application> = {
     id: "",
-    is_deleted: 0,
     created_at: "",
     updated_at: "",
     ...editingApp.value,
@@ -661,5 +659,6 @@ onMounted(() => {
   gap: 4px;
 }
 </style>
+
 
 

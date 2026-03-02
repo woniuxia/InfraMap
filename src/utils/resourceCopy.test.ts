@@ -27,7 +27,6 @@ describe("resourceCopy", () => {
       hostname: "host-01",
       env: "prod",
       status: "running",
-      is_deleted: 0,
       created_at: "2026-01-01T00:00:00Z",
       updated_at: "2026-01-02T00:00:00Z",
     };
@@ -36,10 +35,8 @@ describe("resourceCopy", () => {
 
     expect(stripped.hostname).toBe("host-01");
     expect(stripped.id).toBeUndefined();
-    expect(stripped.is_deleted).toBeUndefined();
     expect(stripped.created_at).toBeUndefined();
     expect(stripped.updated_at).toBeUndefined();
-    expect(stripped.deleted_at).toBeUndefined();
   });
 
   it("builds host copy draft without legacy ip fields", () => {
@@ -50,7 +47,6 @@ describe("resourceCopy", () => {
       status: "running",
       os_type: "Ubuntu 22.04",
       tags: "[\"db\"]",
-      is_deleted: 0,
       created_at: "2026-01-03T00:00:00Z",
       updated_at: "2026-01-03T00:00:00Z",
     };
@@ -75,7 +71,6 @@ describe("resourceCopy", () => {
       status: "running",
       owner: "ops",
       owners: ["ops", "devops"],
-      is_deleted: 0,
       created_at: "2026-01-01T00:00:00Z",
       updated_at: "2026-01-01T00:00:00Z",
     };
@@ -96,7 +91,6 @@ describe("resourceCopy", () => {
       address: "10.0.2.20",
       port: 6379,
       env: "test",
-      is_deleted: 0,
       created_at: "2026-01-01T00:00:00Z",
       updated_at: "2026-01-01T00:00:00Z",
     };
@@ -116,7 +110,6 @@ describe("resourceCopy", () => {
       strategy: "roundrobin",
       env: "prod",
       status: "running",
-      is_deleted: 0,
       created_at: "2026-01-01T00:00:00Z",
       updated_at: "2026-01-01T00:00:00Z",
     };

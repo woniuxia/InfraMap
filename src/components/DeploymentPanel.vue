@@ -6,7 +6,7 @@ import {
   getResourceDeployContext,
   listDeployments,
   saveDeployment,
-  softDeleteDeployment,
+  deleteDeployment,
 } from "@/api/deployments";
 import { listHosts, saveHost } from "@/api/hosts";
 import { listIpAddresses, saveIpAddress } from "@/api/ip-addresses";
@@ -135,7 +135,6 @@ async function handleQuickCreateHost() {
         hostname: formatTempHostName(),
         env: normalizedEnv,
         status: "running",
-        is_deleted: 0,
         created_at: "",
         updated_at: "",
       });
@@ -148,7 +147,6 @@ async function handleQuickCreateHost() {
         env: normalizedEnv,
         is_vip: false,
         real_ips: undefined,
-        is_deleted: 0,
         created_at: "",
         updated_at: "",
       });
@@ -235,7 +233,7 @@ async function handleRemove(dep: Deployment) {
       cancelButtonText: "取消",
       type: "warning",
     });
-    await softDeleteDeployment(dep.id);
+    await deleteDeployment(dep.id);
     ElMessage.success("已删除");
     fetchDeployments();
   } catch {
@@ -353,3 +351,4 @@ onMounted(() => {
   font-size: 12px;
 }
 </style>
+

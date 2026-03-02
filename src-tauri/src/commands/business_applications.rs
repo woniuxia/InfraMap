@@ -3,7 +3,7 @@ use tauri::State;
 
 use crate::commands::taxonomy::{build_taxonomy_exists_filter, parse_filter_values, FIELD_OWNER};
 use crate::db::audit::insert_audit_log;
-use crate::db::crud::{count_query, soft_delete};
+use crate::db::crud::{count_query, delete_by_id};
 use crate::db::DbPool;
 use crate::error::{AppError, AppResult};
 use crate::models::application::Application;
@@ -39,10 +39,8 @@ fn row_to_business_application(row: &rusqlite::Row) -> rusqlite::Result<Business
         description: row.get(3)?,
         env: row.get(4)?,
         status: row.get(5)?,
-        is_deleted: row.get(6)?,
-        deleted_at: row.get(7)?,
-        created_at: row.get(8)?,
-        updated_at: row.get(9)?,
+        created_at: row.get(6)?,
+        updated_at: row.get(7)?,
     })
 }
 
@@ -63,20 +61,18 @@ fn row_to_application_with_business(row: &rusqlite::Row) -> rusqlite::Result<App
         business_application_name: row.get(11)?,
         status: row.get(12)?,
         description: row.get(13)?,
-        is_deleted: row.get(14)?,
-        deleted_at: row.get(15)?,
-        created_at: row.get(16)?,
-        updated_at: row.get(17)?,
+        created_at: row.get(14)?,
+        updated_at: row.get(15)?,
     })
 }
 
 const SELECT_BUSINESS_APPLICATION_COLUMNS: &str =
-    "id, name, code, description, env, status, is_deleted, deleted_at, created_at, updated_at";
+    "id, name, code, description, env, status, created_at, updated_at";
 const SELECT_APPLICATION_COLUMNS: &str = "applications.id, applications.name, applications.type, applications.address, \
      applications.port, applications.tech_stack, applications.deploy_mode, applications.env, applications.git_repo, \
      applications.owner, applications.business_application_id, \
      (SELECT ba.name FROM business_applications ba WHERE ba.id = applications.business_application_id AND ba.is_deleted = 0) AS business_application_name, \
-     applications.status, applications.description, applications.is_deleted, applications.deleted_at, applications.created_at, applications.updated_at";
+     applications.status, applications.description, applications.created_at, applications.updated_at";
 
 fn build_unassigned_applications_where_clause(
     params: &QueryParams,
@@ -788,8 +784,8 @@ pub fn save_business_application(
 }
 
 #[tauri::command]
-pub fn soft_delete_business_application(pool: State<DbPool>, id: String) -> AppResult<()> {
-    let command = "soft_delete_business_application";
+pub fn delete_business_application(pool: State<DbPool>, id: String) -> AppResult<()> {
+    let command = "delete_business_application";
     let conn = pool
         .get()
         .map_err(|e| AppError::db_unavailable(command, format!("Pool error: {}", e)))?;
@@ -806,7 +802,7 @@ pub fn soft_delete_business_application(pool: State<DbPool>, id: String) -> AppR
         .map_err(|e| AppError::from_db_error(command, "开启事务", e))?;
 
     let result: AppResult<()> = (|| {
-        soft_delete(&conn, "business_applications", &id)
+        delete_by_id(&conn, "business_applications", &id)
             .map_err(|e| AppError::from_db_error(command, "删除业务应用", e))?;
         conn.execute(
             "UPDATE applications
@@ -1017,8 +1013,6 @@ mod tests {
             description: None,
             env: Some("prod".into()),
             status: "active".into(),
-            is_deleted: 0,
-            deleted_at: None,
             created_at: "".into(),
             updated_at: "".into(),
         }

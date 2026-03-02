@@ -1,11 +1,11 @@
 use tauri::State;
 
 use crate::commands::taxonomy::{
-    build_taxonomy_exists_filter, parse_filter_values, parse_json_string_array,
-    save_resource_terms, soft_delete_resource_terms, FIELD_TAGS,
+    build_taxonomy_exists_filter, delete_resource_terms, parse_filter_values,
+    parse_json_string_array, save_resource_terms, FIELD_TAGS,
 };
 use crate::db::audit::insert_audit_log;
-use crate::db::crud::{build_where_clause, count_query, soft_delete};
+use crate::db::crud::{build_where_clause, count_query, delete_by_id};
 use crate::db::transaction::with_transaction;
 use crate::db::DbPool;
 use crate::error::{AppError, AppErrorCode, AppResult};
@@ -42,14 +42,13 @@ fn row_to_ip_address(row: &rusqlite::Row) -> rusqlite::Result<IpAddress> {
         real_ips: row.get(4)?,
         tags: row.get(5)?,
         description: row.get(6)?,
-        is_deleted: row.get(7)?,
-        deleted_at: row.get(8)?,
-        created_at: row.get(9)?,
-        updated_at: row.get(10)?,
+        created_at: row.get(7)?,
+        updated_at: row.get(8)?,
     })
 }
 
-const SELECT_COLUMNS: &str = "id, ip_address, env, is_vip, real_ips, tags, description, is_deleted, deleted_at, created_at, updated_at";
+const SELECT_COLUMNS: &str =
+    "id, ip_address, env, is_vip, real_ips, tags, description, created_at, updated_at";
 
 fn ipv4_to_u32(ip: &str) -> Result<u32, String> {
     let parsed = ip
@@ -204,8 +203,6 @@ fn batch_create_ip_addresses_inner(
             real_ips: None,
             tags: params.tags.clone(),
             description: params.description.clone(),
-            is_deleted: 0,
-            deleted_at: None,
             created_at: "".into(),
             updated_at: "".into(),
         };
@@ -326,7 +323,7 @@ pub fn batch_create_ip_addresses(
     batch_create_ip_addresses_inner(command, &conn, params)
 }
 
-fn soft_delete_ip_address_inner(
+fn delete_ip_address_inner(
     command: &str,
     conn: &rusqlite::Connection,
     id: String,
@@ -355,24 +352,24 @@ fn soft_delete_ip_address_inner(
     }
 
     with_transaction(conn, command, |conn| {
-        soft_delete(conn, "ip_addresses", &id)
+        delete_by_id(conn, "ip_addresses", &id)
             .map_err(|e| AppError::from_db_error(command, "删除IP资源", e))?;
         insert_audit_log(conn, "delete", "ip_address", &id, name.as_deref(), None)
             .map_err(|e| AppError::from_db_error(command, "写入审计日志", e))?;
         let now = chrono::Utc::now().to_rfc3339();
-        soft_delete_resource_terms(conn, "ip_address", &id, &now)
+        delete_resource_terms(conn, "ip_address", &id, &now)
             .map_err(|e| AppError::from_db_error(command, "删除标签绑定", e))?;
         Ok(())
     })
 }
 
 #[tauri::command]
-pub fn soft_delete_ip_address(pool: State<DbPool>, id: String) -> AppResult<()> {
-    let command = "soft_delete_ip_address";
+pub fn delete_ip_address(pool: State<DbPool>, id: String) -> AppResult<()> {
+    let command = "delete_ip_address";
     let conn = pool
         .get()
         .map_err(|e| AppError::db_unavailable(command, format!("Pool error: {}", e)))?;
-    soft_delete_ip_address_inner(command, &conn, id)
+    delete_ip_address_inner(command, &conn, id)
 }
 
 #[cfg(test)]
@@ -392,8 +389,6 @@ mod tests {
             real_ips: None,
             tags: None,
             description: None,
-            is_deleted: 0,
-            deleted_at: None,
             created_at: "".into(),
             updated_at: "".into(),
         }
@@ -422,7 +417,7 @@ mod tests {
     }
 
     #[test]
-    fn soft_delete_ip_address_should_block_when_bound_to_host() {
+    fn delete_ip_address_should_block_when_bound_to_host() {
         let conn = setup_test_db();
         insert_test_host(&conn, "h1", "server-1", "10.0.0.2");
         let ip_id: String = conn
@@ -433,11 +428,11 @@ mod tests {
             )
             .expect("query ip id");
 
-        let err = super::soft_delete_ip_address_inner("test", &conn, "hb-unknown".to_string())
+        let err = super::delete_ip_address_inner("test", &conn, "hb-unknown".to_string())
             .expect_err("deleting unknown id should fail first");
         assert_eq!(err.code, AppErrorCode::NotFound);
 
-        let err = super::soft_delete_ip_address_inner("test", &conn, ip_id)
+        let err = super::delete_ip_address_inner("test", &conn, ip_id)
             .expect_err("bound ip should not be deleted");
         assert_eq!(err.code, AppErrorCode::DependencyConflict);
     }

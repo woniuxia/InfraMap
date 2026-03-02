@@ -21,7 +21,6 @@ function createHost(overrides: Partial<Host> = {}): Host {
     hostname: "web-prod-01",
     env: "prod",
     status: "running",
-    is_deleted: 0,
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
     ...overrides,

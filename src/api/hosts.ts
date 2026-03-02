@@ -13,6 +13,7 @@ export function saveHost(data: Partial<Host>): Promise<void> {
   return tauriInvoke<void>('save_host', { data })
 }
 
-export function softDeleteHost(id: string): Promise<void> {
-  return tauriInvoke<void>('soft_delete_host', { id })
+export function deleteHost(id: string): Promise<void> {
+  return tauriInvoke<void>('delete_host', { id })
 }
+

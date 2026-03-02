@@ -9,7 +9,7 @@ import {
   listServicesByBusinessApplication,
   replaceServicesByBusinessApplication,
   saveBusinessApplication,
-  softDeleteBusinessApplication,
+  deleteBusinessApplication,
 } from "@/api/business-applications";
 import {
   listBusinessApplicationOwnerTerms,
@@ -31,7 +31,7 @@ const {
   handleDelete,
 } = useResourceList<BusinessApplication>({
   listFn: listBusinessApplications,
-  deleteFn: softDeleteBusinessApplication,
+  deleteFn: deleteBusinessApplication,
   entityLabel: "业务应用",
 });
 
@@ -288,7 +288,6 @@ async function openAdd() {
     id: "",
     status: "active",
     env: "prod",
-    is_deleted: 0,
     created_at: "",
     updated_at: "",
   };
@@ -341,7 +340,6 @@ async function handleSave() {
   const { owners: _ignoredOwners, ...businessDraft } = editingBusiness.value;
   const payload: Partial<BusinessApplication> = {
     id: "",
-    is_deleted: 0,
     created_at: "",
     updated_at: "",
     ...businessDraft,
@@ -661,3 +659,4 @@ onMounted(async () => {
   gap: 4px;
 }
 </style>
+

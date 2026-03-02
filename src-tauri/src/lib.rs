@@ -26,6 +26,16 @@ pub fn run() {
             let pool =
                 init_db_pool(db_path_str).expect("Failed to initialize database connection pool");
 
+            let backup_dir = backup::get_backup_dir(&storage_paths.active_root_path)
+                .expect("Failed to resolve backup directory");
+            let backup_name = format!(
+                "backup_pre_migration_{}.db",
+                chrono::Utc::now().format("%Y%m%d_%H%M%S")
+            );
+            let backup_path = backup_dir.join(backup_name);
+            backup::perform_backup(&pool, &backup_path)
+                .expect("Failed to create pre-migration backup");
+
             run_migrations(&pool).expect("Database migration failed");
 
             app.manage(pool.clone());
@@ -41,23 +51,23 @@ pub fn run() {
             commands::hosts::list_hosts,
             commands::hosts::get_host,
             commands::hosts::save_host,
-            commands::hosts::soft_delete_host,
+            commands::hosts::delete_host,
             commands::ip_addresses::list_ip_addresses,
             commands::ip_addresses::get_ip_address,
             commands::ip_addresses::save_ip_address,
             commands::ip_addresses::batch_create_ip_addresses,
-            commands::ip_addresses::soft_delete_ip_address,
+            commands::ip_addresses::delete_ip_address,
             commands::host_ip_bindings::list_host_ip_bindings,
             commands::host_ip_bindings::bind_host_ip,
             commands::host_ip_bindings::unbind_host_ip,
             commands::applications::list_applications,
             commands::applications::get_application,
             commands::applications::save_application,
-            commands::applications::soft_delete_application,
+            commands::applications::delete_application,
             commands::business_applications::list_business_applications,
             commands::business_applications::get_business_application,
             commands::business_applications::save_business_application,
-            commands::business_applications::soft_delete_business_application,
+            commands::business_applications::delete_business_application,
             commands::business_applications::list_unassigned_application_services,
             commands::business_applications::attach_services_to_business_application,
             commands::business_applications::detach_service_from_business_application,
@@ -66,15 +76,15 @@ pub fn run() {
             commands::middlewares::list_middlewares,
             commands::middlewares::get_middleware,
             commands::middlewares::save_middleware,
-            commands::middlewares::soft_delete_middleware,
+            commands::middlewares::delete_middleware,
             commands::nginx_configs::list_nginx_configs,
             commands::nginx_configs::get_nginx_config,
             commands::nginx_configs::save_nginx_config,
-            commands::nginx_configs::soft_delete_nginx_config,
+            commands::nginx_configs::delete_nginx_config,
             commands::deployments::list_deployments,
             commands::deployments::get_resource_deploy_context,
             commands::deployments::save_deployment,
-            commands::deployments::soft_delete_deployment,
+            commands::deployments::delete_deployment,
             commands::dependencies::list_call_relations,
             commands::dependencies::replace_resource_call_relations,
             commands::dashboard::get_dashboard_overview,

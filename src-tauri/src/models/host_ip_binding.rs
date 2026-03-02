@@ -8,9 +8,6 @@ pub struct HostIpBinding {
     pub host_id: String,
     pub ip_id: String,
     #[serde(default)]
-    pub is_deleted: i32,
-    pub deleted_at: Option<String>,
-    #[serde(default)]
     pub created_at: String,
     #[serde(default)]
     pub updated_at: String,

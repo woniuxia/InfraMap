@@ -17,8 +17,6 @@ function makeRelation(input: Partial<CallRelation>): CallRelation {
     direction: "upstream",
     relation_type: "http_call",
     description: undefined,
-    is_deleted: 0,
-    deleted_at: undefined,
     created_at: "",
     updated_at: "",
     ...input,

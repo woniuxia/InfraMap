@@ -3,7 +3,7 @@ import { ElMessage } from "element-plus";
 import type { FormInstance, FormRules } from "element-plus";
 import type { Host, IpAddress } from "@/types";
 import type { SearchFieldConfig, SearchToolbarQueryPayload } from "@/types/searchToolbar";
-import { listHosts, saveHost, softDeleteHost } from "@/api/hosts";
+import { listHosts, saveHost, deleteHost } from "@/api/hosts";
 import { listIpAddresses, saveIpAddress } from "@/api/ip-addresses";
 import { listHostTagTerms } from "@/api/taxonomy";
 import { bindHostIp, listHostIpBindings, unbindHostIp } from "@/api/host-ip-bindings";
@@ -50,7 +50,7 @@ export function useHostViewModel() {
     handleDelete,
   } = useResourceList<Host>({
     listFn: listHosts,
-    deleteFn: softDeleteHost,
+    deleteFn: deleteHost,
     entityLabel: "服务器",
   });
 
@@ -604,3 +604,4 @@ export function useHostViewModel() {
 }
 
 export type HostViewModel = ReturnType<typeof useHostViewModel>;
+

@@ -412,8 +412,6 @@ mod tests {
             status: "running".into(),
             tags: None,
             description: None,
-            is_deleted: 0,
-            deleted_at: None,
             created_at: "2024-01-01T00:00:00Z".into(),
             updated_at: "2024-01-01T00:00:00Z".into(),
         }
@@ -487,8 +485,6 @@ mod tests {
             business_application_name: None,
             status: "running".into(),
             description: None,
-            is_deleted: 0,
-            deleted_at: None,
             created_at: "2024-01-01T00:00:00Z".into(),
             updated_at: "2024-01-01T00:00:00Z".into(),
         }
@@ -522,8 +518,6 @@ mod tests {
             description: None,
             env: Some("prod".into()),
             status: "active".into(),
-            is_deleted: 0,
-            deleted_at: None,
             created_at: "2024-01-01T00:00:00Z".into(),
             updated_at: "2024-01-01T00:00:00Z".into(),
         }
@@ -553,8 +547,6 @@ mod tests {
             version: None,
             env: "prod".into(),
             description: None,
-            is_deleted: 0,
-            deleted_at: None,
             created_at: "2024-01-01T00:00:00Z".into(),
             updated_at: "2024-01-01T00:00:00Z".into(),
         }
@@ -584,8 +576,6 @@ mod tests {
             env: "prod".into(),
             status: "running".into(),
             description: None,
-            is_deleted: 0,
-            deleted_at: None,
             created_at: "2024-01-01T00:00:00Z".into(),
             updated_at: "2024-01-01T00:00:00Z".into(),
         }
@@ -618,8 +608,6 @@ mod tests {
             resource_type: "application".into(),
             host_id: "h1".into(),
             port: Some(8080),
-            is_deleted: 0,
-            deleted_at: None,
             created_at: "2024-01-01T00:00:00Z".into(),
             updated_at: "2024-01-01T00:00:00Z".into(),
         }
@@ -647,8 +635,6 @@ mod tests {
             target_type: "middleware".into(),
             relation_type: "tcp".into(),
             description: None,
-            is_deleted: 0,
-            deleted_at: None,
             created_at: "2024-01-01T00:00:00Z".into(),
             updated_at: "2024-01-01T00:00:00Z".into(),
         }
@@ -689,8 +675,6 @@ mod tests {
             real_ips: None,
             tags: None,
             description: None,
-            is_deleted: 0,
-            deleted_at: None,
             created_at: "2024-01-01T00:00:00Z".into(),
             updated_at: "2024-01-01T00:00:00Z".into(),
         }

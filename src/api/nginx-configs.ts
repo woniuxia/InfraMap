@@ -13,6 +13,7 @@ export function saveNginxConfig(data: Partial<NginxConfig>): Promise<string> {
   return tauriInvoke<string>('save_nginx_config', { data })
 }
 
-export function softDeleteNginxConfig(id: string): Promise<void> {
-  return tauriInvoke<void>('soft_delete_nginx_config', { id })
+export function deleteNginxConfig(id: string): Promise<void> {
+  return tauriInvoke<void>('delete_nginx_config', { id })
 }
+

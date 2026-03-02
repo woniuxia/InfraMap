@@ -1,11 +1,11 @@
 use tauri::State;
 
 use crate::commands::taxonomy::{
-    build_taxonomy_exists_filter, parse_filter_values, parse_json_string_array,
-    save_resource_terms, soft_delete_resource_terms, FIELD_TAGS,
+    build_taxonomy_exists_filter, delete_resource_terms, parse_filter_values,
+    parse_json_string_array, save_resource_terms, FIELD_TAGS,
 };
 use crate::db::audit::insert_audit_log;
-use crate::db::crud::soft_delete;
+use crate::db::crud::delete_by_id;
 use crate::db::DbPool;
 use crate::error::{AppError, AppResult};
 use crate::models::common::{PagedResult, QueryParams};
@@ -94,10 +94,8 @@ fn row_to_host(row: &rusqlite::Row) -> rusqlite::Result<Host> {
         status: row.get(11)?,
         tags: row.get(12)?,
         description: row.get(13)?,
-        is_deleted: row.get(14)?,
-        deleted_at: row.get(15)?,
-        created_at: row.get(16)?,
-        updated_at: row.get(17)?,
+        created_at: row.get(14)?,
+        updated_at: row.get(15)?,
     })
 }
 
@@ -110,7 +108,7 @@ const SELECT_COLUMNS: &str = "h.id, h.hostname,
      ), '') AS ip_display,
      h.env, h.os_type, h.cpu_model, h.cpu_cores, h.cpu_threads, h.cpu_freq,
      h.ram_gb, h.disk_gb, h.status, h.tags, h.description,
-     h.is_deleted, h.deleted_at, h.created_at, h.updated_at";
+     h.created_at, h.updated_at";
 
 #[tauri::command]
 pub fn list_hosts(pool: State<DbPool>, params: QueryParams) -> AppResult<PagedResult<Host>> {
@@ -325,13 +323,7 @@ mod tests {
     }
 }
 
-#[tauri::command]
-pub fn soft_delete_host(pool: State<DbPool>, id: String) -> AppResult<()> {
-    let command = "soft_delete_host";
-    let conn = pool
-        .get()
-        .map_err(|e| AppError::db_unavailable(command, format!("Pool error: {}", e)))?;
-
+fn delete_host_inner(command: &str, conn: &rusqlite::Connection, id: String) -> AppResult<()> {
     let name: Option<String> = conn
         .query_row(
             "SELECT hostname FROM hosts WHERE id = ?1 AND is_deleted = 0",
@@ -343,11 +335,17 @@ pub fn soft_delete_host(pool: State<DbPool>, id: String) -> AppResult<()> {
     conn.execute_batch("BEGIN TRANSACTION;")
         .map_err(|e| AppError::from_db_error(command, "开启事务", e))?;
 
-    match soft_delete(&conn, "hosts", &id) {
+    conn.execute(
+        "DELETE FROM host_ip_bindings WHERE host_id = ?1 AND is_deleted = 0",
+        rusqlite::params![id],
+    )
+    .map_err(|e| AppError::from_db_error(command, "删除主机IP绑定", e))?;
+
+    match delete_by_id(&conn, "hosts", &id) {
         Ok(()) => match insert_audit_log(&conn, "delete", "host", &id, name.as_deref(), None) {
             Ok(()) => {
                 let now = chrono::Utc::now().to_rfc3339();
-                soft_delete_resource_terms(&conn, "host", &id, &now)
+                delete_resource_terms(&conn, "host", &id, &now)
                     .map_err(|e| AppError::from_db_error(command, "删除标签绑定", e))?;
                 conn.execute_batch("COMMIT;")
                     .map_err(|e| AppError::from_db_error(command, "提交事务", e))?;
@@ -362,5 +360,44 @@ pub fn soft_delete_host(pool: State<DbPool>, id: String) -> AppResult<()> {
             let _ = conn.execute_batch("ROLLBACK;");
             Err(AppError::from_db_error(command, "删除主机", e))
         }
+    }
+}
+
+#[tauri::command]
+pub fn delete_host(pool: State<DbPool>, id: String) -> AppResult<()> {
+    let command = "delete_host";
+    let conn = pool
+        .get()
+        .map_err(|e| AppError::db_unavailable(command, format!("Pool error: {}", e)))?;
+    delete_host_inner(command, &conn, id)
+}
+
+#[cfg(test)]
+mod delete_tests {
+    use super::delete_host_inner;
+    use crate::test_helpers::{insert_test_host, setup_test_db};
+
+    #[test]
+    fn delete_host_should_cleanup_ip_bindings() {
+        let conn = setup_test_db();
+        insert_test_host(&conn, "h1", "server-1", "10.0.0.2");
+
+        delete_host_inner("test", &conn, "h1".to_string()).expect("delete host");
+
+        let host_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM hosts WHERE id = 'h1'", [], |row| {
+                row.get(0)
+            })
+            .expect("query host count");
+        assert_eq!(host_count, 0);
+
+        let binding_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM host_ip_bindings WHERE host_id = 'h1'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("query binding count");
+        assert_eq!(binding_count, 0);
     }
 }

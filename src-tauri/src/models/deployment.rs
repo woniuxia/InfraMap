@@ -9,9 +9,6 @@ pub struct Deployment {
     pub host_id: String,
     pub port: Option<i64>,
     #[serde(default)]
-    pub is_deleted: i32,
-    pub deleted_at: Option<String>,
-    #[serde(default)]
     pub created_at: String,
     #[serde(default)]
     pub updated_at: String,

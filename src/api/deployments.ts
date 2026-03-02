@@ -15,8 +15,8 @@ export function saveDeployment(data: Partial<Deployment>): Promise<void> {
   return tauriInvoke<void>('save_deployment', { data })
 }
 
-export function softDeleteDeployment(id: string): Promise<void> {
-  return tauriInvoke<void>('soft_delete_deployment', { id })
+export function deleteDeployment(id: string): Promise<void> {
+  return tauriInvoke<void>('delete_deployment', { id })
 }
 
 export function getResourceDeployContext(
@@ -28,3 +28,4 @@ export function getResourceDeployContext(
     resourceId,
   })
 }
+

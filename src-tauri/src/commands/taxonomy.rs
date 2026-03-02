@@ -271,7 +271,7 @@ pub fn rebuild_taxonomy_term_stats(
     Ok(())
 }
 
-pub fn soft_delete_resource_terms(
+pub fn delete_resource_terms(
     conn: &rusqlite::Connection,
     resource_type: &str,
     resource_id: &str,
@@ -293,12 +293,11 @@ pub fn soft_delete_resource_terms(
     }
 
     conn.execute(
-        "UPDATE taxonomy_bindings
-         SET is_deleted = 1, deleted_at = ?1, updated_at = ?1
-         WHERE resource_type = ?2
-           AND resource_id = ?3
+        "DELETE FROM taxonomy_bindings
+         WHERE resource_type = ?1
+           AND resource_id = ?2
            AND is_deleted = 0",
-        rusqlite::params![now, resource_type, resource_id],
+        rusqlite::params![resource_type, resource_id],
     )?;
 
     refresh_term_stats_for_term_ids(conn, &affected_term_ids, now)?;
@@ -334,17 +333,15 @@ pub fn save_resource_terms(
         affected_term_ids.push(row?);
     }
 
-    // Soft-delete old bindings for this (resource_type, resource_id, field_key) via JOIN subquery
     conn.execute(
-        "UPDATE taxonomy_bindings
-         SET is_deleted = 1, deleted_at = ?1, updated_at = ?1
-         WHERE resource_type = ?2
-           AND resource_id = ?3
+        "DELETE FROM taxonomy_bindings
+         WHERE resource_type = ?1
+           AND resource_id = ?2
            AND is_deleted = 0
            AND term_id IN (
-               SELECT tt.id FROM taxonomy_terms tt WHERE tt.field_key = ?4 AND tt.is_deleted = 0
+               SELECT tt.id FROM taxonomy_terms tt WHERE tt.field_key = ?3 AND tt.is_deleted = 0
            )",
-        rusqlite::params![now, resource_type, resource_id, field_key],
+        rusqlite::params![resource_type, resource_id, field_key],
     )?;
 
     for (display, normalized_value) in normalized_values {

@@ -13,6 +13,7 @@ export function saveMiddleware(data: Partial<Middleware>): Promise<string> {
   return tauriInvoke<string>('save_middleware', { data })
 }
 
-export function softDeleteMiddleware(id: string): Promise<void> {
-  return tauriInvoke<void>('soft_delete_middleware', { id })
+export function deleteMiddleware(id: string): Promise<void> {
+  return tauriInvoke<void>('delete_middleware', { id })
 }
+

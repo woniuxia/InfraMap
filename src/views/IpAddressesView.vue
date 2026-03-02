@@ -7,7 +7,7 @@ import {
   batchCreateIpAddresses,
   listIpAddresses,
   saveIpAddress,
-  softDeleteIpAddress,
+  deleteIpAddress,
 } from "@/api/ip-addresses";
 import { listIpTagTerms } from "@/api/taxonomy";
 import type { IpAddress } from "@/types";
@@ -28,7 +28,7 @@ const {
   handleDelete,
 } = useResourceList<IpAddress>({
   listFn: listIpAddresses,
-  deleteFn: softDeleteIpAddress,
+  deleteFn: deleteIpAddress,
   entityLabel: "IP资源",
 });
 
@@ -261,7 +261,6 @@ async function handleSave() {
     real_ips: editingIp.value.is_vip ? JSON.stringify(normalizedRealIps) : undefined,
     tags: tagsToJson(tagList.value),
     description: editingIp.value.description?.trim() || undefined,
-    is_deleted: 0,
     created_at: editingIp.value.created_at ?? "",
     updated_at: editingIp.value.updated_at ?? "",
   };
@@ -582,3 +581,4 @@ onMounted(() => {
   align-items: center;
 }
 </style>
+

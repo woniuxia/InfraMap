@@ -7,7 +7,7 @@ import {
   listServicesByBusinessApplication,
   replaceServicesByBusinessApplication,
   saveBusinessApplication,
-  softDeleteBusinessApplication,
+  deleteBusinessApplication,
 } from "@/api/business-applications";
 import { listApplications } from "@/api/applications";
 import {
@@ -38,7 +38,6 @@ vi.mock("@/api/business-applications", () => ({
         owners: ["alice", "bob"],
         env: "prod",
         status: "active",
-        is_deleted: 0,
         created_at: "",
         updated_at: "",
       },
@@ -48,7 +47,7 @@ vi.mock("@/api/business-applications", () => ({
     page_size: 20,
   })),
   saveBusinessApplication: vi.fn(async () => "ba-1"),
-  softDeleteBusinessApplication: vi.fn(async () => undefined),
+  deleteBusinessApplication: vi.fn(async () => undefined),
   listServicesByBusinessApplication: vi.fn(async () => ({
     frontend: [
       {
@@ -289,7 +288,8 @@ describe("BusinessApplicationsView", () => {
     expect(replaceServicesByBusinessApplication).toHaveBeenCalledWith("ba-1", []);
     expect(listBusinessApplications).toHaveBeenCalled();
     expect(listServicesByBusinessApplication).toHaveBeenCalledWith("ba-1");
-    expect(softDeleteBusinessApplication).not.toHaveBeenCalled();
+    expect(deleteBusinessApplication).not.toHaveBeenCalled();
     expect(messageSuccess).toHaveBeenCalled();
   });
 });
+

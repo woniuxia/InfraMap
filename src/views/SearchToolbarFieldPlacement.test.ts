@@ -12,7 +12,7 @@ vi.mock("@/api/applications", () => ({
     page_size: 20,
   })),
   saveApplication: vi.fn(async () => "app-1"),
-  softDeleteApplication: vi.fn(async () => undefined),
+  deleteApplication: vi.fn(async () => undefined),
 }));
 
 vi.mock("@/api/taxonomy", () => ({
@@ -28,7 +28,7 @@ vi.mock("@/api/nginx-configs", () => ({
     page_size: 20,
   })),
   saveNginxConfig: vi.fn(async () => "nginx-1"),
-  softDeleteNginxConfig: vi.fn(async () => undefined),
+  deleteNginxConfig: vi.fn(async () => undefined),
 }));
 
 const SearchToolbarStub = defineComponent({
@@ -131,3 +131,4 @@ describe("search toolbar field placement", () => {
     expect(strategyField?.section ?? "basic").toBe("basic");
   });
 });
+

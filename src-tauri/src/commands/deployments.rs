@@ -2,7 +2,7 @@ use std::net::Ipv4Addr;
 use tauri::State;
 
 use crate::db::audit::insert_audit_log;
-use crate::db::crud::{build_where_clause, count_query, soft_delete};
+use crate::db::crud::{build_where_clause, count_query, delete_by_id};
 use crate::db::transaction::with_transaction;
 use crate::db::DbPool;
 use crate::error::{AppError, AppResult};
@@ -30,15 +30,13 @@ fn row_to_deployment(row: &rusqlite::Row) -> rusqlite::Result<Deployment> {
         resource_type: row.get(2)?,
         host_id: row.get(3)?,
         port: row.get(4)?,
-        is_deleted: row.get(5)?,
-        deleted_at: row.get(6)?,
-        created_at: row.get(7)?,
-        updated_at: row.get(8)?,
+        created_at: row.get(5)?,
+        updated_at: row.get(6)?,
     })
 }
 
-const SELECT_COLUMNS: &str = "id, resource_id, resource_type, host_id, port, \
-     is_deleted, deleted_at, created_at, updated_at";
+const SELECT_COLUMNS: &str =
+    "id, resource_id, resource_type, host_id, port, created_at, updated_at";
 
 fn normalize_ipv4(candidate: &str) -> Option<String> {
     candidate
@@ -401,14 +399,14 @@ pub fn save_deployment(pool: State<DbPool>, data: Deployment) -> AppResult<()> {
 }
 
 #[tauri::command]
-pub fn soft_delete_deployment(pool: State<DbPool>, id: String) -> AppResult<()> {
-    let command = "soft_delete_deployment";
+pub fn delete_deployment(pool: State<DbPool>, id: String) -> AppResult<()> {
+    let command = "delete_deployment";
     let conn = pool
         .get()
         .map_err(|e| AppError::db_unavailable(command, format!("Pool error: {}", e)))?;
 
     with_transaction(&conn, command, |conn| {
-        soft_delete(conn, "deployments", &id)
+        delete_by_id(conn, "deployments", &id)
             .map_err(|e| AppError::from_db_error(command, "删除部署关系", e))?;
         insert_audit_log(conn, "delete", "deployment", &id, None, None)
             .map_err(|e| AppError::from_db_error(command, "写入审计日志", e))?;
@@ -434,8 +432,6 @@ mod tests {
             resource_type: resource_type.into(),
             host_id: host_id.into(),
             port: Some(8080),
-            is_deleted: 0,
-            deleted_at: None,
             created_at: "".into(),
             updated_at: "".into(),
         }

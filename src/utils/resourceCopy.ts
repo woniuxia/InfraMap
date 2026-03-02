@@ -23,10 +23,8 @@ export function buildCopyName(base: string, date: Date = new Date()): string {
 
 export function stripSystemFields<T extends object>(row: T): Partial<T> {
   const source = row as Record<string, unknown>;
-  const { id, is_deleted, deleted_at, created_at, updated_at, ...rest } = source;
+  const { id, created_at, updated_at, ...rest } = source;
   void id;
-  void is_deleted;
-  void deleted_at;
   void created_at;
   void updated_at;
   return rest as Partial<T>;

@@ -23,8 +23,8 @@ export function saveBusinessApplication(data: Partial<BusinessApplication>): Pro
   return tauriInvoke<string>("save_business_application", { data });
 }
 
-export function softDeleteBusinessApplication(id: string): Promise<void> {
-  return tauriInvoke<void>("soft_delete_business_application", { id });
+export function deleteBusinessApplication(id: string): Promise<void> {
+  return tauriInvoke<void>("delete_business_application", { id });
 }
 
 export function listUnassignedApplicationServices(
@@ -70,3 +70,4 @@ export function listServicesByBusinessApplication(
     businessApplicationId,
   });
 }
+
