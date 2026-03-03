@@ -8,6 +8,8 @@ use crate::validation::validate_enum;
 pub const FIELD_TAGS: &str = "tags";
 pub const FIELD_OWNER: &str = "owner";
 pub const FIELD_TECH_STACK: &str = "tech_stack";
+pub const FIELD_OS_TYPE: &str = "os_type";
+pub const FIELD_CPU_MODEL: &str = "cpu_model";
 pub const SORT_ALPHA: &str = "alpha";
 pub const SORT_RECENT: &str = "recent";
 pub const RECENCY_SCOPE_GLOBAL: &str = "global";
@@ -24,10 +26,18 @@ struct TaxonomyFieldSpec {
     field_key: &'static str,
 }
 
-const TAXONOMY_FIELD_SPECS: [TaxonomyFieldSpec; 5] = [
+const TAXONOMY_FIELD_SPECS: [TaxonomyFieldSpec; 7] = [
     TaxonomyFieldSpec {
         resource_type: "host",
         field_key: FIELD_TAGS,
+    },
+    TaxonomyFieldSpec {
+        resource_type: "host",
+        field_key: FIELD_OS_TYPE,
+    },
+    TaxonomyFieldSpec {
+        resource_type: "host",
+        field_key: FIELD_CPU_MODEL,
     },
     TaxonomyFieldSpec {
         resource_type: "ip_address",
@@ -702,8 +712,8 @@ mod tests {
         is_taxonomy_schema_error, list_resource_terms_by_field, list_terms_by_scope,
         list_terms_by_scope_with_options, list_terms_with_fallback, normalize_terms,
         parse_json_string_array, parse_tech_stack_terms, save_resource_terms,
-        validate_resource_field, FIELD_OWNER, FIELD_TAGS, FIELD_TECH_STACK, RECENCY_SCOPE_GLOBAL,
-        RECENCY_SCOPE_RESOURCE_TYPE, SORT_RECENT,
+        validate_resource_field, FIELD_CPU_MODEL, FIELD_OS_TYPE, FIELD_OWNER, FIELD_TAGS,
+        FIELD_TECH_STACK, RECENCY_SCOPE_GLOBAL, RECENCY_SCOPE_RESOURCE_TYPE, SORT_RECENT,
     };
     use crate::test_helpers::setup_test_db;
 
@@ -768,6 +778,14 @@ mod tests {
     fn validate_resource_field_should_allow_business_application_owner_only() {
         assert!(validate_resource_field("test", "business_application", FIELD_OWNER).is_ok());
         assert!(validate_resource_field("test", "business_application", FIELD_TECH_STACK).is_err());
+    }
+
+    #[test]
+    fn validate_resource_field_should_allow_host_os_and_cpu() {
+        assert!(validate_resource_field("test", "host", FIELD_TAGS).is_ok());
+        assert!(validate_resource_field("test", "host", FIELD_OS_TYPE).is_ok());
+        assert!(validate_resource_field("test", "host", FIELD_CPU_MODEL).is_ok());
+        assert!(validate_resource_field("test", "host", FIELD_OWNER).is_err());
     }
 
     #[test]

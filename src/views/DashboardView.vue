@@ -11,9 +11,9 @@ import {
   Monitor,
   Refresh,
   SetUp,
-  Warning,
   Menu,
   Share,
+  Upload,
 } from "@element-plus/icons-vue";
 
 const router = useRouter();
@@ -35,6 +35,8 @@ interface QuickAction {
   desc: string;
   routeName?: string;
   icon: Component;
+  priority: "primary" | "secondary";
+  badge?: string;
 }
 
 const totalAssets = computed(() => {
@@ -115,31 +117,45 @@ const kpiCards = computed<KpiCard[]>(() => {
 const quickActions = computed<QuickAction[]>(() => [
   {
     key: "hosts",
-    title: "资产服务器",
-    desc: "查看并维护主机资产",
+    title: "服务器",
+    desc: "进入主机资产列表",
     routeName: "Hosts",
     icon: Monitor,
+    priority: "primary",
+    badge: "常用",
   },
   {
     key: "applications",
     title: "应用服务",
-    desc: "查看应用及状态",
+    desc: "进入应用服务列表",
     routeName: "Applications",
     icon: Menu,
+    priority: "primary",
+    badge: "常用",
   },
   {
     key: "middlewares",
     title: "中间件",
-    desc: "查看中间件实例",
+    desc: "进入中间件列表",
     routeName: "Middlewares",
     icon: Connection,
+    priority: "primary",
   },
   {
     key: "nginx",
     title: "负载均衡",
-    desc: "查看网关配置",
+    desc: "进入负载均衡列表",
     routeName: "NginxConfigs",
     icon: SetUp,
+    priority: "primary",
+  },
+  {
+    key: "import-workbench",
+    title: "批量录入",
+    desc: "打开导入工作台",
+    routeName: "ImportWorkbench",
+    icon: Upload,
+    priority: "primary",
   },
   {
     key: "topology",
@@ -147,14 +163,24 @@ const quickActions = computed<QuickAction[]>(() => [
     desc: "进入链路拓扑图",
     routeName: "Topology",
     icon: Share,
+    priority: "secondary",
   },
   {
     key: "refresh",
-    title: "刷新统计",
-    desc: "重新拉取首页数据",
+    title: "刷新首页",
+    desc: "重新拉取最新统计",
     icon: Refresh,
+    priority: "secondary",
   },
 ]);
+
+const primaryQuickActions = computed(() =>
+  quickActions.value.filter((action) => action.priority === "primary"),
+);
+
+const secondaryQuickActions = computed(() =>
+  quickActions.value.filter((action) => action.priority === "secondary"),
+);
 
 function formatInt(value: number) {
   return value.toLocaleString("zh-CN");
@@ -272,11 +298,11 @@ onMounted(loadDashboardOverview);
 
 <template>
   <div class="dashboard-view" v-loading="loading">
-    <el-card class="hero-card">
+    <el-card class="hero-card" data-testid="quick-hub">
       <div class="hero-header">
         <div>
-          <h3 class="hero-title">资产健康驾驶舱</h3>
-          <p class="hero-subtitle">聚焦资产规模、健康状态和高风险入口</p>
+          <h3 class="hero-title">快捷操作中心</h3>
+          <p class="hero-subtitle">优先进入常用页面，快速完成资产录入与维护</p>
         </div>
         <div class="hero-actions">
           <el-tag v-if="usedFallback" type="warning" effect="plain">统计回退模式</el-tag>
@@ -287,37 +313,57 @@ onMounted(loadDashboardOverview);
         </div>
       </div>
 
-      <div class="hero-metrics">
-        <div class="hero-metric">
-          <div class="metric-label">总资产</div>
-          <div class="metric-value">{{ formatInt(totalAssets) }}</div>
-          <div class="metric-sub">主机 + 应用 + 中间件 + 负载均衡</div>
-        </div>
-        <div class="hero-metric">
-          <div class="metric-label">健康评分</div>
-          <div class="metric-value">{{ overview ? formatInt(Math.round(overview.health.score)) : "0" }}</div>
-          <div class="metric-sub">异常、未部署、孤立关系综合计算</div>
-        </div>
-        <div class="hero-metric">
-          <div class="metric-label">异常率</div>
-          <div class="metric-value">
-            {{ overview ? formatPercent(overview.health.abnormal_rate) : "0%" }}
+      <div class="hero-primary-actions" data-testid="primary-quick-actions">
+        <button
+          v-for="action in primaryQuickActions"
+          :key="action.key"
+          type="button"
+          class="quick-action-button quick-action-button-primary"
+          :data-testid="`quick-action-${action.key}`"
+          @click="onQuickAction(action)"
+        >
+          <el-icon :size="20">
+            <component :is="action.icon" />
+          </el-icon>
+          <div class="quick-action-text">
+            <div class="quick-action-title">{{ action.title }}</div>
+            <div class="quick-action-desc">{{ action.desc }}</div>
           </div>
-          <div class="metric-sub">异常 {{ formatInt(overview?.health.abnormal_total ?? 0) }}</div>
-        </div>
-        <div class="hero-metric">
-          <div class="metric-label">部署覆盖率</div>
-          <div class="metric-value">
-            {{ overview ? formatPercent(overview.coverage.deployment_coverage) : "0%" }}
-          </div>
-          <div class="metric-sub">
-            未部署 {{ formatInt(overview?.coverage.undeployed_total ?? 0) }}
-          </div>
-        </div>
+          <el-tag
+            v-if="action.badge"
+            class="quick-action-badge"
+            size="small"
+            effect="plain"
+          >
+            {{ action.badge }}
+          </el-tag>
+        </button>
+      </div>
+
+      <div class="hero-secondary-actions" data-testid="secondary-quick-actions">
+        <button
+          v-for="action in secondaryQuickActions"
+          :key="action.key"
+          type="button"
+          class="quick-action-button quick-action-button-secondary"
+          :data-testid="`quick-action-${action.key}`"
+          @click="onQuickAction(action)"
+        >
+          <el-icon :size="16">
+            <component :is="action.icon" />
+          </el-icon>
+          <span class="quick-action-secondary-title">{{ action.title }}</span>
+          <span class="quick-action-secondary-desc">{{ action.desc }}</span>
+        </button>
       </div>
     </el-card>
 
-    <el-row :gutter="16" class="section-row">
+    <div class="section-intro" data-testid="resource-entry-intro">
+      <h4 class="section-title">资源入口</h4>
+      <p class="section-subtitle">按资源维度查看存量和覆盖情况</p>
+    </div>
+
+    <el-row :gutter="16" class="section-row" data-testid="resource-entry-row">
       <el-col
         v-for="item in kpiCards"
         :key="item.key"
@@ -346,108 +392,6 @@ onMounted(loadDashboardOverview);
     </el-row>
 
     <el-row :gutter="16" class="section-row">
-      <el-col :xs="24" :lg="10">
-        <el-card class="panel-card">
-          <template #header>
-            <div class="panel-header">
-              <span class="panel-title">环境分布</span>
-              <el-icon :size="16"><DataAnalysis /></el-icon>
-            </div>
-          </template>
-          <div v-if="overview?.env_distribution?.length" class="env-list">
-            <div
-              v-for="item in overview.env_distribution"
-              :key="item.env"
-              class="env-item"
-            >
-              <div class="env-top">
-                <span class="env-label">{{ envLabel(item.env) }}</span>
-                <span class="env-count">{{ formatInt(item.count) }}</span>
-              </div>
-              <el-progress
-                :stroke-width="10"
-                :percentage="
-                  Math.round(
-                    (item.count /
-                      Math.max(
-                        overview.env_distribution.reduce((sum, current) => sum + current.count, 0),
-                        1
-                      )) *
-                      100
-                  )
-                "
-                :show-text="false"
-              />
-            </div>
-          </div>
-          <el-empty v-else description="暂无环境分布数据" :image-size="64" />
-        </el-card>
-      </el-col>
-
-      <el-col :xs="24" :lg="14">
-        <el-card class="panel-card">
-          <template #header>
-            <div class="panel-header">
-              <span class="panel-title">风险清单</span>
-              <span class="panel-hint">按严重级别和数量排序</span>
-            </div>
-          </template>
-
-          <div v-if="overview?.risk_items?.length" class="risk-list">
-            <button
-              v-for="item in overview.risk_items"
-              :key="item.key"
-              type="button"
-              class="risk-item-button"
-              @click="onRiskClick(item)"
-            >
-              <div class="risk-item-main">
-                <div class="risk-item-title">{{ item.label }}</div>
-                <div class="risk-item-sub">点击查看处理页</div>
-              </div>
-              <div class="risk-item-side">
-                <el-tag :type="severityTagType(item.severity)" size="small" effect="plain">
-                  风险{{ severityLabel(item.severity) }}
-                </el-tag>
-                <span class="risk-count">{{ formatInt(item.count) }}</span>
-              </div>
-            </button>
-          </div>
-          <el-empty v-else description="当前无高优先风险项" :image-size="64" />
-        </el-card>
-      </el-col>
-    </el-row>
-
-    <el-row :gutter="16" class="section-row">
-      <el-col :xs="24" :lg="8">
-        <el-card class="panel-card">
-          <template #header>
-            <div class="panel-header">
-              <span class="panel-title">快捷操作</span>
-              <el-icon :size="16"><Warning /></el-icon>
-            </div>
-          </template>
-
-          <div class="quick-actions-grid">
-            <button
-              v-for="action in quickActions"
-              :key="action.key"
-              type="button"
-              class="quick-action-button"
-              @click="onQuickAction(action)"
-            >
-              <el-icon :size="18">
-                <component :is="action.icon" />
-              </el-icon>
-              <div class="quick-action-text">
-                <div class="quick-action-title">{{ action.title }}</div>
-                <div class="quick-action-desc">{{ action.desc }}</div>
-              </div>
-            </button>
-          </div>
-        </el-card>
-      </el-col>
-
       <el-col :xs="24" :lg="16">
         <el-card class="panel-card">
           <template #header>
@@ -498,6 +442,111 @@ onMounted(loadDashboardOverview);
             description="暂无变更记录"
             :image-size="64"
           />
+        </el-card>
+      </el-col>
+
+      <el-col :xs="24" :lg="8">
+        <el-card class="panel-card">
+          <template #header>
+            <div class="panel-header">
+              <span class="panel-title">环境分布</span>
+              <el-icon :size="16"><DataAnalysis /></el-icon>
+            </div>
+          </template>
+          <div v-if="overview?.env_distribution?.length" class="env-list">
+            <div
+              v-for="item in overview.env_distribution"
+              :key="item.env"
+              class="env-item"
+            >
+              <div class="env-top">
+                <span class="env-label">{{ envLabel(item.env) }}</span>
+                <span class="env-count">{{ formatInt(item.count) }}</span>
+              </div>
+              <el-progress
+                :stroke-width="10"
+                :percentage="
+                  Math.round(
+                    (item.count /
+                      Math.max(
+                        overview.env_distribution.reduce((sum, current) => sum + current.count, 0),
+                        1
+                      )) *
+                      100
+                  )
+                "
+                :show-text="false"
+              />
+            </div>
+          </div>
+          <el-empty v-else description="暂无环境分布数据" :image-size="64" />
+        </el-card>
+      </el-col>
+    </el-row>
+
+    <el-row :gutter="16" class="section-row section-row-secondary">
+      <el-col :xs="24" :lg="10">
+        <el-card class="panel-card secondary-panel-card">
+          <template #header>
+            <div class="panel-header">
+              <span class="panel-title">运营概览（次要）</span>
+            </div>
+          </template>
+          <div class="secondary-metrics">
+            <div class="secondary-metric">
+              <div class="secondary-metric-label">总资产</div>
+              <div class="secondary-metric-value">{{ formatInt(totalAssets) }}</div>
+              <div class="secondary-metric-sub">主机 + 应用 + 中间件 + 负载均衡</div>
+            </div>
+            <div class="secondary-metric">
+              <div class="secondary-metric-label">异常率</div>
+              <div class="secondary-metric-value">{{ overview ? formatPercent(overview.health.abnormal_rate) : "0%" }}</div>
+              <div class="secondary-metric-sub">异常 {{ formatInt(overview?.health.abnormal_total ?? 0) }}</div>
+            </div>
+            <div class="secondary-metric">
+              <div class="secondary-metric-label">部署覆盖率</div>
+              <div class="secondary-metric-value">
+                {{ overview ? formatPercent(overview.coverage.deployment_coverage) : "0%" }}
+              </div>
+              <div class="secondary-metric-sub">未部署 {{ formatInt(overview?.coverage.undeployed_total ?? 0) }}</div>
+            </div>
+          </div>
+          <p class="secondary-summary-note">
+            健康评分 {{ overview ? formatInt(Math.round(overview.health.score)) : "0" }}，仅作排查参考
+          </p>
+        </el-card>
+      </el-col>
+
+      <el-col :xs="24" :lg="14">
+        <el-card class="panel-card secondary-panel-card">
+          <template #header>
+            <div class="panel-header">
+              <span class="panel-title">风险提示（次要）</span>
+              <span class="panel-hint">按严重级别和数量排序</span>
+            </div>
+          </template>
+
+          <div v-if="overview?.risk_items?.length" class="risk-list">
+            <button
+              v-for="item in overview.risk_items"
+              :key="item.key"
+              type="button"
+              class="risk-item-button"
+              @click="onRiskClick(item)"
+            >
+              <div class="risk-item-main">
+                <div class="risk-item-title">{{ item.label }}</div>
+                <div class="risk-item-sub">点击查看处理页</div>
+              </div>
+              <div class="risk-item-side">
+                <el-tag :type="severityTagType(item.severity)" size="small" effect="plain">
+                  风险{{ severityLabel(item.severity) }}
+                </el-tag>
+                <span class="risk-count">{{ formatInt(item.count) }}</span>
+              </div>
+            </button>
+          </div>
+          <el-empty v-else description="当前无高优先风险项" :image-size="64" />
         </el-card>
       </el-col>
     </el-row>
@@ -560,36 +609,36 @@ onMounted(loadDashboardOverview);
   min-height: 32px;
 }
 
-.hero-metrics {
+.hero-primary-actions {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
 }
 
-.hero-metric {
-  border: 1px solid var(--im-border-light);
-  border-radius: var(--im-radius-md);
-  background: var(--im-surface-1);
-  padding: 12px 14px;
+.hero-secondary-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
 }
 
-.metric-label {
-  color: var(--im-text-secondary);
-  font-size: 12px;
-  margin-bottom: 4px;
+.section-intro {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
 }
 
-.metric-value {
-  font-size: 28px;
-  line-height: 1.1;
+.section-title {
+  margin: 0;
+  font-size: 16px;
   font-weight: 700;
   color: var(--im-text-primary);
 }
 
-.metric-sub {
-  margin-top: 6px;
+.section-subtitle {
+  margin: 0;
   font-size: 12px;
-  color: var(--im-text-muted);
+  color: var(--im-text-secondary);
 }
 
 .kpi-card {
@@ -778,13 +827,15 @@ onMounted(loadDashboardOverview);
   transition:
     border-color var(--im-duration-base) var(--im-ease-standard),
     background-color var(--im-duration-base) var(--im-ease-standard),
-    transform var(--im-duration-base) var(--im-ease-standard);
+    transform var(--im-duration-base) var(--im-ease-standard),
+    opacity var(--im-duration-base) var(--im-ease-standard);
 }
 
 .risk-item-button:hover {
   border-color: var(--im-border-active);
-  background: var(--im-surface-2);
-  transform: translateY(-1px);
+  background: color-mix(in srgb, var(--im-surface-1) 90%, transparent);
+  opacity: 0.92;
+  transform: translateY(0);
 }
 
 .risk-item-button:focus-visible {
@@ -826,20 +877,14 @@ onMounted(loadDashboardOverview);
   color: var(--im-text-primary);
 }
 
-.quick-actions-grid {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 10px;
-}
-
 .quick-action-button {
   border: 1px solid var(--im-border-light);
   border-radius: var(--im-radius-sm);
-  background: var(--im-surface-1);
+  background: color-mix(in srgb, var(--im-accent-soft) 22%, var(--im-surface-1));
   color: inherit;
   cursor: pointer;
-  min-height: 52px;
-  padding: 10px 12px;
+  min-height: 60px;
+  padding: 12px;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -865,12 +910,34 @@ onMounted(loadDashboardOverview);
   transform: translateY(0);
 }
 
+.quick-action-button-primary {
+  align-items: flex-start;
+}
+
+.quick-action-button-secondary {
+  min-height: 44px;
+  background: var(--im-surface-1);
+}
+
+.quick-action-secondary-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--im-text-primary);
+}
+
+.quick-action-secondary-desc {
+  font-size: 12px;
+  color: var(--im-text-muted);
+}
+
 .quick-action-text {
   min-width: 0;
+  flex: 1;
 }
 
 .quick-action-title {
-  font-size: 13px;
+  font-size: 14px;
+  font-weight: 600;
   color: var(--im-text-primary);
 }
 
@@ -880,8 +947,62 @@ onMounted(loadDashboardOverview);
   color: var(--im-text-muted);
 }
 
+.quick-action-badge {
+  flex-shrink: 0;
+}
+
+.section-row-secondary {
+  opacity: 0.92;
+}
+
+.secondary-panel-card {
+  background: color-mix(in srgb, var(--im-surface-0) 90%, var(--im-surface-1));
+}
+
+.secondary-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.secondary-metric {
+  border: 1px solid var(--im-border-light);
+  border-radius: var(--im-radius-sm);
+  padding: 10px;
+  background: var(--im-surface-1);
+}
+
+.secondary-metric-label {
+  font-size: 12px;
+  color: var(--im-text-secondary);
+}
+
+.secondary-metric-value {
+  margin-top: 4px;
+  font-size: 20px;
+  line-height: 1.2;
+  font-weight: 700;
+  color: var(--im-text-primary);
+}
+
+.secondary-metric-sub {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--im-text-muted);
+}
+
+.secondary-summary-note {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: var(--im-text-muted);
+}
+
 @media (max-width: 1280px) {
-  .hero-metrics {
+  .hero-primary-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .secondary-metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
@@ -897,8 +1018,15 @@ onMounted(loadDashboardOverview);
     justify-content: flex-start;
   }
 
-  .hero-metrics {
+  .hero-primary-actions,
+  .hero-secondary-actions,
+  .secondary-metrics {
     grid-template-columns: 1fr;
+  }
+
+  .section-intro {
+    flex-direction: column;
+    align-items: flex-start;
   }
 }
 </style>

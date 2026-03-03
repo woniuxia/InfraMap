@@ -174,7 +174,7 @@ function mountDashboard() {
         Connection: true,
         SetUp: true,
         Refresh: true,
-        Warning: true,
+        Upload: true,
         Files: true,
         Share: true,
         DataAnalysis: true,
@@ -200,14 +200,43 @@ describe("DashboardView", () => {
     const wrapper = mountDashboard();
     await flushPromises();
 
-    expect(wrapper.text()).toContain("资产健康驾驶舱");
+    expect(wrapper.text()).toContain("快捷操作中心");
+    expect(wrapper.text()).toContain("资源入口");
     expect(wrapper.text()).toContain("异常应用服务");
     expect(wrapper.text()).toContain("Redis");
+    expect(wrapper.find('[data-testid="quick-action-import-workbench"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="resource-entry-row"]').exists()).toBe(true);
 
     const resourceTypeCell = wrapper.find('[data-testid="cell-resource_type-0"]');
     expect(resourceTypeCell.exists()).toBe(true);
     expect(resourceTypeCell.find('[data-testid="el-tag"]').exists()).toBe(true);
     expect(resourceTypeCell.text()).toContain("中间件");
+  });
+
+  it("navigates by quick actions and supports refresh action", async () => {
+    getDashboardOverviewMock.mockResolvedValue(createOverview());
+
+    const wrapper = mountDashboard();
+    await flushPromises();
+
+    expect(getDashboardOverviewMock).toHaveBeenCalledTimes(1);
+
+    await wrapper.get('[data-testid="quick-action-applications"]').trigger("click");
+    expect(pushMock).toHaveBeenCalledWith({
+      name: "Applications",
+      query: undefined,
+    });
+
+    await wrapper.get('[data-testid="quick-action-import-workbench"]').trigger("click");
+    expect(pushMock).toHaveBeenCalledWith({
+      name: "ImportWorkbench",
+      query: undefined,
+    });
+
+    const beforeRefreshCalls = getDashboardOverviewMock.mock.calls.length;
+    await wrapper.get('[data-testid="quick-action-refresh"]').trigger("click");
+    await flushPromises();
+    expect(getDashboardOverviewMock).toHaveBeenCalledTimes(beforeRefreshCalls + 1);
   });
 
   it("falls back to legacy APIs when overview endpoint fails", async () => {

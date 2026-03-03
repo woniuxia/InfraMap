@@ -2,7 +2,7 @@ use tauri::State;
 
 use crate::commands::taxonomy::{
     build_taxonomy_exists_filter, delete_resource_terms, parse_filter_values,
-    parse_json_string_array, save_resource_terms, FIELD_TAGS,
+    parse_json_string_array, save_resource_terms, FIELD_CPU_MODEL, FIELD_OS_TYPE, FIELD_TAGS,
 };
 use crate::db::audit::insert_audit_log;
 use crate::db::crud::delete_by_id;
@@ -11,6 +11,34 @@ use crate::error::{AppError, AppResult};
 use crate::models::common::{PagedResult, QueryParams};
 use crate::models::host::Host;
 use crate::validation::validate_host;
+
+fn parse_single_term(value: Option<&str>) -> Vec<String> {
+    match value
+        .map(str::trim)
+        .filter(|candidate| !candidate.is_empty())
+    {
+        Some(term) => vec![term.to_string()],
+        None => Vec::new(),
+    }
+}
+
+fn sync_host_taxonomy_terms(
+    conn: &rusqlite::Connection,
+    host_id: &str,
+    host: &Host,
+    now: &str,
+) -> Result<(), rusqlite::Error> {
+    let tag_values = parse_json_string_array(host.tags.as_deref());
+    save_resource_terms(conn, "host", host_id, FIELD_TAGS, &tag_values, now)?;
+
+    let os_type_values = parse_single_term(host.os_type.as_deref());
+    save_resource_terms(conn, "host", host_id, FIELD_OS_TYPE, &os_type_values, now)?;
+
+    let cpu_model_values = parse_single_term(host.cpu_model.as_deref());
+    save_resource_terms(conn, "host", host_id, FIELD_CPU_MODEL, &cpu_model_values, now)?;
+
+    Ok(())
+}
 
 fn build_hosts_where_clause(
     params: &QueryParams,
@@ -40,7 +68,7 @@ fn build_hosts_where_clause(
     }
 
     if let Some(filters) = params.filters.as_ref() {
-        for column in ["status", "os_type", "env"] {
+        for column in ["status", "env"] {
             if let Some(raw_value) = filters.get(column) {
                 let values = parse_filter_values(raw_value);
                 if values.is_empty() {
@@ -65,6 +93,34 @@ fn build_hosts_where_clause(
             if !values.is_empty() {
                 if let Some(clause) =
                     build_taxonomy_exists_filter("host", FIELD_TAGS, "h.id", &values)
+                {
+                    conditions.push(clause);
+                }
+                for value in values {
+                    sql_params.push(Box::new(value));
+                }
+            }
+        }
+
+        if let Some(raw_os_type) = filters.get("os_type") {
+            let values = parse_filter_values(raw_os_type);
+            if !values.is_empty() {
+                if let Some(clause) =
+                    build_taxonomy_exists_filter("host", FIELD_OS_TYPE, "h.id", &values)
+                {
+                    conditions.push(clause);
+                }
+                for value in values {
+                    sql_params.push(Box::new(value));
+                }
+            }
+        }
+
+        if let Some(raw_cpu_model) = filters.get("cpu_model") {
+            let values = parse_filter_values(raw_cpu_model);
+            if !values.is_empty() {
+                if let Some(clause) =
+                    build_taxonomy_exists_filter("host", FIELD_CPU_MODEL, "h.id", &values)
                 {
                     conditions.push(clause);
                 }
@@ -228,9 +284,8 @@ pub fn save_host(pool: State<DbPool>, data: Host) -> AppResult<()> {
             .map_err(|e| AppError::from_db_error(command, "创建主机", e))?;
             insert_audit_log(&conn, "create", "host", &id, Some(&data.hostname), None)
                 .map_err(|e| AppError::from_db_error(command, "写入审计日志", e))?;
-            let tag_values = parse_json_string_array(data.tags.as_deref());
-            save_resource_terms(&conn, "host", &id, FIELD_TAGS, &tag_values, &now)
-                .map_err(|e| AppError::from_db_error(command, "同步标签词条", e))?;
+            sync_host_taxonomy_terms(&conn, &id, &data, &now)
+                .map_err(|e| AppError::from_db_error(command, "同步主机词条", e))?;
         } else {
             conn.execute(
                 "UPDATE hosts SET hostname=?1, env=?2, os_type=?3, cpu_model=?4, cpu_cores=?5,
@@ -264,9 +319,8 @@ pub fn save_host(pool: State<DbPool>, data: Host) -> AppResult<()> {
                 None,
             )
             .map_err(|e| AppError::from_db_error(command, "写入审计日志", e))?;
-            let tag_values = parse_json_string_array(data.tags.as_deref());
-            save_resource_terms(&conn, "host", &data.id, FIELD_TAGS, &tag_values, &now)
-                .map_err(|e| AppError::from_db_error(command, "同步标签词条", e))?;
+            sync_host_taxonomy_terms(&conn, &data.id, &data, &now)
+                .map_err(|e| AppError::from_db_error(command, "同步主机词条", e))?;
         }
         Ok(())
     })();
@@ -320,6 +374,42 @@ mod tests {
         assert!(where_clause.contains("h.status = ?"));
         assert!(where_clause.contains("taxonomy_bindings"));
         assert_eq!(sql_params.len(), 2);
+    }
+
+    #[test]
+    fn build_hosts_where_clause_should_filter_os_type_with_taxonomy() {
+        let mut filters = HashMap::new();
+        filters.insert(
+            "os_type".to_string(),
+            r#"["openEuler","Ubuntu 22.04"]"#.to_string(),
+        );
+        let params = QueryParams {
+            filters: Some(filters),
+            ..Default::default()
+        };
+
+        let (where_clause, sql_params) = build_hosts_where_clause(&params);
+        assert!(where_clause.contains("taxonomy_bindings"));
+        assert!(where_clause.contains("tt.field_key = 'os_type'"));
+        assert!(where_clause.contains("tt.display_name IN (?, ?)"));
+        assert!(!where_clause.contains("h.os_type IN"));
+        assert_eq!(sql_params.len(), 2);
+    }
+
+    #[test]
+    fn build_hosts_where_clause_should_filter_cpu_model_with_taxonomy() {
+        let mut filters = HashMap::new();
+        filters.insert("cpu_model".to_string(), "Hygon C86 7285".to_string());
+        let params = QueryParams {
+            filters: Some(filters),
+            ..Default::default()
+        };
+
+        let (where_clause, sql_params) = build_hosts_where_clause(&params);
+        assert!(where_clause.contains("taxonomy_bindings"));
+        assert!(where_clause.contains("tt.field_key = 'cpu_model'"));
+        assert!(where_clause.contains("tt.display_name IN (?)"));
+        assert_eq!(sql_params.len(), 1);
     }
 }
 

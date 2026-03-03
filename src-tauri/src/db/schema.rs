@@ -479,6 +479,109 @@ pub const MIGRATIONS: &[(i32, &str)] = &[
         DELETE FROM taxonomy_terms WHERE is_deleted = 1;
     "#,
     ),
+    (
+        17,
+        r#"
+        CREATE TABLE IF NOT EXISTS import_jobs (
+            id TEXT PRIMARY KEY,
+            status TEXT NOT NULL,
+            strategy TEXT NOT NULL,
+            total_rows INTEGER NOT NULL DEFAULT 0,
+            created_count INTEGER NOT NULL DEFAULT 0,
+            updated_count INTEGER NOT NULL DEFAULT 0,
+            skipped_count INTEGER NOT NULL DEFAULT 0,
+            failed_count INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_import_jobs_created_at
+        ON import_jobs(created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_import_jobs_status
+        ON import_jobs(status);
+
+        CREATE TABLE IF NOT EXISTS import_job_rows (
+            id TEXT PRIMARY KEY,
+            job_id TEXT NOT NULL,
+            row_no INTEGER NOT NULL,
+            resource_type TEXT NOT NULL,
+            name TEXT NOT NULL,
+            env TEXT NOT NULL,
+            status TEXT NOT NULL,
+            error_message TEXT,
+            payload_json TEXT NOT NULL,
+            normalized_json TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS uk_import_job_rows_job_row
+        ON import_job_rows(job_id, row_no);
+        CREATE INDEX IF NOT EXISTS idx_import_job_rows_job
+        ON import_job_rows(job_id);
+
+        CREATE TABLE IF NOT EXISTS import_job_issues (
+            id TEXT PRIMARY KEY,
+            job_id TEXT NOT NULL,
+            row_no INTEGER NOT NULL,
+            field_key TEXT,
+            issue_type TEXT NOT NULL,
+            code TEXT NOT NULL,
+            message TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_import_job_issues_job
+        ON import_job_issues(job_id);
+        CREATE INDEX IF NOT EXISTS idx_import_job_issues_job_row
+        ON import_job_issues(job_id, row_no);
+    "#,
+    ),
+    (
+        18,
+        r#"
+        INSERT OR IGNORE INTO taxonomy_terms (id, field_key, normalized_value, display_name, is_deleted, deleted_at, created_at, updated_at)
+        SELECT lower(hex(randomblob(16))), 'os_type', lower(trim(os_type)), trim(os_type), 0, NULL, COALESCE(updated_at, datetime('now')), COALESCE(updated_at, datetime('now'))
+        FROM hosts
+        WHERE is_deleted = 0
+          AND TRIM(COALESCE(os_type, '')) <> '';
+
+        INSERT OR IGNORE INTO taxonomy_terms (id, field_key, normalized_value, display_name, is_deleted, deleted_at, created_at, updated_at)
+        SELECT lower(hex(randomblob(16))), 'cpu_model', lower(trim(cpu_model)), trim(cpu_model), 0, NULL, COALESCE(updated_at, datetime('now')), COALESCE(updated_at, datetime('now'))
+        FROM hosts
+        WHERE is_deleted = 0
+          AND TRIM(COALESCE(cpu_model, '')) <> '';
+
+        INSERT OR IGNORE INTO taxonomy_bindings (id, term_id, resource_type, resource_id, is_deleted, deleted_at, created_at, updated_at)
+        SELECT lower(hex(randomblob(16))), tt.id, 'host', h.id, 0, NULL, COALESCE(h.updated_at, datetime('now')), COALESCE(h.updated_at, datetime('now'))
+        FROM hosts h
+        JOIN taxonomy_terms tt
+          ON tt.field_key = 'os_type'
+         AND tt.normalized_value = lower(trim(h.os_type))
+         AND tt.is_deleted = 0
+        WHERE h.is_deleted = 0
+          AND TRIM(COALESCE(h.os_type, '')) <> '';
+
+        INSERT OR IGNORE INTO taxonomy_bindings (id, term_id, resource_type, resource_id, is_deleted, deleted_at, created_at, updated_at)
+        SELECT lower(hex(randomblob(16))), tt.id, 'host', h.id, 0, NULL, COALESCE(h.updated_at, datetime('now')), COALESCE(h.updated_at, datetime('now'))
+        FROM hosts h
+        JOIN taxonomy_terms tt
+          ON tt.field_key = 'cpu_model'
+         AND tt.normalized_value = lower(trim(h.cpu_model))
+         AND tt.is_deleted = 0
+        WHERE h.is_deleted = 0
+          AND TRIM(COALESCE(h.cpu_model, '')) <> '';
+
+        DELETE FROM taxonomy_term_stats;
+        INSERT INTO taxonomy_term_stats (term_id, resource_type, usage_count, last_used_at, updated_at)
+        SELECT tb.term_id, tb.resource_type, COUNT(*) AS usage_count, MAX(tb.updated_at) AS last_used_at, datetime('now')
+        FROM taxonomy_bindings tb
+        JOIN taxonomy_terms tt ON tt.id = tb.term_id
+        WHERE tb.is_deleted = 0
+          AND tt.is_deleted = 0
+        GROUP BY tb.term_id, tb.resource_type;
+    "#,
+    ),
 ];
 
 const TAXONOMY_TERMS_REQUIRED_COLUMNS: [&str; 8] = [
@@ -1197,6 +1300,68 @@ mod tests {
     }
 
     #[test]
+    fn host_os_and_cpu_should_backfill_to_taxonomy_after_migrations() {
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        for (version, sql) in MIGRATIONS.iter() {
+            if *version == 18 {
+                conn.execute(
+                    "INSERT INTO hosts (id, hostname, env, os_type, cpu_model, status, is_deleted, created_at, updated_at)
+                     VALUES ('host-taxonomy-1', 'os-cpu-node', 'prod', 'openEuler', 'Hygon C86 7285', 'running', 0, datetime('now'), datetime('now'))",
+                    [],
+                )
+                .expect("seed host os/cpu before migration v18");
+            }
+
+            conn.execute_batch(sql)
+                .unwrap_or_else(|e| panic!("Migration v{} failed: {}", version, e));
+            if *version == 12 {
+                migrate_taxonomy_v2(&conn)
+                    .unwrap_or_else(|e| panic!("Post-migration hook v{} failed: {}", version, e));
+            }
+        }
+
+        let os_binding_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*)
+                 FROM taxonomy_bindings tb
+                 JOIN taxonomy_terms tt ON tt.id = tb.term_id
+                 WHERE tb.resource_type = 'host'
+                   AND tb.resource_id = 'host-taxonomy-1'
+                   AND tb.is_deleted = 0
+                   AND tt.is_deleted = 0
+                   AND tt.field_key = 'os_type'
+                   AND tt.display_name = 'openEuler'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count migrated host os binding");
+        assert_eq!(
+            os_binding_count, 1,
+            "host os_type should be backfilled into taxonomy"
+        );
+
+        let cpu_binding_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*)
+                 FROM taxonomy_bindings tb
+                 JOIN taxonomy_terms tt ON tt.id = tb.term_id
+                 WHERE tb.resource_type = 'host'
+                   AND tb.resource_id = 'host-taxonomy-1'
+                   AND tb.is_deleted = 0
+                   AND tt.is_deleted = 0
+                   AND tt.field_key = 'cpu_model'
+                   AND tt.display_name = 'Hygon C86 7285'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count migrated host cpu binding");
+        assert_eq!(
+            cpu_binding_count, 1,
+            "host cpu_model should be backfilled into taxonomy"
+        );
+    }
+
+    #[test]
     fn taxonomy_tables_should_have_correct_v2_schema_after_migrations() {
         let conn = Connection::open_in_memory().expect("open in-memory db");
         apply_all_migrations(&conn);
@@ -1304,6 +1469,38 @@ mod tests {
             .expect("query sqlite_master");
 
         assert_eq!(exists, 1, "call_relations table should exist");
+    }
+
+    #[test]
+    fn import_job_tables_should_exist_after_migrations() {
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        apply_all_migrations(&conn);
+
+        let jobs_exists: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='import_jobs'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("query import_jobs");
+        let rows_exists: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='import_job_rows'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("query import_job_rows");
+        let issues_exists: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='import_job_issues'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("query import_job_issues");
+
+        assert_eq!(jobs_exists, 1, "import_jobs table should exist");
+        assert_eq!(rows_exists, 1, "import_job_rows table should exist");
+        assert_eq!(issues_exists, 1, "import_job_issues table should exist");
     }
 
     #[test]

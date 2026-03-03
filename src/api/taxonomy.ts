@@ -5,7 +5,7 @@ export type TaxonomyResourceType =
   | "ip_address"
   | "application"
   | "business_application";
-export type TaxonomyFieldKey = "tags" | "owner" | "tech_stack";
+export type TaxonomyFieldKey = "tags" | "owner" | "tech_stack" | "os_type" | "cpu_model";
 export type TaxonomySortBy = "alpha" | "recent";
 export type TaxonomyRecencyScope = "global" | "resource_type";
 export type TaxonomyAppType = "frontend" | "backend";
@@ -48,6 +48,26 @@ export function listHostTagTerms(limit = 200): Promise<string[]> {
   return listTaxonomyTerms({
     resource_type: "host",
     field_key: "tags",
+    limit,
+    sort_by: "recent",
+    recency_scope: "resource_type",
+  });
+}
+
+export function listHostOsTypeTerms(limit = 200): Promise<string[]> {
+  return listTaxonomyTerms({
+    resource_type: "host",
+    field_key: "os_type",
+    limit,
+    sort_by: "recent",
+    recency_scope: "resource_type",
+  });
+}
+
+export function listHostCpuModelTerms(limit = 200): Promise<string[]> {
+  return listTaxonomyTerms({
+    resource_type: "host",
+    field_key: "cpu_model",
     limit,
     sort_by: "recent",
     recency_scope: "resource_type",

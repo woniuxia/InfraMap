@@ -20,7 +20,8 @@ interface Props {
   formRules: FormRules;
   envOptions: Array<{ label: string; value: string }>;
   statusOptions: Array<{ label: string; value: string }>;
-  osOptions: string[];
+  formOsSuggestionOptions: Array<{ label: string; value: string }>;
+  formCpuModelSuggestionOptions: Array<{ label: string; value: string }>;
   tagList: string[];
   formTagSuggestionOptions: Array<{ label: string; value: string }>;
   selectedIpIds: string[];
@@ -225,17 +226,38 @@ async function submitQuickIpForm() {
           v-model="props.editingHost.os_type"
           filterable
           allow-create
+          default-first-option
           clearable
           placeholder="选择或输入操作系统版本，如 Ubuntu 22.04"
           class="w-full"
         >
-          <el-option v-for="os in props.osOptions" :key="os" :label="os" :value="os" />
+          <el-option
+            v-for="option in props.formOsSuggestionOptions"
+            :key="`host-os-${option.value}`"
+            :label="option.label"
+            :value="option.value"
+          />
         </el-select>
       </el-form-item>
 
       <el-divider content-position="left">硬件规格</el-divider>
       <el-form-item label="CPU 型号">
-        <el-input v-model="props.editingHost.cpu_model" placeholder="如 Intel Xeon E5-2680 v4" />
+        <el-select
+          v-model="props.editingHost.cpu_model"
+          filterable
+          allow-create
+          default-first-option
+          clearable
+          placeholder="选择或输入 CPU 型号，如 Intel Xeon E5-2680 v4"
+          class="w-full"
+        >
+          <el-option
+            v-for="option in props.formCpuModelSuggestionOptions"
+            :key="`host-cpu-model-${option.value}`"
+            :label="option.label"
+            :value="option.value"
+          />
+        </el-select>
       </el-form-item>
       <el-form-item label="CPU 参数">
         <el-row :gutter="12" class="w-full">

@@ -30,9 +30,10 @@ const {
   quickIpFormRules,
   envOptions,
   statusOptions,
-  osOptions,
   tagList,
   formTagSuggestionOptions,
+  formOsSuggestionOptions,
+  formCpuModelSuggestionOptions,
   filteredIpOptions,
   searchedIpKeyword,
   canQuickCreateIp,
@@ -105,7 +106,8 @@ onMounted(() => {
       :form-rules="formRules"
       :env-options="envOptions"
       :status-options="statusOptions"
-      :os-options="osOptions"
+      :form-os-suggestion-options="formOsSuggestionOptions"
+      :form-cpu-model-suggestion-options="formCpuModelSuggestionOptions"
       :tag-list="tagList"
       :form-tag-suggestion-options="formTagSuggestionOptions"
       :selected-ip-ids="selectedIpIds"

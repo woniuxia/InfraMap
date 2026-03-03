@@ -5,7 +5,7 @@ import type { Host, IpAddress } from "@/types";
 import type { SearchFieldConfig, SearchToolbarQueryPayload } from "@/types/searchToolbar";
 import { listHosts, saveHost, deleteHost } from "@/api/hosts";
 import { listIpAddresses, saveIpAddress } from "@/api/ip-addresses";
-import { listHostTagTerms } from "@/api/taxonomy";
+import { listHostCpuModelTerms, listHostOsTypeTerms, listHostTagTerms } from "@/api/taxonomy";
 import { bindHostIp, listHostIpBindings, unbindHostIp } from "@/api/host-ip-bindings";
 import { useResourceList } from "@/composables/useResourceList";
 import { buildHostCopyDraft } from "@/utils/resourceCopy";
@@ -24,6 +24,8 @@ import { envLabel } from "@/views/hosts/hostDisplay";
 interface HostListFilters {
   env: string[];
   status: string[];
+  os_type: string[];
+  cpu_model: string[];
   tags: string[];
 }
 
@@ -31,11 +33,30 @@ function createDefaultFilters(): HostListFilters {
   return {
     env: [],
     status: [],
+    os_type: [],
+    cpu_model: [],
     tags: [],
   };
 }
 
 const ipv4Pattern = /^((25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(25[0-5]|2[0-4]\d|[01]?\d\d?)$/;
+const DEFAULT_HOST_OS_OPTIONS = [
+  "CentOS 7",
+  "CentOS 8",
+  "Ubuntu 20.04",
+  "Ubuntu 22.04",
+  "Ubuntu 24.04",
+  "Debian 11",
+  "Debian 12",
+  "RHEL 8",
+  "RHEL 9",
+  "Windows Server 2019",
+  "Windows Server 2022",
+  "openEuler",
+  "银河麒麟 V10",
+  "统信 UOS Server",
+  "龙蜥 Anolis OS",
+];
 
 export function useHostViewModel() {
   const {
@@ -90,6 +111,8 @@ export function useHostViewModel() {
     { label: "维护中", value: "maintenance" },
   ];
   const tagFilterOptions = ref<Array<{ label: string; value: string }>>([]);
+  const osFilterOptions = ref<Array<{ label: string; value: string }>>([]);
+  const cpuModelFilterOptions = ref<Array<{ label: string; value: string }>>([]);
 
   const toolbarFields = computed<SearchFieldConfig[]>(() => [
     {
@@ -108,6 +131,24 @@ export function useHostViewModel() {
       width: "md",
       maxCollapseTags: 2,
       options: statusOptions,
+    },
+    {
+      key: "os_type",
+      queryKey: "os_type",
+      label: "操作系统",
+      type: "multi-select",
+      width: "md",
+      maxCollapseTags: 2,
+      options: osFilterOptions.value,
+    },
+    {
+      key: "cpu_model",
+      queryKey: "cpu_model",
+      label: "CPU 型号",
+      type: "multi-select",
+      width: "md",
+      maxCollapseTags: 2,
+      options: cpuModelFilterOptions.value,
     },
     {
       key: "tags",
@@ -166,24 +207,20 @@ export function useHostViewModel() {
     ],
     env: [{ required: true, message: "请选择环境", trigger: "change" }],
   };
-
-  const osOptions = [
-    "CentOS 7",
-    "CentOS 8",
-    "Ubuntu 20.04",
-    "Ubuntu 22.04",
-    "Ubuntu 24.04",
-    "Debian 11",
-    "Debian 12",
-    "RHEL 8",
-    "RHEL 9",
-    "Windows Server 2019",
-    "Windows Server 2022",
-  ];
-
   const tagList = ref<string[]>([]);
-  function buildTagSuggestionOptions(currentValues: string[]) {
-    const merged = new Set<string>(tagFilterOptions.value.map((item) => item.value));
+
+  function normalizeTermValues(values: string[]): string[] {
+    return Array.from(
+      new Set(
+        values
+          .map((item) => item.trim())
+          .filter((item) => item.length > 0)
+      )
+    );
+  }
+
+  function buildSuggestionOptions(baseValues: string[], currentValues: string[]) {
+    const merged = new Set<string>(normalizeTermValues(baseValues));
     for (const value of currentValues) {
       const normalized = value.trim();
       if (normalized) {
@@ -193,7 +230,24 @@ export function useHostViewModel() {
     return Array.from(merged).map((value) => ({ label: value, value }));
   }
 
-  const formTagSuggestionOptions = computed(() => buildTagSuggestionOptions(tagList.value));
+  const formTagSuggestionOptions = computed(() =>
+    buildSuggestionOptions(
+      tagFilterOptions.value.map((item) => item.value),
+      tagList.value
+    )
+  );
+  const formOsSuggestionOptions = computed(() =>
+    buildSuggestionOptions(
+      [...DEFAULT_HOST_OS_OPTIONS, ...osFilterOptions.value.map((item) => item.value)],
+      [editingHost.value.os_type ?? ""]
+    )
+  );
+  const formCpuModelSuggestionOptions = computed(() =>
+    buildSuggestionOptions(
+      cpuModelFilterOptions.value.map((item) => item.value),
+      [editingHost.value.cpu_model ?? ""]
+    )
+  );
   const filteredIpOptions = computed(() => {
     const keyword = bindingSearchKeyword.value.trim().toLowerCase();
     const candidates = allowCrossEnv.value
@@ -277,10 +331,20 @@ export function useHostViewModel() {
     availableIps.value = result.data;
   }
 
-  async function loadTagOptions() {
+  function termValuesToFilterOptions(values: string[]) {
+    return normalizeTermValues(values).map((item) => ({ label: item, value: item }));
+  }
+
+  async function loadTaxonomyOptions() {
     try {
-      const tags = await listHostTagTerms(200);
-      tagFilterOptions.value = tags.map((item) => ({ label: item, value: item }));
+      const [tags, osTypes, cpuModels] = await Promise.all([
+        listHostTagTerms(200),
+        listHostOsTypeTerms(200),
+        listHostCpuModelTerms(200),
+      ]);
+      tagFilterOptions.value = termValuesToFilterOptions(tags);
+      osFilterOptions.value = termValuesToFilterOptions(osTypes);
+      cpuModelFilterOptions.value = termValuesToFilterOptions(cpuModels);
     } catch {
       // error shown by tauriInvoke
     }
@@ -437,7 +501,7 @@ export function useHostViewModel() {
     bindingSearchKeyword.value = "";
     isEditing.value = false;
     dialogVisible.value = true;
-    await Promise.all([refreshBindingContext(), loadTagOptions()]);
+    await Promise.all([refreshBindingContext(), loadTaxonomyOptions()]);
   }
 
   async function openEdit(row: Host) {
@@ -447,7 +511,7 @@ export function useHostViewModel() {
     bindingSearchKeyword.value = "";
     isEditing.value = true;
     dialogVisible.value = true;
-    await Promise.all([refreshBindingContext(row.id), loadTagOptions()]);
+    await Promise.all([refreshBindingContext(row.id), loadTaxonomyOptions()]);
   }
 
   async function openCopy(row: Host) {
@@ -457,7 +521,7 @@ export function useHostViewModel() {
     bindingSearchKeyword.value = "";
     isEditing.value = false;
     dialogVisible.value = true;
-    await Promise.all([refreshBindingContext(), loadTagOptions()]);
+    await Promise.all([refreshBindingContext(), loadTaxonomyOptions()]);
     ElMessage.info("已生成副本草稿，请在下方绑定 IP 后保存");
   }
 
@@ -513,12 +577,22 @@ export function useHostViewModel() {
     editingHost.value.cpu_freq = normalizeCpuFreqValue(editingHost.value.cpu_freq);
   }
 
+  function normalizeOptionalTextValue(value: unknown): string | undefined {
+    if (typeof value !== "string") {
+      return undefined;
+    }
+    const normalized = value.trim();
+    return normalized.length > 0 ? normalized : undefined;
+  }
+
   async function handleSave() {
     const valid = await formRef.value?.validate().catch(() => false);
     if (!valid) return;
     if (!validateHardwareFields()) return;
 
     normalizeHardwareFields();
+    editingHost.value.os_type = normalizeOptionalTextValue(editingHost.value.os_type);
+    editingHost.value.cpu_model = normalizeOptionalTextValue(editingHost.value.cpu_model);
     const hostId = editingHost.value.id || generateHostId();
     editingHost.value.id = hostId;
     const payload: Partial<Host> = {
@@ -533,7 +607,7 @@ export function useHostViewModel() {
       await syncHostBindings(hostId);
       ElMessage.success(isEditing.value ? "更新成功" : "创建成功");
       dialogVisible.value = false;
-      await Promise.all([fetchData(), loadTagOptions()]);
+      await Promise.all([fetchData(), loadTaxonomyOptions()]);
     } catch {
       // error shown by tauriInvoke
     } finally {
@@ -542,7 +616,7 @@ export function useHostViewModel() {
   }
 
   async function init() {
-    await Promise.all([fetchData(), loadTagOptions()]);
+    await Promise.all([fetchData(), loadTaxonomyOptions()]);
   }
 
   return {
@@ -571,9 +645,10 @@ export function useHostViewModel() {
     quickIpFormRules,
     envOptions,
     statusOptions,
-    osOptions,
     tagList,
     formTagSuggestionOptions,
+    formOsSuggestionOptions,
+    formCpuModelSuggestionOptions,
     filteredIpOptions,
     searchedIpKeyword,
     canQuickCreateIp,
@@ -604,4 +679,3 @@ export function useHostViewModel() {
 }
 
 export type HostViewModel = ReturnType<typeof useHostViewModel>;
-

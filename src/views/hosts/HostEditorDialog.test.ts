@@ -139,7 +139,8 @@ function mountDialog(overrides?: Record<string, unknown>) {
         { label: "已停止", value: "stopped" },
         { label: "维护中", value: "maintenance" },
       ],
-      osOptions: ["Ubuntu 22.04"],
+      formOsSuggestionOptions: [{ label: "Ubuntu 22.04", value: "Ubuntu 22.04" }],
+      formCpuModelSuggestionOptions: [{ label: "Intel Xeon E5-2680 v4", value: "Intel Xeon E5-2680 v4" }],
       ...overrides,
     },
     global: {

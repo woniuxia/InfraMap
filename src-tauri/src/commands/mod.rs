@@ -8,6 +8,7 @@ pub mod deployments;
 pub mod health;
 pub mod host_ip_bindings;
 pub mod hosts;
+pub mod import_jobs;
 pub mod ip_addresses;
 pub mod middlewares;
 pub mod nginx_configs;

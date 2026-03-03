@@ -4,6 +4,8 @@ import {
   listApplicationOwnerTerms,
   listApplicationTechStackTerms,
   listBusinessApplicationOwnerTerms,
+  listHostCpuModelTerms,
+  listHostOsTypeTerms,
   listHostTagTerms,
   listIpTagTerms,
   listResourceTerms,
@@ -85,6 +87,40 @@ describe("taxonomy API", () => {
 
     const result = await listHostTagTerms();
     expect(result).toEqual(["core", "edge"]);
+  });
+
+  it("listHostOsTypeTerms should use host os_type with resource_type scope", async () => {
+    __setMockHandler("list_taxonomy_terms", (_cmd, args) => {
+      expect(args).toEqual({
+        resourceType: "host",
+        fieldKey: "os_type",
+        limit: 200,
+        sortBy: "recent",
+        recencyScope: "resource_type",
+        appType: undefined,
+      });
+      return ["openEuler", "Ubuntu 22.04"];
+    });
+
+    const result = await listHostOsTypeTerms();
+    expect(result).toEqual(["openEuler", "Ubuntu 22.04"]);
+  });
+
+  it("listHostCpuModelTerms should use host cpu_model with resource_type scope", async () => {
+    __setMockHandler("list_taxonomy_terms", (_cmd, args) => {
+      expect(args).toEqual({
+        resourceType: "host",
+        fieldKey: "cpu_model",
+        limit: 200,
+        sortBy: "recent",
+        recencyScope: "resource_type",
+        appType: undefined,
+      });
+      return ["Intel Xeon Gold 6258R", "Hygon C86 7285"];
+    });
+
+    const result = await listHostCpuModelTerms();
+    expect(result).toEqual(["Intel Xeon Gold 6258R", "Hygon C86 7285"]);
   });
 
   it("listIpTagTerms should use ip tags with resource_type scope", async () => {

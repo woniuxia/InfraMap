@@ -9,6 +9,7 @@ import {
   SetUp,
   DataAnalysis,
   Share,
+  UploadFilled,
   Setting,
   Fold,
   Expand,
@@ -26,6 +27,7 @@ const menuItems: { path: string; name: string; icon: Component }[] = [
   { path: "/applications", name: "应用服务", icon: markRaw(IconMenu) },
   { path: "/middlewares", name: "中间件", icon: markRaw(Connection) },
   { path: "/nginx-configs", name: "负载均衡", icon: markRaw(SetUp) },
+  { path: "/import-workbench", name: "批量录入", icon: markRaw(UploadFilled) },
   { path: "/topology", name: "拓扑图", icon: markRaw(Share) },
   { path: "/settings", name: "系统设置", icon: markRaw(Setting) },
 ];

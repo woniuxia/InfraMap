@@ -102,4 +102,12 @@ describe("useHostViewModel", () => {
     expect(viewModel.editingHost.value.ram_gb).toBeUndefined();
     expect(viewModel.editingHost.value.disk_gb).toBeUndefined();
   });
+
+  it("should expose os_type and cpu_model filter fields for toolbar", () => {
+    const viewModel = useHostViewModel();
+    const keys = viewModel.toolbarFields.value.map((field) => field.key);
+
+    expect(keys).toContain("os_type");
+    expect(keys).toContain("cpu_model");
+  });
 });
