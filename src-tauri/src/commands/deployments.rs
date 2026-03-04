@@ -8,6 +8,7 @@ use crate::db::DbPool;
 use crate::error::{AppError, AppResult};
 use crate::models::common::{PagedResult, QueryParams};
 use crate::models::deployment::Deployment;
+use crate::models::nginx_config::NginxEndpoint;
 use crate::validation::validate_deployment;
 use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
@@ -81,6 +82,25 @@ fn extract_ipv4_from_address(address: &str) -> Option<String> {
     None
 }
 
+fn normalize_optional_override(value: Option<String>) -> Option<String> {
+    value.and_then(|item| {
+        let trimmed = item.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    })
+}
+
+fn select_nginx_context_address(endpoints: &[NginxEndpoint]) -> Option<String> {
+    endpoints
+        .iter()
+        .find(|item| extract_ipv4_from_address(&item.host).is_some())
+        .or_else(|| endpoints.first())
+        .map(|item| format!("{}:{}", item.host.trim(), item.port))
+}
+
 fn query_resource_address_env(
     command: &str,
     conn: &rusqlite::Connection,
@@ -116,11 +136,20 @@ fn query_resource_address_env(
             }),
         "nginx" => conn
             .query_row(
-                "SELECT address, env FROM nginx_configs WHERE id = ?1 AND is_deleted = 0",
+                "SELECT endpoints, env FROM nginx_configs WHERE id = ?1 AND is_deleted = 0",
                 rusqlite::params![resource_id],
                 |row| {
+                    let endpoints_raw: String = row.get(0)?;
+                    let endpoints: Vec<NginxEndpoint> =
+                        serde_json::from_str(&endpoints_raw).map_err(|err| {
+                            rusqlite::Error::FromSqlConversionFailure(
+                                0,
+                                rusqlite::types::Type::Text,
+                                Box::new(err),
+                            )
+                        })?;
                     Ok((
-                        Some(row.get::<_, String>(0)?),
+                        select_nginx_context_address(&endpoints),
                         Some(row.get::<_, String>(1)?),
                     ))
                 },
@@ -143,9 +172,17 @@ fn build_resource_deploy_context(
     conn: &rusqlite::Connection,
     resource_type: &str,
     resource_id: &str,
+    address_override: Option<String>,
+    resource_env_override: Option<String>,
 ) -> AppResult<ResourceDeployContext> {
-    let (address, resource_env) =
+    let (mut address, mut resource_env) =
         query_resource_address_env(command, conn, resource_type, resource_id)?;
+    if let Some(override_address) = normalize_optional_override(address_override) {
+        address = Some(override_address);
+    }
+    if let Some(override_env) = normalize_optional_override(resource_env_override) {
+        resource_env = Some(override_env);
+    }
     let parsed_ip = address.as_deref().and_then(extract_ipv4_from_address);
 
     let (matched_host_id, matched_host_name) = if let Some(ref ip) = parsed_ip {
@@ -271,13 +308,22 @@ pub fn get_resource_deploy_context(
     pool: State<DbPool>,
     resource_type: String,
     resource_id: String,
+    address_override: Option<String>,
+    resource_env_override: Option<String>,
 ) -> AppResult<ResourceDeployContext> {
     let command = "get_resource_deploy_context";
     let conn = pool
         .get()
         .map_err(|e| AppError::db_unavailable(command, format!("Pool error: {}", e)))?;
 
-    build_resource_deploy_context(command, &conn, &resource_type, &resource_id)
+    build_resource_deploy_context(
+        command,
+        &conn,
+        &resource_type,
+        &resource_id,
+        address_override,
+        resource_env_override,
+    )
 }
 
 #[tauri::command]
@@ -465,7 +511,7 @@ mod tests {
         )
         .expect("update middleware address");
 
-        let context = build_resource_deploy_context("test", &conn, "middleware", "mw1")
+        let context = build_resource_deploy_context("test", &conn, "middleware", "mw1", None, None)
             .expect("build context");
         assert_eq!(context.parsed_ip.as_deref(), Some("10.0.0.8"));
         assert_eq!(context.matched_host_id.as_deref(), Some("h1"));
@@ -477,16 +523,38 @@ mod tests {
         let conn = setup_test_db();
         insert_test_nginx_config(&conn, "ng1", "gateway-1");
         conn.execute(
-            "UPDATE nginx_configs SET address = 'http://10.9.9.9:80', env='dev' WHERE id = 'ng1'",
+            r#"UPDATE nginx_configs
+               SET endpoints = '[{"host":"10.9.9.9","port":80}]', env='dev'
+               WHERE id = 'ng1'"#,
             [],
         )
-        .expect("update nginx address");
+        .expect("update nginx endpoints");
 
-        let context =
-            build_resource_deploy_context("test", &conn, "nginx", "ng1").expect("build context");
+        let context = build_resource_deploy_context("test", &conn, "nginx", "ng1", None, None)
+            .expect("build context");
         assert_eq!(context.parsed_ip.as_deref(), Some("10.9.9.9"));
         assert_eq!(context.matched_host_id, None);
         assert_eq!(context.resource_env.as_deref(), Some("dev"));
+    }
+
+    #[test]
+    fn build_resource_deploy_context_should_prefer_ipv4_endpoint_for_nginx() {
+        let conn = setup_test_db();
+        insert_test_nginx_config(&conn, "ng2", "gateway-priority");
+        conn.execute(
+            r#"UPDATE nginx_configs
+               SET endpoints = '[{"host":"edge.example.com","port":443},{"host":"10.0.0.77","port":8443}]',
+                   env='prod'
+               WHERE id = 'ng2'"#,
+            [],
+        )
+        .expect("update nginx endpoints");
+
+        let context = build_resource_deploy_context("test", &conn, "nginx", "ng2", None, None)
+            .expect("build context");
+        assert_eq!(context.address.as_deref(), Some("10.0.0.77:8443"));
+        assert_eq!(context.parsed_ip.as_deref(), Some("10.0.0.77"));
+        assert_eq!(context.resource_env.as_deref(), Some("prod"));
     }
 
     #[test]
@@ -499,7 +567,7 @@ mod tests {
         )
         .expect("update app address");
 
-        let context = build_resource_deploy_context("test", &conn, "application", "app1")
+        let context = build_resource_deploy_context("test", &conn, "application", "app1", None, None)
             .expect("build context");
         assert_eq!(context.address.as_deref(), Some("https://api.example.com"));
         assert_eq!(context.parsed_ip, None);
@@ -509,7 +577,7 @@ mod tests {
     #[test]
     fn build_resource_deploy_context_should_fail_for_invalid_type() {
         let conn = setup_test_db();
-        let err = build_resource_deploy_context("test", &conn, "invalid", "x")
+        let err = build_resource_deploy_context("test", &conn, "invalid", "x", None, None)
             .expect_err("invalid type should fail");
         assert_eq!(err.code, AppErrorCode::ValidationError);
     }
@@ -555,11 +623,71 @@ mod tests {
         )
         .expect("update middleware");
 
-        let context = build_resource_deploy_context("test", &conn, "middleware", "mw2")
+        let context = build_resource_deploy_context("test", &conn, "middleware", "mw2", None, None)
             .expect("build context");
         assert_eq!(context.parsed_ip.as_deref(), Some("10.0.0.9"));
         assert_eq!(context.matched_host_id.as_deref(), Some("h-dev"));
         assert_eq!(context.resource_env.as_deref(), Some("dev"));
+    }
+
+    #[test]
+    fn build_resource_deploy_context_should_use_runtime_overrides() {
+        let conn = setup_test_db();
+        insert_test_host(&conn, "h-old", "redis-old", "10.0.0.8");
+        insert_test_host(&conn, "h-new-dev", "redis-new-dev", "10.0.0.9");
+        insert_test_host(&conn, "h-new-prod", "redis-new-prod", "10.0.0.9");
+        conn.execute("UPDATE hosts SET env='dev' WHERE id='h-new-dev'", [])
+            .expect("set dev env");
+        conn.execute("UPDATE hosts SET env='prod' WHERE id='h-new-prod'", [])
+            .expect("set prod env");
+
+        let ip_prod_id: String = conn
+            .query_row(
+                "SELECT id FROM ip_addresses WHERE ip_address='10.0.0.9' AND env='prod' AND is_deleted=0 LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .expect("query prod ip id");
+        conn.execute(
+            "INSERT INTO ip_addresses (id, ip_address, env, is_vip, real_ips, is_deleted, created_at, updated_at)
+             VALUES ('ip-new-dev', '10.0.0.9', 'dev', 0, NULL, 0, datetime('now'), datetime('now'))",
+            [],
+        )
+        .expect("insert dev ip");
+        conn.execute(
+            "DELETE FROM host_ip_bindings WHERE host_id IN ('h-new-dev','h-new-prod')",
+            [],
+        )
+        .expect("clear new bindings");
+        conn.execute(
+            "INSERT INTO host_ip_bindings (id, host_id, ip_id, is_deleted, created_at, updated_at)
+             VALUES ('hb-new-dev', 'h-new-dev', 'ip-new-dev', 0, datetime('now'), datetime('now')),
+                    ('hb-new-prod', 'h-new-prod', ?1, 0, datetime('now'), datetime('now'))",
+            rusqlite::params![ip_prod_id],
+        )
+        .expect("insert new bindings");
+
+        insert_test_middleware(&conn, "mw-override", "redis-override", "cache");
+        conn.execute(
+            "UPDATE middlewares SET address = 'redis://10.0.0.8:6379', env = 'dev' WHERE id = 'mw-override'",
+            [],
+        )
+        .expect("update middleware baseline");
+
+        let context = build_resource_deploy_context(
+            "test",
+            &conn,
+            "middleware",
+            "mw-override",
+            Some("redis://10.0.0.9:6379".into()),
+            Some("prod".into()),
+        )
+        .expect("build context with overrides");
+
+        assert_eq!(context.address.as_deref(), Some("redis://10.0.0.9:6379"));
+        assert_eq!(context.resource_env.as_deref(), Some("prod"));
+        assert_eq!(context.parsed_ip.as_deref(), Some("10.0.0.9"));
+        assert_eq!(context.matched_host_id.as_deref(), Some("h-new-prod"));
     }
 
     #[test]

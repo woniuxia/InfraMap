@@ -109,13 +109,16 @@ export interface Middleware {
   updated_at: string;
 }
 
+export interface NginxEndpoint {
+  host: string;
+  port: number;
+}
+
 export interface NginxConfig {
   id: string;
   name: string;
-  address: string;
-  listen_port?: number;
+  endpoints: NginxEndpoint[];
   strategy?: "roundrobin" | "ip_hash";
-  upstream_servers?: string;
   env: "prod" | "dev" | "test";
   status: "running" | "stopped" | "maintenance";
   description?: string;
@@ -323,6 +326,8 @@ export interface TopologyNode {
   env: TopologyEnv;
   group_kind: TopologyGroupKind;
   host_id?: string;
+  host_name?: string;
+  host_ip_display?: string;
   status?: string;
   importance: number;
   extra?: Record<string, unknown>;

@@ -2,9 +2,8 @@
 import { ref, computed, onMounted, onBeforeUnmount } from "vue";
 import { ElMessage } from "element-plus";
 import TopologyCanvas from "@/components/topology/TopologyCanvas.vue";
-import TopologyToolbar from "@/components/topology/TopologyToolbar.vue";
+import TopologyControlBar from "@/components/topology/TopologyControlBar.vue";
 import TopologyDetailPanel from "@/components/topology/TopologyDetailPanel.vue";
-import TopologyLegend from "@/components/topology/TopologyLegend.vue";
 import { findPaths, analyzeImpact } from "@/api/topology";
 import { useTopologyStore } from "@/stores/topology";
 import type { TopologyNode, PathResult, ImpactResult } from "@/types";
@@ -160,15 +159,7 @@ function handleSearch(payload: { matchIds: string[]; focusId?: string }) {
   canvasRef.value?.highlightSearch(payload.matchIds, payload.focusId);
 }
 
-function handleFilter(payload: { nodeKinds: TopologyFilterState["nodeKinds"]; env: TopologyFilterState["env"] }) {
-  activeFilter.value = {
-    ...activeFilter.value,
-    nodeKinds: payload.nodeKinds,
-    env: payload.env,
-  };
-}
-
-function handleLegendChange(payload: Partial<TopologyFilterState>) {
+function handleFilterChange(payload: Partial<TopologyFilterState>) {
   activeFilter.value = {
     ...activeFilter.value,
     ...payload,
@@ -225,11 +216,12 @@ onBeforeUnmount(() => {
 
 <template>
   <div ref="containerRef" class="topology-view" v-loading="loading" @click="closeContextMenu">
-    <!-- Toolbar -->
-    <TopologyToolbar
+    <TopologyControlBar
       :nodes="graphData?.nodes || []"
+      :stats="graphData?.legend_stats || null"
+      :filter="activeFilter"
       @search="handleSearch"
-      @filter="handleFilter"
+      @filter-change="handleFilterChange"
       @layout-change="handleLayoutChange"
       @export="handleExport"
       @refresh="loadData"
@@ -262,15 +254,9 @@ onBeforeUnmount(() => {
 
         <!-- Empty state -->
         <div v-if="graphData && graphData.nodes.length === 0 && !loading" class="empty-overlay">
-          <el-empty :description="(rawGraphData?.nodes.length || 0) > 0 ? '当前筛选无数据，请调整图例筛选项' : '暂无拓扑数据，请先添加资源和关系'" />
+          <el-empty :description="(rawGraphData?.nodes.length || 0) > 0 ? '当前筛选无数据，请调整顶部筛选项' : '暂无拓扑数据，请先添加资源和关系'" />
         </div>
       </div>
-
-      <TopologyLegend
-        :stats="graphData?.legend_stats || null"
-        :filter="activeFilter"
-        @change="handleLegendChange"
-      />
 
       <!-- Detail panel -->
       <TopologyDetailPanel

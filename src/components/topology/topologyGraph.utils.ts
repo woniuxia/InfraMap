@@ -36,6 +36,8 @@ export const DEFAULT_TOPOLOGY_FILTER: TopologyFilterState = {
 export const EDGE_RENDER_LIMIT = 260;
 export const EXTERNAL_NODE_PREFIX = "external:";
 export const EXTERNAL_ZONE_COMBO_ID = "external-zone";
+const UUID_LIKE_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const HOST_GENERATED_ID_PATTERN = /^host-\d{8,}-[0-9a-f]{6,}$/i;
 
 function countKinds(items: string[]): TopologyKindCount[] {
   const map = new Map<string, number>();
@@ -267,19 +269,110 @@ function hostComboId(hostId: string): string {
   return `host-${hostId}`;
 }
 
+export function compactLabel(value: string, maxLength = 16): string {
+  if (value.length <= maxLength) return value;
+  return `${value.slice(0, Math.max(1, maxLength - 1))}…`;
+}
+
+export function isOpaqueIdentifier(value: string): boolean {
+  const trimmed = value.trim();
+  if (!trimmed) return true;
+  if (UUID_LIKE_PATTERN.test(trimmed) || HOST_GENERATED_ID_PATTERN.test(trimmed)) return true;
+  const normalized = trimmed.replace(/[-_]/g, "");
+  const digitCount = (normalized.match(/\d/g) || []).length;
+  const letterCount = (normalized.match(/[a-z]/gi) || []).length;
+  const hasChinese = /[\u4e00-\u9fa5]/.test(trimmed);
+  return !hasChinese && normalized.length >= 18 && digitCount >= 8 && letterCount >= 4;
+}
+
+function asNonEmptyString(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function pickHostName(nodes: TopologyNode[]): string | null {
+  for (const node of nodes) {
+    const direct = asNonEmptyString(node.host_name);
+    if (direct) return direct;
+
+    const extra = node.extra;
+    if (!extra) continue;
+    const candidate = asNonEmptyString(extra.host_name)
+      || asNonEmptyString(extra.host_hostname)
+      || asNonEmptyString(extra.hostname)
+      || asNonEmptyString(extra.host_display);
+    if (candidate) return candidate;
+  }
+  return null;
+}
+
+function pickHostIpDisplay(nodes: TopologyNode[]): string | null {
+  for (const node of nodes) {
+    const direct = asNonEmptyString(node.host_ip_display);
+    if (direct) return direct;
+
+    const extra = node.extra;
+    if (!extra) continue;
+    const candidate = asNonEmptyString(extra.host_ip_display) || asNonEmptyString(extra.ip_display);
+    if (candidate) return candidate;
+  }
+  return null;
+}
+
+function formatHostIpSummary(ipDisplay: string | null): string | null {
+  if (!ipDisplay) return null;
+  const items = ipDisplay
+    .split(/[，,]/)
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+  if (items.length === 0) return null;
+  if (items.length === 1) return items[0];
+  return `${items[0]} +${items.length - 1}`;
+}
+
+export function formatHostDisplayName(hostName: string | null, hostIpDisplay: string | null): string | null {
+  const ipSummary = formatHostIpSummary(hostIpDisplay);
+  if (hostName && ipSummary) return `${hostName} · ${ipSummary}`;
+  if (hostName) return hostName;
+  if (ipSummary) return ipSummary;
+  return null;
+}
+
+export function formatHostComboLabel(hostId: string, hostNodes: TopologyNode[]): string {
+  const hostName = pickHostName(hostNodes);
+  const hostIpDisplay = pickHostIpDisplay(hostNodes);
+  const displayName = formatHostDisplayName(hostName, hostIpDisplay);
+  const baseLabel = displayName
+    || (isOpaqueIdentifier(hostId) ? `主机 #${hostId.slice(-6)}` : hostId);
+  return compactLabel(baseLabel, 22);
+}
+
 export function buildTopologyG6Data(graph: TopologyGraph): GraphData {
-  const hostCombos: ComboData[] = [];
-  const hostSeen = new Set<string>();
+  const nodesByHost = new Map<string, TopologyNode[]>();
   for (const node of graph.nodes) {
-    if (!node.host_id || isExternalTopologyNode(node) || hostSeen.has(node.host_id)) continue;
-    hostSeen.add(node.host_id);
+    if (!node.host_id || isExternalTopologyNode(node)) continue;
+    const items = nodesByHost.get(node.host_id);
+    if (items) {
+      items.push(node);
+    } else {
+      nodesByHost.set(node.host_id, [node]);
+    }
+  }
+
+  const comboHostIds = new Set<string>();
+  const hostCombos: ComboData[] = [];
+  for (const [hostId, hostNodes] of nodesByHost.entries()) {
+    if (hostNodes.length < 2) continue;
+    comboHostIds.add(hostId);
     hostCombos.push({
-      id: hostComboId(node.host_id),
+      id: hostComboId(hostId),
       type: "rect",
       data: {
         kind: "host",
-        host_id: node.host_id,
-        label: node.host_id,
+        host_id: hostId,
+        label: formatHostComboLabel(hostId, hostNodes),
+        node_count: hostNodes.length,
       },
     });
   }
@@ -300,7 +393,7 @@ export function buildTopologyG6Data(graph: TopologyGraph): GraphData {
     let combo: string | undefined;
     if (isExternalTopologyNode(node)) {
       combo = EXTERNAL_ZONE_COMBO_ID;
-    } else if (node.host_id) {
+    } else if (node.host_id && comboHostIds.has(node.host_id)) {
       combo = hostComboId(node.host_id);
     }
 
@@ -314,6 +407,8 @@ export function buildTopologyG6Data(graph: TopologyGraph): GraphData {
         status: node.status,
         env: node.env,
         host_id: node.host_id,
+        host_name: node.host_name,
+        host_ip_display: node.host_ip_display,
         importance: node.importance,
         is_external: isExternalTopologyNode(node),
         external_ref_id: node.external_ref_id || node.extra?.external_ref_id,

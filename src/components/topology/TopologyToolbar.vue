@@ -92,7 +92,7 @@ const envOptions = [
 ] as const;
 const selectedEnv = ref<"prod" | "test" | "dev">("prod");
 
-const selectedLayout = ref<"force" | "dagre">("force");
+const selectedLayout = ref<"force" | "dagre">("dagre");
 
 function emitFilter() {
   emit("filter", { nodeKinds: selectedTypes.value, env: selectedEnv.value });

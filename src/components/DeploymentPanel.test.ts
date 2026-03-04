@@ -103,11 +103,22 @@ function flushPromises() {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
-function mountPanel() {
+function mountPanel(
+  props: {
+    resourceId?: string;
+    resourceType?: "application" | "middleware" | "nginx";
+    resourcePersisted?: boolean;
+    resourceAddress?: string;
+    resourceEnv?: "prod" | "dev" | "test";
+  } = {}
+) {
   return mount(DeploymentPanel, {
     props: {
-      resourceId: "mw-1",
-      resourceType: "middleware",
+      resourceId: props.resourceId ?? "mw-1",
+      resourceType: props.resourceType ?? "middleware",
+      resourcePersisted: props.resourcePersisted,
+      resourceAddress: props.resourceAddress,
+      resourceEnv: props.resourceEnv,
     },
     global: {
       stubs: {
@@ -220,5 +231,94 @@ describe("DeploymentPanel", () => {
     await flushPromises();
 
     expect(messageSuccess).toHaveBeenCalled();
+  });
+
+  it("stores deployment rows locally in draft mode before resource is persisted", async () => {
+    __setMockHandler("list_hosts", () => ({
+      data: [
+        {
+          id: "h-1",
+          hostname: "host-1",
+          ip_display: "10.0.0.11",
+          env: "prod",
+          status: "running",
+          created_at: "",
+          updated_at: "",
+        },
+      ],
+      total: 1,
+      page: 1,
+      page_size: 999,
+    }));
+
+    const wrapper = mountPanel({
+      resourceId: "app-draft-1",
+      resourceType: "application",
+      resourcePersisted: false,
+    });
+    await flushPromises();
+
+    const addBtn = wrapper.findAll("button").find((btn) => btn.text() === "添加");
+    expect(addBtn).toBeDefined();
+    await addBtn!.trigger("click");
+    await flushPromises();
+
+    const hostSelect = wrapper.find("select");
+    expect(hostSelect.exists()).toBe(true);
+    await hostSelect.setValue("h-1");
+    await flushPromises();
+
+    const confirmBtn = wrapper.findAll("button").find((btn) => btn.text() === "确定");
+    expect(confirmBtn).toBeDefined();
+    await confirmBtn!.trigger("click");
+    await flushPromises();
+
+    const exposed = wrapper.vm as unknown as {
+      getDraftDeployments: () => Array<{ host_id: string; port?: number }>;
+    };
+    expect(exposed.getDraftDeployments()).toEqual([
+      {
+        host_id: "h-1",
+        port: undefined,
+      },
+    ]);
+    expect(messageSuccess).toHaveBeenCalledWith("部署关系已暂存，保存应用后生效");
+  });
+
+  it("passes live address/env overrides when loading deploy context", async () => {
+    __setMockHandler("list_deployments", () => ({ data: [], total: 0, page: 1, page_size: 100 }));
+    __setMockHandler("list_hosts", () => ({ data: [], total: 0, page: 1, page_size: 999 }));
+    const contextHandler = vi.fn((_cmd, args) => {
+      expect(args).toEqual({
+        resourceType: "middleware",
+        resourceId: "mw-1",
+        addressOverride: "redis://10.0.0.9:6379",
+        resourceEnvOverride: "dev",
+      });
+      return {
+        resource_type: "middleware",
+        resource_id: "mw-1",
+        address: "redis://10.0.0.9:6379",
+        resource_env: "dev",
+        parsed_ip: "10.0.0.9",
+        matched_host_id: null,
+        matched_host_name: null,
+      };
+    });
+    __setMockHandler("get_resource_deploy_context", contextHandler);
+
+    const wrapper = mountPanel({
+      resourceId: "mw-1",
+      resourceType: "middleware",
+      resourceAddress: "redis://10.0.0.9:6379",
+      resourceEnv: "dev",
+    });
+    await flushPromises();
+
+    const addBtn = wrapper.findAll("button").find((btn) => btn.text() === "添加");
+    expect(addBtn).toBeDefined();
+    await addBtn!.trigger("click");
+    await flushPromises();
+    expect(contextHandler).toHaveBeenCalledTimes(1);
   });
 });

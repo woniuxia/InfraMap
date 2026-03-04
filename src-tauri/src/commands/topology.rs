@@ -1,5 +1,6 @@
 use crate::db::DbPool;
 use crate::error::{AppError, AppResult};
+use crate::models::nginx_config::NginxEndpoint;
 use crate::models::topology::{
     AffectedNode, ImpactResult, PathResult, TopologyEdgeV2, TopologyEnvCount, TopologyGraphV2,
     TopologyKindCount, TopologyLane, TopologyLayoutHints, TopologyLegendStats, TopologyNodeV2,
@@ -37,22 +38,62 @@ fn vectorize_kind_count(map: HashMap<String, u32>) -> Vec<TopologyKindCount> {
     items
 }
 
+#[derive(Debug, Clone)]
+struct HostTopologyMeta {
+    env: String,
+    host_name: Option<String>,
+    host_ip_display: Option<String>,
+}
+
+fn normalize_optional_text(value: Option<String>) -> Option<String> {
+    value.and_then(|item| {
+        let trimmed = item.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    })
+}
+
 pub fn get_topology_graph_inner(conn: &Connection) -> Result<TopologyGraphV2, String> {
-    let mut host_env_map: HashMap<String, String> = HashMap::new();
+    let mut host_meta_map: HashMap<String, HostTopologyMeta> = HashMap::new();
     {
         let mut stmt = conn
-            .prepare("SELECT id, env FROM hosts WHERE is_deleted = 0")
+            .prepare(
+                "SELECT
+                    h.id,
+                    h.hostname,
+                    h.env,
+                    NULLIF((
+                      SELECT GROUP_CONCAT(ia.ip_address, ', ')
+                      FROM host_ip_bindings hb
+                      JOIN ip_addresses ia ON ia.id = hb.ip_id
+                      WHERE hb.host_id = h.id AND hb.is_deleted = 0 AND ia.is_deleted = 0
+                    ), '') AS host_ip_display
+                FROM hosts h
+                WHERE h.is_deleted = 0",
+            )
             .map_err(|e| e.to_string())?;
         let rows = stmt
             .query_map([], |row| {
                 let host_id: String = row.get(0)?;
-                let env: Option<String> = row.get(1)?;
-                Ok((host_id, normalize_env(env)))
+                let host_name: Option<String> = row.get(1)?;
+                let env: Option<String> = row.get(2)?;
+                let host_ip_display: Option<String> = row.get(3)?;
+                Ok((
+                    host_id,
+                    HostTopologyMeta {
+                        env: normalize_env(env),
+                        host_name: normalize_optional_text(host_name),
+                        host_ip_display: normalize_optional_text(host_ip_display),
+                    },
+                ))
             })
             .map_err(|e| e.to_string())?;
         for row in rows {
-            let (host_id, env) = row.map_err(|e| e.to_string())?;
-            host_env_map.insert(host_id, env);
+            let (host_id, host_meta) = row.map_err(|e| e.to_string())?;
+            host_meta_map.insert(host_id, host_meta);
         }
     }
 
@@ -120,6 +161,8 @@ pub fn get_topology_graph_inner(conn: &Connection) -> Result<TopologyGraphV2, St
                     env,
                     group_kind: "application_service".to_string(),
                     host_id: None,
+                    host_name: None,
+                    host_ip_display: None,
                     status,
                     importance: 1.0,
                     extra: Some(serde_json::Value::Object(extra)),
@@ -130,8 +173,10 @@ pub fn get_topology_graph_inner(conn: &Connection) -> Result<TopologyGraphV2, St
             let mut node = row.map_err(|e| e.to_string())?;
             node.host_id = deployment_host_map.get(&node.id).cloned();
             if let Some(host_id) = node.host_id.as_ref() {
-                if let Some(host_env) = host_env_map.get(host_id) {
-                    node.env = host_env.clone();
+                if let Some(host_meta) = host_meta_map.get(host_id) {
+                    node.env = host_meta.env.clone();
+                    node.host_name = host_meta.host_name.clone();
+                    node.host_ip_display = host_meta.host_ip_display.clone();
                 }
             }
             node_env_map.insert(node.id.clone(), node.env.clone());
@@ -190,6 +235,8 @@ pub fn get_topology_graph_inner(conn: &Connection) -> Result<TopologyGraphV2, St
                     env,
                     group_kind: "middleware".to_string(),
                     host_id: None,
+                    host_name: None,
+                    host_ip_display: None,
                     status: None,
                     importance: 0.82,
                     extra: Some(serde_json::Value::Object(extra)),
@@ -200,8 +247,10 @@ pub fn get_topology_graph_inner(conn: &Connection) -> Result<TopologyGraphV2, St
             let mut node = row.map_err(|e| e.to_string())?;
             node.host_id = deployment_host_map.get(&node.id).cloned();
             if let Some(host_id) = node.host_id.as_ref() {
-                if let Some(host_env) = host_env_map.get(host_id) {
-                    node.env = host_env.clone();
+                if let Some(host_meta) = host_meta_map.get(host_id) {
+                    node.env = host_meta.env.clone();
+                    node.host_name = host_meta.host_name.clone();
+                    node.host_ip_display = host_meta.host_ip_display.clone();
                 }
             }
             node_env_map.insert(node.id.clone(), node.env.clone());
@@ -212,7 +261,7 @@ pub fn get_topology_graph_inner(conn: &Connection) -> Result<TopologyGraphV2, St
     {
         let mut stmt = conn
             .prepare(
-                "SELECT id, name, listen_port, strategy, env, status \
+                "SELECT id, name, endpoints, strategy, env, status \
                  FROM nginx_configs WHERE is_deleted = 0",
             )
             .map_err(|e| e.to_string())?;
@@ -220,14 +269,35 @@ pub fn get_topology_graph_inner(conn: &Connection) -> Result<TopologyGraphV2, St
             .query_map([], |row| {
                 let id: String = row.get(0)?;
                 let name: String = row.get(1)?;
-                let listen_port: Option<i64> = row.get(2)?;
+                let endpoints_raw: String = row.get(2)?;
+                let endpoints: Vec<NginxEndpoint> =
+                    serde_json::from_str(&endpoints_raw).map_err(|err| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            2,
+                            rusqlite::types::Type::Text,
+                            Box::new(err),
+                        )
+                    })?;
                 let strategy: Option<String> = row.get(3)?;
                 let env = normalize_env(row.get(4)?);
                 let status: Option<String> = row.get(5)?;
 
                 let mut extra = serde_json::Map::new();
-                if let Some(value) = listen_port {
-                    extra.insert("listen_port".to_string(), serde_json::json!(value));
+                extra.insert(
+                    "endpoint_count".to_string(),
+                    serde_json::json!(endpoints.len()),
+                );
+                if let Some(first_endpoint) = endpoints.first() {
+                    let endpoint_text =
+                        format!("{}:{}", first_endpoint.host.trim(), first_endpoint.port);
+                    extra.insert(
+                        "first_endpoint".to_string(),
+                        serde_json::Value::String(endpoint_text.clone()),
+                    );
+                    extra.insert(
+                        "address".to_string(),
+                        serde_json::Value::String(endpoint_text),
+                    );
                 }
                 if let Some(ref value) = strategy {
                     extra.insert(
@@ -243,6 +313,8 @@ pub fn get_topology_graph_inner(conn: &Connection) -> Result<TopologyGraphV2, St
                     env,
                     group_kind: "nginx".to_string(),
                     host_id: None,
+                    host_name: None,
+                    host_ip_display: None,
                     status,
                     importance: 0.9,
                     extra: Some(serde_json::Value::Object(extra)),
@@ -253,8 +325,10 @@ pub fn get_topology_graph_inner(conn: &Connection) -> Result<TopologyGraphV2, St
             let mut node = row.map_err(|e| e.to_string())?;
             node.host_id = deployment_host_map.get(&node.id).cloned();
             if let Some(host_id) = node.host_id.as_ref() {
-                if let Some(host_env) = host_env_map.get(host_id) {
-                    node.env = host_env.clone();
+                if let Some(host_meta) = host_meta_map.get(host_id) {
+                    node.env = host_meta.env.clone();
+                    node.host_name = host_meta.host_name.clone();
+                    node.host_ip_display = host_meta.host_ip_display.clone();
                 }
             }
             node_env_map.insert(node.id.clone(), node.env.clone());
@@ -758,6 +832,8 @@ mod tests {
             .find(|node| node.id == "A")
             .expect("node A should exist");
         assert_eq!(node_a.host_id.as_deref(), Some("H1"));
+        assert_eq!(node_a.host_name.as_deref(), Some("server1"));
+        assert_eq!(node_a.host_ip_display.as_deref(), Some("10.0.0.1"));
         assert_eq!(node_a.env, "test");
 
         let lane_test = graph
@@ -766,6 +842,48 @@ mod tests {
             .find(|lane| lane.id == "test")
             .expect("test lane should exist");
         assert!(lane_test.node_count >= 1);
+    }
+
+    #[test]
+    fn test_get_topology_graph_should_set_host_name_without_ip_when_no_binding() {
+        let conn = setup_test_db();
+        setup_graph(&conn);
+        let now = chrono::Utc::now().to_rfc3339();
+        conn.execute(
+            "INSERT INTO hosts (id, hostname, env, status, is_deleted, created_at, updated_at)
+             VALUES ('H2', 'server2', 'prod', 'running', 0, ?1, ?2)",
+            rusqlite::params![now, now],
+        )
+        .expect("insert host without ip binding");
+        insert_test_deployment(&conn, "dep2", "B", "application", "H2");
+
+        let graph = get_topology_graph_inner(&conn).unwrap();
+        let node_b = graph
+            .nodes
+            .iter()
+            .find(|node| node.id == "B")
+            .expect("node B should exist");
+        assert_eq!(node_b.host_id.as_deref(), Some("H2"));
+        assert_eq!(node_b.host_name.as_deref(), Some("server2"));
+        assert_eq!(node_b.host_ip_display, None);
+    }
+
+    #[test]
+    fn test_get_topology_graph_should_keep_host_meta_empty_when_host_missing() {
+        let conn = setup_test_db();
+        setup_graph(&conn);
+        insert_test_deployment(&conn, "dep3", "C", "application", "H-MISSING");
+
+        let graph = get_topology_graph_inner(&conn).unwrap();
+        let node_c = graph
+            .nodes
+            .iter()
+            .find(|node| node.id == "C")
+            .expect("node C should exist");
+        assert_eq!(node_c.host_id.as_deref(), Some("H-MISSING"));
+        assert_eq!(node_c.host_name, None);
+        assert_eq!(node_c.host_ip_display, None);
+        assert_eq!(node_c.env, "prod");
     }
 
     #[test]

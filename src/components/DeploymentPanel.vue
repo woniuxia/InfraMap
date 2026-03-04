@@ -16,6 +16,9 @@ const props = defineProps<{
   resourceId: string;
   resourceType: "application" | "middleware" | "nginx";
   defaultPort?: number;
+  resourcePersisted?: boolean;
+  resourceAddress?: string;
+  resourceEnv?: Host["env"];
 }>();
 
 const deployments = ref<Deployment[]>([]);
@@ -28,6 +31,7 @@ const contextLoading = ref(false);
 const quickCreateLoading = ref(false);
 const hostLocked = ref(false);
 const resourceContext = ref<ResourceDeployContext | null>(null);
+const isDraftMode = computed(() => props.resourcePersisted === false);
 
 const hasUnmatchedIp = computed(
   () => Boolean(resourceContext.value?.parsed_ip) && !resourceContext.value?.matched_host_id
@@ -54,8 +58,19 @@ function splitIpDisplay(value?: string): string[] {
     .filter((item) => item.length > 0);
 }
 
+function normalizeAddressOverride(value?: string): string | undefined {
+  const trimmed = value?.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  return trimmed;
+}
+
 async function fetchDeployments() {
   if (!props.resourceId) return;
+  if (isDraftMode.value) {
+    return;
+  }
   loading.value = true;
   try {
     const result = await listDeployments({
@@ -88,7 +103,10 @@ function hostName(hostId: string) {
 async function loadResourceDeployContext() {
   contextLoading.value = true;
   try {
-    const context = await getResourceDeployContext(props.resourceType, props.resourceId);
+    const context = await getResourceDeployContext(props.resourceType, props.resourceId, {
+      address: normalizeAddressOverride(props.resourceAddress),
+      resourceEnv: props.resourceEnv,
+    });
     resourceContext.value = context;
     if (context.matched_host_id) {
       newDeploy.value.host_id = context.matched_host_id;
@@ -112,6 +130,9 @@ async function openAdd() {
   resourceContext.value = null;
   addVisible.value = true;
   await fetchHosts();
+  if (isDraftMode.value) {
+    return;
+  }
   await loadResourceDeployContext();
 }
 
@@ -207,6 +228,26 @@ async function handleAdd() {
     ElMessage.warning("请选择目标服务器");
     return;
   }
+  if (isDraftMode.value) {
+    const duplicated = deployments.value.some((item) => item.host_id === newDeploy.value.host_id);
+    if (duplicated) {
+      ElMessage.warning("同一服务器已存在部署关系");
+      return;
+    }
+    const draftDeployment: Deployment = {
+      id: `draft-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+      resource_id: props.resourceId,
+      resource_type: props.resourceType,
+      host_id: newDeploy.value.host_id,
+      port: newDeploy.value.port,
+      created_at: "",
+      updated_at: "",
+    };
+    deployments.value = [draftDeployment, ...deployments.value];
+    ElMessage.success("部署关系已暂存，保存应用后生效");
+    addVisible.value = false;
+    return;
+  }
   saveLoading.value = true;
   try {
     await saveDeployment({
@@ -233,6 +274,11 @@ async function handleRemove(dep: Deployment) {
       cancelButtonText: "取消",
       type: "warning",
     });
+    if (isDraftMode.value) {
+      deployments.value = deployments.value.filter((item) => item.id !== dep.id);
+      ElMessage.success("已删除");
+      return;
+    }
     await deleteDeployment(dep.id);
     ElMessage.success("已删除");
     fetchDeployments();
@@ -241,7 +287,27 @@ async function handleRemove(dep: Deployment) {
   }
 }
 
+function getDraftDeployments() {
+  if (!isDraftMode.value) {
+    return [];
+  }
+  return deployments.value.map((item) => ({
+    host_id: item.host_id,
+    port: item.port,
+  }));
+}
+
+defineExpose({
+  getDraftDeployments,
+});
+
 watch(() => props.resourceId, fetchDeployments);
+watch(
+  () => props.resourcePersisted,
+  () => {
+    fetchDeployments();
+  }
+);
 onMounted(() => {
   fetchDeployments();
   fetchHosts();
@@ -275,7 +341,7 @@ onMounted(() => {
       :image-size="40"
     />
 
-    <el-dialog v-model="addVisible" title="添加部署关系" width="360px" append-to-body>
+    <el-dialog v-model="addVisible" title="添加部署关系" width="420px" append-to-body>
       <el-form :model="newDeploy" label-width="110px">
         <el-form-item label="目标服务器" required>
           <el-select
@@ -351,4 +417,3 @@ onMounted(() => {
   font-size: 12px;
 }
 </style>
-

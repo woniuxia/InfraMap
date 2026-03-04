@@ -93,8 +93,8 @@ pub fn insert_test_middleware(conn: &Connection, id: &str, name: &str, category:
 pub fn insert_test_nginx_config(conn: &Connection, id: &str, name: &str) {
     let now = chrono::Utc::now().to_rfc3339();
     conn.execute(
-        "INSERT INTO nginx_configs (id, name, env, status, is_deleted, created_at, updated_at)
-         VALUES (?1, ?2, 'prod', 'running', 0, ?3, ?4)",
+        "INSERT INTO nginx_configs (id, name, endpoints, env, status, is_deleted, created_at, updated_at)
+         VALUES (?1, ?2, '[]', 'prod', 'running', 0, ?3, ?4)",
         rusqlite::params![id, name, now, now],
     )
     .unwrap_or_else(|e| panic!("insert_test_nginx_config failed: {}", e));

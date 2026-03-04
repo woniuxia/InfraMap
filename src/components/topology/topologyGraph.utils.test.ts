@@ -5,6 +5,9 @@ import {
   buildTopologyG6Data,
   computeLegendStats,
   filterTopologyGraph,
+  formatHostDisplayName,
+  formatHostComboLabel,
+  isOpaqueIdentifier,
 } from "@/components/topology/topologyGraph.utils";
 
 function createNode(partial: Partial<TopologyNode> & Pick<TopologyNode, "id" | "name" | "node_type" | "env" | "group_kind">): TopologyNode {
@@ -52,7 +55,7 @@ function createGraphFixture(): TopologyGraph {
       env: "dev",
       group_kind: "nginx",
       status: "running",
-      extra: { listen_port: 8080 },
+      extra: { endpoint_count: 2, first_endpoint: "10.0.2.8:8080", address: "10.0.2.8:8080" },
     }),
   ];
 
@@ -237,5 +240,79 @@ describe("topologyGraph utils", () => {
     expect(hostCombos[0].id).toBe("host-host-prod-1");
     expect(externalCombo).toBeTruthy();
     expect(g6Data.nodes?.some((node) => node.combo === "external-zone")).toBe(true);
+  });
+
+  it("should not create host combo for single-node host", () => {
+    const graph: TopologyGraph = {
+      lanes: [
+        { id: "prod", label: "生产", order: 0, node_count: 2, app_count: 2 },
+        { id: "test", label: "测试", order: 1, node_count: 0, app_count: 0 },
+        { id: "dev", label: "开发", order: 2, node_count: 0, app_count: 0 },
+      ],
+      nodes: [
+        createNode({
+          id: "app-a",
+          name: "A",
+          node_type: "application",
+          env: "prod",
+          group_kind: "application_service",
+          host_id: "host-a",
+        }),
+        createNode({
+          id: "app-b",
+          name: "B",
+          node_type: "application",
+          env: "prod",
+          group_kind: "application_service",
+          host_id: "host-b",
+        }),
+      ],
+      edges: [],
+      legend_stats: computeLegendStats([], [], "prod"),
+      layout_hints: {
+        lane_order: ["prod", "test", "dev"],
+        default_collapsed_groups: [],
+        high_density_mode: false,
+      },
+    };
+
+    const g6Data = buildTopologyG6Data(graph);
+    const hostCombos = (g6Data.combos || []).filter((combo) => combo.data?.kind === "host");
+    expect(hostCombos).toHaveLength(0);
+    expect(g6Data.nodes?.every((node) => !node.combo)).toBe(true);
+  });
+
+  it("should format opaque host id into readable combo label", () => {
+    const hostId = "host-1772540925435-ed5c58b0";
+    const label = formatHostComboLabel(hostId, []);
+    expect(isOpaqueIdentifier(hostId)).toBe(true);
+    expect(label.startsWith("主机 #")).toBe(true);
+  });
+
+  it("should compose host display name with hostname and ip", () => {
+    expect(formatHostDisplayName("web-01", "10.0.1.12")).toBe("web-01 · 10.0.1.12");
+    expect(formatHostDisplayName("web-01", null)).toBe("web-01");
+    expect(formatHostDisplayName(null, "10.0.1.12")).toBe("10.0.1.12");
+    expect(formatHostDisplayName(null, null)).toBeNull();
+  });
+
+  it("should summarize multiple host ips with count suffix", () => {
+    expect(formatHostDisplayName(null, "10.0.1.12, 10.0.1.13,10.0.1.14")).toBe("10.0.1.12 +2");
+  });
+
+  it("should prefer host meta fields when formatting host combo label", () => {
+    const label = formatHostComboLabel("host-opaque-id", [
+      createNode({
+        id: "app-1",
+        name: "app",
+        node_type: "application",
+        env: "prod",
+        group_kind: "application_service",
+        host_id: "host-opaque-id",
+        host_name: "payment-host",
+        host_ip_display: "10.6.1.8",
+      }),
+    ]);
+    expect(label).toBe("payment-host · 10.6.1…");
   });
 });

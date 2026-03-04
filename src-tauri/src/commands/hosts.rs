@@ -35,7 +35,14 @@ fn sync_host_taxonomy_terms(
     save_resource_terms(conn, "host", host_id, FIELD_OS_TYPE, &os_type_values, now)?;
 
     let cpu_model_values = parse_single_term(host.cpu_model.as_deref());
-    save_resource_terms(conn, "host", host_id, FIELD_CPU_MODEL, &cpu_model_values, now)?;
+    save_resource_terms(
+        conn,
+        "host",
+        host_id,
+        FIELD_CPU_MODEL,
+        &cpu_model_values,
+        now,
+    )?;
 
     Ok(())
 }

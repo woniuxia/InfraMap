@@ -62,7 +62,8 @@ function extraEntries(node: TopologyNode): { key: string; value: string }[] {
     address: '地址',
     port: '端口',
     version: '版本',
-    listen_port: '监听端口',
+    endpoint_count: '端点数量',
+    first_endpoint: '首个端点',
     strategy: '策略',
   }
   for (const [k, v] of Object.entries(node.extra)) {

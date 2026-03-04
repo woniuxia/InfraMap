@@ -5,6 +5,7 @@ import type { Middleware } from "@/types";
 import type { SearchFieldConfig, SearchToolbarQueryPayload } from "@/types/searchToolbar";
 import { listMiddlewares, saveMiddleware, deleteMiddleware } from "@/api/middlewares";
 import { replaceResourceCallRelations } from "@/api/call-relations";
+import { saveDeployment } from "@/api/deployments";
 import { useResourceList } from "@/composables/useResourceList";
 import {
   MIDDLEWARE_CATEGORY_OPTIONS,
@@ -41,6 +42,14 @@ const isEditing = ref(false);
 const saveLoading = ref(false);
 const autoFilledPort = ref<number | undefined>(undefined);
 const callRelationsEditorRef = ref<InstanceType<typeof CallRelationsEditor> | null>(null);
+interface DraftDeploymentItem {
+  host_id: string;
+  port?: number;
+}
+interface DeploymentPanelExposed {
+  getDraftDeployments: () => DraftDeploymentItem[];
+}
+const deploymentPanelRef = ref<DeploymentPanelExposed | null>(null);
 
 interface MiddlewareListFilters {
   category: string[];
@@ -90,10 +99,17 @@ function handleToolbarQuery(payload: SearchToolbarQueryPayload) {
   handleQuery(payload);
 }
 
+function generateDraftMiddlewareId() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return `mw-${crypto.randomUUID()}`;
+  }
+  return `mw-draft-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
+}
+
 function openAdd() {
   autoFilledPort.value = undefined;
   editingMw.value = {
-    id: "",
+    id: generateDraftMiddlewareId(),
     env: "prod",
     category: "database",
     created_at: "",
@@ -112,7 +128,10 @@ function openEdit(row: Middleware) {
 
 function openCopy(row: Middleware) {
   autoFilledPort.value = undefined;
-  editingMw.value = buildMiddlewareCopyDraft(row);
+  editingMw.value = {
+    ...buildMiddlewareCopyDraft(row),
+    id: generateDraftMiddlewareId(),
+  };
   isEditing.value = false;
   drawerVisible.value = true;
 }
@@ -123,6 +142,8 @@ async function handleSave() {
     return;
   }
 
+  const wasEditing = isEditing.value;
+  const draftDeployments = !wasEditing ? deploymentPanelRef.value?.getDraftDeployments?.() ?? [] : [];
   const payload: Partial<Middleware> = {
     id: "",
     created_at: "",
@@ -141,7 +162,24 @@ async function handleSave() {
     } catch {
       ElMessage.warning("中间件已保存，调用关系保存失败，请重新编辑后重试。");
     }
-    ElMessage.success(isEditing.value ? "更新成功" : "创建成功");
+    if (!wasEditing && draftDeployments.length > 0) {
+      try {
+        await Promise.all(
+          draftDeployments.map((item) =>
+            saveDeployment({
+              id: "",
+              resource_id: middlewareId,
+              resource_type: "middleware",
+              host_id: item.host_id,
+              port: item.port,
+            })
+          )
+        );
+      } catch {
+        ElMessage.warning("中间件已保存，部署关系保存失败，请在部署关系中重试。");
+      }
+    }
+    ElMessage.success(wasEditing ? "更新成功" : "创建成功");
     drawerVisible.value = false;
     fetchData();
   } catch {
@@ -363,7 +401,16 @@ watch(
         resource-type="middleware"
       />
 
-      <DeploymentPanel v-if="isEditing && editingMw.id" :resource-id="editingMw.id!" resource-type="middleware" />
+      <DeploymentPanel
+        v-if="Boolean(editingMw.id)"
+        ref="deploymentPanelRef"
+        :resource-id="editingMw.id!"
+        resource-type="middleware"
+        :resource-persisted="isEditing"
+        :resource-address="editingMw.address"
+        :resource-env="editingMw.env"
+        :default-port="editingMw.port"
+      />
 
       <template #footer>
         <el-button @click="drawerVisible = false">取消</el-button>
@@ -506,6 +553,4 @@ watch(
   border-radius: 4px;
 }
 </style>
-
-
 

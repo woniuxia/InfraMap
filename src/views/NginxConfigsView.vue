@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
 import { ElMessage } from "element-plus";
-import type { NginxConfig } from "@/types";
+import type { NginxConfig, NginxEndpoint } from "@/types";
 import type { SearchFieldConfig, SearchToolbarQueryPayload } from "@/types/searchToolbar";
 import { listNginxConfigs, saveNginxConfig, deleteNginxConfig } from "@/api/nginx-configs";
 import { replaceResourceCallRelations } from "@/api/call-relations";
@@ -101,7 +101,7 @@ function handleToolbarQuery(payload: SearchToolbarQueryPayload) {
 function openAdd() {
   editingNc.value = {
     id: "",
-    address: "",
+    endpoints: [createEmptyEndpoint()],
     status: "running",
     env: "prod",
     strategy: "roundrobin",
@@ -113,15 +113,107 @@ function openAdd() {
 }
 
 function openEdit(row: NginxConfig) {
-  editingNc.value = { ...row };
+  editingNc.value = {
+    ...row,
+    endpoints: normalizeEndpointDraft(row.endpoints),
+  };
   isEditing.value = true;
   drawerVisible.value = true;
 }
 
 function openCopy(row: NginxConfig) {
-  editingNc.value = buildNginxCopyDraft(row);
+  editingNc.value = {
+    ...buildNginxCopyDraft(row),
+    endpoints: normalizeEndpointDraft(row.endpoints),
+  };
   isEditing.value = false;
   drawerVisible.value = true;
+}
+
+function createEmptyEndpoint(): NginxEndpoint {
+  return {
+    host: "",
+    port: 80,
+  };
+}
+
+function normalizeEndpointDraft(endpoints?: NginxEndpoint[]): NginxEndpoint[] {
+  if (!Array.isArray(endpoints)) {
+    return [createEmptyEndpoint()];
+  }
+  const normalized = endpoints.map((item) => ({
+    host: (item?.host ?? "").trim(),
+    port: Number(item?.port ?? 0),
+  }));
+  return normalized.length > 0 ? normalized : [createEmptyEndpoint()];
+}
+
+function ensureEndpointDraft() {
+  editingNc.value.endpoints = normalizeEndpointDraft(editingNc.value.endpoints);
+}
+
+function addEndpoint() {
+  ensureEndpointDraft();
+  editingNc.value.endpoints!.push(createEmptyEndpoint());
+}
+
+function removeEndpoint(index: number) {
+  ensureEndpointDraft();
+  if (editingNc.value.endpoints!.length <= 1) {
+    ElMessage.warning("至少保留一个连接端点");
+    return;
+  }
+  editingNc.value.endpoints!.splice(index, 1);
+}
+
+function normalizeEndpointsForSave(endpoints?: NginxEndpoint[]): NginxEndpoint[] {
+  if (!Array.isArray(endpoints)) {
+    return [];
+  }
+  return endpoints.map((item) => ({
+    host: (item.host || "").trim(),
+    port: Number(item.port),
+  }));
+}
+
+function isValidIpv4(host: string): boolean {
+  const candidate = host.trim();
+  const parts = candidate.split(".");
+  if (parts.length !== 4) return false;
+  return parts.every((part) => {
+    if (!/^\d+$/.test(part)) return false;
+    const value = Number(part);
+    return value >= 0 && value <= 255;
+  });
+}
+
+function pickDeployContextAddress(endpoints?: NginxEndpoint[]): string | undefined {
+  const normalized = normalizeEndpointsForSave(endpoints);
+  if (normalized.length === 0) return undefined;
+  const selected = normalized.find((item) => isValidIpv4(item.host)) || normalized[0];
+  if (!selected.host || !Number.isInteger(selected.port) || selected.port < 1 || selected.port > 65535) {
+    return undefined;
+  }
+  return `${selected.host}:${selected.port}`;
+}
+
+function validateEndpointsBeforeSave(endpoints: NginxEndpoint[]): boolean {
+  if (endpoints.length === 0) {
+    ElMessage.warning("请至少填写一个连接端点");
+    return false;
+  }
+  for (let index = 0; index < endpoints.length; index += 1) {
+    const item = endpoints[index];
+    if (!item.host) {
+      ElMessage.warning(`第 ${index + 1} 条连接端点的地址或域名不能为空`);
+      return false;
+    }
+    if (!Number.isInteger(item.port) || item.port < 1 || item.port > 65535) {
+      ElMessage.warning(`第 ${index + 1} 条连接端点端口必须在 1-65535 之间`);
+      return false;
+    }
+  }
+  return true;
 }
 
 async function handleSave() {
@@ -130,11 +222,17 @@ async function handleSave() {
     return;
   }
 
+  const endpoints = normalizeEndpointsForSave(editingNc.value.endpoints);
+  if (!validateEndpointsBeforeSave(endpoints)) {
+    return;
+  }
+
   const payload: Partial<NginxConfig> = {
     id: "",
     created_at: "",
     updated_at: "",
     ...editingNc.value,
+    endpoints,
   };
   saveLoading.value = true;
   try {
@@ -175,6 +273,23 @@ function strategyLabel(strategy: string) {
   return ({ roundrobin: "轮询", ip_hash: "IP 哈希" } as Record<string, string>)[strategy] || strategy || "-";
 }
 
+function formatEndpoint(item: NginxEndpoint): string {
+  const host = (item.host || "").trim();
+  if (!host) return "-";
+  return `${host}:${item.port}`;
+}
+
+function endpointSummary(endpoints?: NginxEndpoint[]): string {
+  if (!Array.isArray(endpoints) || endpoints.length === 0) {
+    return "-";
+  }
+  const first = formatEndpoint(endpoints[0]);
+  if (endpoints.length === 1) {
+    return first;
+  }
+  return `${first} +${endpoints.length - 1}`;
+}
+
 function envLabel(env: string) {
   return ({ prod: "生产", dev: "开发", test: "测试" } as Record<string, string>)[env] || env;
 }
@@ -196,7 +311,7 @@ onMounted(() => fetchData());
     <SearchToolbar
       v-model:search-text="searchText"
       v-model:filters="listFilters"
-      search-placeholder="搜索配置名称/地址..."
+      search-placeholder="搜索配置名称..."
       :fields="toolbarFields"
       @query="handleToolbarQuery"
     >
@@ -207,9 +322,8 @@ onMounted(() => fetchData());
     </SearchToolbar>
     <el-table :data="data" v-loading="loading" border stripe class="w-full im-table-fixed-ops">
       <el-table-column prop="name" label="配置名称" min-width="180" align="center" />
-      <el-table-column prop="address" label="连接地址" min-width="180" align="center" />
-      <el-table-column prop="listen_port" label="监听端口" width="100" align="center">
-        <template #default="{ row }">{{ row.listen_port || "-" }}</template>
+      <el-table-column label="连接端点" min-width="260" align="center">
+        <template #default="{ row }">{{ endpointSummary(row.endpoints) }}</template>
       </el-table-column>
       <el-table-column prop="strategy" label="负载策略" width="100" align="center">
         <template #default="{ row }">{{ strategyLabel(row.strategy) }}</template>
@@ -257,27 +371,33 @@ onMounted(() => fetchData());
         <el-form-item label="配置名称" required>
           <el-input v-model="editingNc.name" placeholder="请输入配置名称" />
         </el-form-item>
-        <el-form-item label="连接地址" required>
-          <el-input v-model="editingNc.address" placeholder="如 192.168.1.200 或 https://edge.example.com" />
-        </el-form-item>
-        <el-form-item label="监听端口">
-          <el-input-number v-model="editingNc.listen_port" :min="1" :max="65535" class="w-full" />
+        <el-form-item label="连接端点" required>
+          <div class="endpoint-editor">
+            <div v-for="(item, index) in editingNc.endpoints || []" :key="index" class="endpoint-row">
+              <el-input
+                v-model="item.host"
+                class="endpoint-host"
+                placeholder="地址或域名，如 edge.example.com 或 10.0.0.8"
+              />
+              <el-input-number
+                v-model="item.port"
+                :min="1"
+                :max="65535"
+                class="endpoint-port"
+                controls-position="right"
+              />
+              <el-button text type="danger" :disabled="(editingNc.endpoints || []).length <= 1" @click="removeEndpoint(index)">
+                删除
+              </el-button>
+            </div>
+            <el-button text type="primary" @click="addEndpoint">添加端点</el-button>
+          </div>
         </el-form-item>
         <el-form-item label="负载策略">
           <el-select v-model="editingNc.strategy" class="w-full">
             <el-option label="轮询 (roundrobin)" value="roundrobin" />
             <el-option label="IP 哈希 (ip_hash)" value="ip_hash" />
           </el-select>
-        </el-form-item>
-
-        <el-divider content-position="left">上游配置</el-divider>
-        <el-form-item label="上游服务器">
-          <el-input
-            v-model="editingNc.upstream_servers"
-            type="textarea"
-            :rows="4"
-            placeholder='JSON 数组，如 ["192.168.1.10:8080", "192.168.1.11:8080"]'
-          />
         </el-form-item>
 
         <el-divider content-position="left">运维信息</el-divider>
@@ -306,7 +426,13 @@ onMounted(() => fetchData());
         resource-type="nginx"
       />
 
-      <DeploymentPanel v-if="isEditing && editingNc.id" :resource-id="editingNc.id!" resource-type="nginx" />
+      <DeploymentPanel
+        v-if="isEditing && editingNc.id"
+        :resource-id="editingNc.id!"
+        resource-type="nginx"
+        :resource-address="pickDeployContextAddress(editingNc.endpoints)"
+        :resource-env="editingNc.env"
+      />
 
       <template #footer>
         <el-button @click="drawerVisible = false">取消</el-button>
@@ -417,7 +543,25 @@ onMounted(() => fetchData());
   display: flex;
   justify-content: flex-end;
 }
+.endpoint-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+.endpoint-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 140px auto;
+  gap: 8px;
+  align-items: center;
+}
+.endpoint-host,
+.endpoint-port {
+  width: 100%;
+}
+@media (max-width: 768px) {
+  .endpoint-row {
+    grid-template-columns: 1fr;
+  }
+}
 </style>
-
-
-

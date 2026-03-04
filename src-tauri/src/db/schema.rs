@@ -582,6 +582,23 @@ pub const MIGRATIONS: &[(i32, &str)] = &[
         GROUP BY tb.term_id, tb.resource_type;
     "#,
     ),
+    (
+        19,
+        r#"
+        DROP INDEX IF EXISTS uk_applications_name_env;
+        CREATE UNIQUE INDEX IF NOT EXISTS uk_applications_name_env_type
+        ON applications(name, env, type) WHERE is_deleted = 0;
+    "#,
+    ),
+    (
+        20,
+        r#"
+        ALTER TABLE nginx_configs ADD COLUMN endpoints TEXT NOT NULL DEFAULT '[]';
+        ALTER TABLE nginx_configs DROP COLUMN address;
+        ALTER TABLE nginx_configs DROP COLUMN listen_port;
+        ALTER TABLE nginx_configs DROP COLUMN upstream_servers;
+    "#,
+    ),
 ];
 
 const TAXONOMY_TERMS_REQUIRED_COLUMNS: [&str; 8] = [
@@ -1101,7 +1118,7 @@ mod tests {
     }
 
     #[test]
-    fn nginx_configs_table_should_have_address_column_after_migrations() {
+    fn nginx_configs_table_should_have_endpoints_column_after_migrations() {
         let conn = Connection::open_in_memory().expect("open in-memory db");
         apply_all_migrations(&conn);
 
@@ -1114,8 +1131,20 @@ mod tests {
         let columns: Vec<String> = rows.filter_map(|r| r.ok()).collect();
 
         assert!(
-            columns.iter().any(|col| col == "address"),
-            "nginx_configs table should contain address column"
+            columns.iter().any(|col| col == "endpoints"),
+            "nginx_configs table should contain endpoints column"
+        );
+        assert!(
+            !columns.iter().any(|col| col == "address"),
+            "nginx_configs table should not contain legacy address column"
+        );
+        assert!(
+            !columns.iter().any(|col| col == "listen_port"),
+            "nginx_configs table should not contain legacy listen_port column"
+        );
+        assert!(
+            !columns.iter().any(|col| col == "upstream_servers"),
+            "nginx_configs table should not contain legacy upstream_servers column"
         );
     }
 
@@ -1254,6 +1283,36 @@ mod tests {
         assert!(
             columns.iter().any(|col| col == "business_application_id"),
             "applications table should contain business_application_id column"
+        );
+    }
+
+    #[test]
+    fn applications_unique_index_should_use_name_env_type_after_migrations() {
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        apply_all_migrations(&conn);
+
+        let old_index_exists: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='uk_applications_name_env'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("query old applications unique index");
+        assert_eq!(
+            old_index_exists, 0,
+            "legacy applications unique index should be removed"
+        );
+
+        let new_index_exists: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='uk_applications_name_env_type'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("query new applications unique index");
+        assert_eq!(
+            new_index_exists, 1,
+            "applications unique index should be name+env+type"
         );
     }
 

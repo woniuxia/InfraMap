@@ -85,6 +85,23 @@ fn parse_string_array(value: &str, field_name: &str) -> Result<Vec<String>, Stri
     Ok(normalized)
 }
 
+fn validate_endpoint_host(host: &str, field_name: &str) -> Result<(), String> {
+    let trimmed = host.trim();
+    if trimmed.is_empty() {
+        return Err(format!("{} is required", field_name));
+    }
+    if trimmed.contains("://") {
+        return Err(format!("{} must not include scheme", field_name));
+    }
+    if trimmed.contains('/') {
+        return Err(format!("{} must not include path", field_name));
+    }
+    if trimmed.chars().any(char::is_whitespace) {
+        return Err(format!("{} must not include whitespace", field_name));
+    }
+    Ok(())
+}
+
 // --- Entity-specific validation ---
 
 pub fn validate_host(host: &Host) -> Result<(), String> {
@@ -234,7 +251,6 @@ pub fn validate_middleware(mw: &Middleware) -> Result<(), String> {
 pub fn validate_nginx_config(nc: &NginxConfig) -> Result<(), String> {
     validate_required(&nc.name, "name")?;
     validate_string_length(&nc.name, 1, 200, "name")?;
-    validate_required(&nc.address, "address")?;
     validate_enum(&nc.env, &["prod", "dev", "test"], "env")?;
     validate_enum(&nc.status, &["running", "stopped", "maintenance"], "status")?;
     if let Some(ref strategy) = nc.strategy {
@@ -242,13 +258,12 @@ pub fn validate_nginx_config(nc: &NginxConfig) -> Result<(), String> {
             validate_enum(strategy, &["roundrobin", "ip_hash"], "strategy")?;
         }
     }
-    if let Some(port) = nc.listen_port {
-        validate_port(port)?;
+    if nc.endpoints.is_empty() {
+        return Err("endpoints must contain at least one item".into());
     }
-    if let Some(ref upstream) = nc.upstream_servers {
-        if !upstream.is_empty() {
-            validate_json_array(upstream, "upstream_servers")?;
-        }
+    for (index, endpoint) in nc.endpoints.iter().enumerate() {
+        validate_endpoint_host(&endpoint.host, &format!("endpoints[{}].host", index))?;
+        validate_port(endpoint.port)?;
     }
     Ok(())
 }
@@ -291,6 +306,7 @@ pub fn validate_dependency(dep: &Dependency) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::nginx_config::NginxEndpoint;
 
     // --- validate_required ---
     #[test]
@@ -569,10 +585,11 @@ mod tests {
         NginxConfig {
             id: "n1".into(),
             name: "nginx-main".into(),
-            address: "10.0.0.1".into(),
-            listen_port: Some(80),
+            endpoints: vec![NginxEndpoint {
+                host: "10.0.0.1".into(),
+                port: 80,
+            }],
             strategy: Some("roundrobin".into()),
-            upstream_servers: Some(r#"["10.0.0.1:8080"]"#.into()),
             env: "prod".into(),
             status: "running".into(),
             description: None,
@@ -594,9 +611,23 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_nginx_config_requires_address() {
+    fn test_validate_nginx_config_requires_endpoints() {
         let mut nc = make_test_nginx();
-        nc.address = "".into();
+        nc.endpoints = Vec::new();
+        assert!(validate_nginx_config(&nc).is_err());
+    }
+
+    #[test]
+    fn test_validate_nginx_config_endpoint_port_should_be_valid() {
+        let mut nc = make_test_nginx();
+        nc.endpoints[0].port = 70000;
+        assert!(validate_nginx_config(&nc).is_err());
+    }
+
+    #[test]
+    fn test_validate_nginx_config_endpoint_host_should_not_include_scheme() {
+        let mut nc = make_test_nginx();
+        nc.endpoints[0].host = "https://edge.example.com".into();
         assert!(validate_nginx_config(&nc).is_err());
     }
 

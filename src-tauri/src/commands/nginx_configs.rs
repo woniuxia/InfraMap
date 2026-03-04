@@ -5,27 +5,28 @@ use crate::db::crud::{build_where_clause, count_query, delete_by_id};
 use crate::db::DbPool;
 use crate::error::{AppError, AppResult};
 use crate::models::common::{PagedResult, QueryParams};
-use crate::models::nginx_config::NginxConfig;
+use crate::models::nginx_config::{NginxConfig, NginxEndpoint};
 use crate::validation::validate_nginx_config;
 
 fn row_to_nginx_config(row: &rusqlite::Row) -> rusqlite::Result<NginxConfig> {
+    let endpoints_raw: String = row.get(2)?;
+    let endpoints = serde_json::from_str::<Vec<NginxEndpoint>>(&endpoints_raw).map_err(|err| {
+        rusqlite::Error::FromSqlConversionFailure(2, rusqlite::types::Type::Text, Box::new(err))
+    })?;
     Ok(NginxConfig {
         id: row.get(0)?,
         name: row.get(1)?,
-        address: row.get(2)?,
-        listen_port: row.get(3)?,
-        strategy: row.get(4)?,
-        upstream_servers: row.get(5)?,
-        env: row.get(6)?,
-        status: row.get(7)?,
-        description: row.get(8)?,
-        created_at: row.get(9)?,
-        updated_at: row.get(10)?,
+        endpoints,
+        strategy: row.get(3)?,
+        env: row.get(4)?,
+        status: row.get(5)?,
+        description: row.get(6)?,
+        created_at: row.get(7)?,
+        updated_at: row.get(8)?,
     })
 }
 
-const SELECT_COLUMNS: &str = "id, name, address, listen_port, strategy, upstream_servers, \
-     env, status, description, created_at, updated_at";
+const SELECT_COLUMNS: &str = "id, name, endpoints, strategy, env, status, description, created_at, updated_at";
 
 #[tauri::command]
 pub fn list_nginx_configs(
@@ -37,7 +38,7 @@ pub fn list_nginx_configs(
         .get()
         .map_err(|e| AppError::db_unavailable(command, format!("Pool error: {}", e)))?;
 
-    let search_columns = &["name", "address"];
+    let search_columns = &["name"];
     let filter_columns = &["env", "status", "strategy"];
     let (where_clause, sql_params) = build_where_clause(&params, search_columns, filter_columns);
 
@@ -96,6 +97,8 @@ pub fn save_nginx_config(pool: State<DbPool>, data: NginxConfig) -> AppResult<St
     let command = "save_nginx_config";
 
     validate_nginx_config(&data).map_err(|e| AppError::validation(command, e))?;
+    let endpoints_json = serde_json::to_string(&data.endpoints)
+        .map_err(|e| AppError::internal(command, format!("serialize nginx endpoints: {}", e)))?;
 
     let conn = pool
         .get()
@@ -124,16 +127,14 @@ pub fn save_nginx_config(pool: State<DbPool>, data: NginxConfig) -> AppResult<St
                 data.id.clone()
             };
             conn.execute(
-                "INSERT INTO nginx_configs (id, name, address, listen_port, strategy, upstream_servers,
-                                            env, status, description, is_deleted, deleted_at, created_at, updated_at)
-                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,0,NULL,?10,?10)",
+                "INSERT INTO nginx_configs (id, name, endpoints, strategy, env, status, description,
+                                            is_deleted, deleted_at, created_at, updated_at)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,0,NULL,?8,?8)",
                 rusqlite::params![
                     id,
                     data.name,
-                    data.address,
-                    data.listen_port,
+                    &endpoints_json,
                     data.strategy,
-                    data.upstream_servers,
                     data.env,
                     data.status,
                     data.description,
@@ -146,15 +147,13 @@ pub fn save_nginx_config(pool: State<DbPool>, data: NginxConfig) -> AppResult<St
             Ok(id)
         } else {
             conn.execute(
-                "UPDATE nginx_configs SET name=?1, address=?2, listen_port=?3, strategy=?4, upstream_servers=?5,
-                                          env=?6, status=?7, description=?8, updated_at=?9
-                 WHERE id=?10 AND is_deleted=0",
+                "UPDATE nginx_configs SET name=?1, endpoints=?2, strategy=?3,
+                                          env=?4, status=?5, description=?6, updated_at=?7
+                 WHERE id=?8 AND is_deleted=0",
                 rusqlite::params![
                     data.name,
-                    data.address,
-                    data.listen_port,
+                    &endpoints_json,
                     data.strategy,
-                    data.upstream_servers,
                     data.env,
                     data.status,
                     data.description,

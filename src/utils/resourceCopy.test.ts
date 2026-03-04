@@ -105,8 +105,7 @@ describe("resourceCopy", () => {
     const nginxConfig: NginxConfig = {
       id: "n1",
       name: "gateway-main",
-      address: "10.0.9.1",
-      listen_port: 80,
+      endpoints: [{ host: "10.0.9.1", port: 80 }],
       strategy: "roundrobin",
       env: "prod",
       status: "running",
@@ -116,8 +115,7 @@ describe("resourceCopy", () => {
 
     const draft = buildNginxCopyDraft(nginxConfig, fixedDate);
     expect(draft.name).toBe("gateway-main（副本-20260228090507）");
-    expect(draft.address).toBe("10.0.9.1");
-    expect(draft.listen_port).toBe(80);
+    expect(draft.endpoints).toEqual([{ host: "10.0.9.1", port: 80 }]);
     expect(draft.id).toBeUndefined();
   });
 });

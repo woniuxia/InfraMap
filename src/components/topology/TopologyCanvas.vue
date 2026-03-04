@@ -5,6 +5,8 @@ import type { ComboData, EdgeData, GraphData, IElementEvent, NodeData } from "@a
 import type { TopologyGraph, TopologyNode } from "@/types";
 import {
   buildTopologyG6Data,
+  compactLabel,
+  isOpaqueIdentifier,
   toExternalNodeId,
 } from "@/components/topology/topologyGraph.utils";
 import { getMiddlewareIconByType } from "@/utils/middlewareCatalog";
@@ -19,7 +21,7 @@ const emit = defineEmits<{
 }>();
 
 const containerRef = ref<HTMLDivElement>();
-const activeLayout = ref<"force" | "dagre">("force");
+const activeLayout = ref<"force" | "dagre">("dagre");
 
 let graph: Graph | null = null;
 let resizeObserver: ResizeObserver | null = null;
@@ -102,15 +104,28 @@ function getNodeType(datum: NodeData): string {
   return "circle";
 }
 
+function humanizeOpaqueLabel(value: string): string {
+  if (!isOpaqueIdentifier(value)) return value;
+  const suffix = value.slice(-6);
+  return `节点 #${suffix}`;
+}
+
+function nodeLabel(datum: NodeData, isLargeGraph: boolean): string {
+  const raw = ((datum.data?.name as string) || `${datum.id || ""}`).trim() || "未命名节点";
+  const base = humanizeOpaqueLabel(raw);
+  return compactLabel(base, isLargeGraph ? 10 : 14);
+}
+
 function getNodeStyle(datum: NodeData, isLargeGraph: boolean): Record<string, unknown> {
   const theme = buildGraphTheme();
   const nodeType = datum.data?.node_type as string;
   const groupKind = datum.data?.group_kind as string;
   const env = (datum.data?.env as string) || "prod";
   const external = isExternalDatum(datum);
+  const labelText = nodeLabel(datum, isLargeGraph);
 
-  const size = isLargeGraph ? 20 : groupKind === "application_service" ? 38 : 30;
-  const labelFontSize = isLargeGraph ? 9 : groupKind === "application_service" ? 12 : 10;
+  const size = isLargeGraph ? 18 : groupKind === "application_service" ? 34 : 28;
+  const labelFontSize = isLargeGraph ? 9 : groupKind === "application_service" ? 11 : 10;
   const envColor = theme.envColors[env] || theme.envColors.prod;
 
   if (nodeType === "middleware") {
@@ -123,7 +138,7 @@ function getNodeStyle(datum: NodeData, isLargeGraph: boolean): Record<string, un
       src: icon.src,
       size,
       opacity: external ? 0.78 : 1,
-      labelText: (datum.data?.name as string) || datum.id,
+      labelText,
       labelPlacement: "bottom",
       labelFontSize,
       labelFill: external ? theme.labelSecondary : theme.labelPrimary,
@@ -145,7 +160,7 @@ function getNodeStyle(datum: NodeData, isLargeGraph: boolean): Record<string, un
     lineWidth: groupKind === "application_service" ? 2.6 : 1.8,
     lineDash: external ? [4, 4] : [],
     opacity: external ? 0.82 : 1,
-    labelText: (datum.data?.name as string) || datum.id,
+    labelText,
     labelPlacement: "bottom",
     labelFontSize,
     labelFill: external ? theme.labelSecondary : theme.labelPrimary,
@@ -198,13 +213,17 @@ function getComboStyle(datum: ComboData): Record<string, unknown> {
     };
   }
 
+  const hostLabel = compactLabel(((datum.data?.label as string) || datum.id), 18);
+  const nodeCount = Number((datum.data?.node_count as number) || 0);
+  const labelText = nodeCount > 1 ? `${hostLabel} (${nodeCount})` : hostLabel;
+
   return {
-    fill: withAlpha(theme.labelBg, "20"),
-    stroke: withAlpha(theme.labelMuted, "CC"),
-    lineWidth: 1,
-    lineDash: [6, 4],
+    fill: withAlpha(theme.labelBg, "16"),
+    stroke: withAlpha(theme.labelMuted, "AA"),
+    lineWidth: 1.2,
+    lineDash: [5, 3],
     collapsedSize: [140, 48],
-    labelText: `${(datum.data?.label as string) || datum.id}`,
+    labelText,
     labelFontSize: 11,
     labelFill: theme.labelSecondary,
     labelPlacement: "top",
@@ -218,8 +237,8 @@ function getLayoutConfig(g6Data: GraphData, layoutType: "force" | "dagre") {
     return {
       type: "dagre" as const,
       rankdir: "LR" as const,
-      nodesep: 42,
-      ranksep: 120,
+      nodesep: 72,
+      ranksep: 180,
       controlPoints: true,
       sortByCombo: true,
     };
@@ -237,13 +256,13 @@ function getLayoutConfig(g6Data: GraphData, layoutType: "force" | "dagre") {
   return {
     type: "force" as const,
     preventOverlap: true,
-    nodeSize: 44,
-    linkDistance: 155,
+    nodeSize: 40,
+    linkDistance: (datum: EdgeData) => (datum.data?.cross_env ? 210 : 165),
     nodeStrength: (datum: NodeData) => {
       const groupKind = datum.data?.group_kind as string;
       const external = Boolean(datum.data?.is_external);
-      if (external) return -35;
-      return groupKind === "application_service" ? -85 : -70;
+      if (external) return -40;
+      return groupKind === "application_service" ? -95 : -78;
     },
     edgeStrength: (datum: EdgeData) => {
       const isCrossEnv = Boolean(datum.data?.cross_env);
@@ -268,7 +287,7 @@ function initGraph() {
   const container = containerRef.value;
   const { width, height } = container.getBoundingClientRect();
   const g6Data = buildTopologyG6Data(props.graphData);
-  const hideEdgeLabels = props.graphData.layout_hints.high_density_mode;
+  const hideEdgeLabels = props.graphData.layout_hints.high_density_mode || (g6Data.edges?.length || 0) > 90;
   const isLargeGraph = (g6Data.nodes?.length || 0) > 500;
   const theme = buildGraphTheme();
 

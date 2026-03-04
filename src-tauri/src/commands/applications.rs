@@ -503,6 +503,7 @@ mod tests {
         build_applications_where_clause, collect_top_tech_stacks, normalize_owner_names,
         save_application_inner,
     };
+    use crate::error::AppErrorCode;
     use crate::models::application::Application;
     use crate::models::common::QueryParams;
     use crate::test_helpers::setup_test_db;
@@ -645,5 +646,35 @@ mod tests {
             )
             .expect("query owner taxonomy bindings");
         assert_eq!(owner_binding_count, 1);
+    }
+
+    #[test]
+    fn save_application_inner_should_allow_same_name_env_when_type_is_different() {
+        let conn = setup_test_db();
+        let first = make_new_application("shared-name");
+        save_application_inner("test", &conn, first).expect("create first application");
+
+        let mut second = make_new_application("shared-name");
+        second.app_type = "gateway".into();
+
+        let created_id = save_application_inner("test", &conn, second)
+            .expect("same name/env with different type should be allowed");
+        assert!(!created_id.is_empty());
+    }
+
+    #[test]
+    fn save_application_inner_should_reject_same_name_env_and_type() {
+        let conn = setup_test_db();
+        let first = make_new_application("duplicate-key");
+        save_application_inner("test", &conn, first).expect("create first application");
+
+        let second = make_new_application("duplicate-key");
+        let err = save_application_inner("test", &conn, second)
+            .expect_err("same name/env/type should be rejected");
+        assert_eq!(err.code, AppErrorCode::Conflict);
+        assert_eq!(
+            err.message,
+            "保存失败，服务名称+环境+类型已存在，请调整后重试。"
+        );
     }
 }

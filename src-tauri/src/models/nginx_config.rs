@@ -1,14 +1,19 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NginxEndpoint {
+    pub host: String,
+    pub port: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NginxConfig {
     #[serde(default)]
     pub id: String,
     pub name: String,
-    pub address: String,
-    pub listen_port: Option<i64>,
+    #[serde(default)]
+    pub endpoints: Vec<NginxEndpoint>,
     pub strategy: Option<String>,
-    pub upstream_servers: Option<String>,
     pub env: String,
     pub status: String,
     pub description: Option<String>,

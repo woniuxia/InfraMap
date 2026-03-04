@@ -19,13 +19,27 @@ export function deleteDeployment(id: string): Promise<void> {
   return tauriInvoke<void>('delete_deployment', { id })
 }
 
-export function getResourceDeployContext(
-  resourceType: DeploymentResourceType,
-  resourceId: string
-): Promise<ResourceDeployContext> {
-  return tauriInvoke<ResourceDeployContext>('get_resource_deploy_context', {
-    resourceType,
-    resourceId,
-  })
+export interface ResourceDeployContextOverrides {
+  address?: string
+  resourceEnv?: 'prod' | 'dev' | 'test'
 }
 
+export function getResourceDeployContext(
+  resourceType: DeploymentResourceType,
+  resourceId: string,
+  overrides?: ResourceDeployContextOverrides
+): Promise<ResourceDeployContext> {
+  const payload: Record<string, unknown> = {
+    resourceType,
+    resourceId,
+  }
+  if (overrides?.address !== undefined) {
+    payload.addressOverride = overrides.address
+  }
+  if (overrides?.resourceEnv !== undefined) {
+    payload.resourceEnvOverride = overrides.resourceEnv
+  }
+  return tauriInvoke<ResourceDeployContext>('get_resource_deploy_context', {
+    ...payload,
+  })
+}

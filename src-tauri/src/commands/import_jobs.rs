@@ -274,8 +274,10 @@ fn validate_and_normalize(
     if !has_error && !name.is_empty() {
         conflict_id = conn
             .query_row(
-                "SELECT id FROM applications WHERE name = ?1 AND env = ?2 AND is_deleted = 0 LIMIT 1",
-                rusqlite::params![name, env],
+                "SELECT id FROM applications
+                 WHERE name = ?1 AND env = ?2 AND type = ?3 AND is_deleted = 0
+                 LIMIT 1",
+                rusqlite::params![name, env, app_type],
                 |raw| raw.get(0),
             )
             .ok();
@@ -286,7 +288,7 @@ fn validate_and_normalize(
                 Some("name"),
                 ISSUE_CONFLICT,
                 "application_conflict",
-                "应用名称与环境组合已存在",
+                "应用名称+环境+类型组合已存在",
             );
         }
     }
@@ -832,6 +834,20 @@ mod tests {
         }
     }
 
+    fn make_app_row_with_type(name: &str, app_type: &str) -> ImportDraftRow {
+        ImportDraftRow {
+            resource_type: "application".to_string(),
+            name: Some(name.to_string()),
+            env: Some("prod".to_string()),
+            item_type: Some(app_type.to_string()),
+            status: Some("running".to_string()),
+            address: Some("10.0.0.10".to_string()),
+            port: Some(8080),
+            category: None,
+            description: None,
+        }
+    }
+
     #[test]
     fn preview_import_rows_should_detect_existing_conflict() {
         let conn = setup_test_db();
@@ -848,6 +864,24 @@ mod tests {
 
         assert_eq!(preview.conflict_count, 1);
         assert_eq!(preview.valid_count, 0);
+    }
+
+    #[test]
+    fn preview_import_rows_should_not_conflict_when_type_is_different() {
+        let conn = setup_test_db();
+        insert_test_application(&conn, "app-1", "orders-api", "prod");
+
+        let preview = preview_import_rows_inner(
+            "test",
+            &conn,
+            PreviewImportRowsInput {
+                rows: vec![make_app_row_with_type("orders-api", "gateway")],
+            },
+        )
+        .expect("preview should succeed");
+
+        assert_eq!(preview.conflict_count, 0);
+        assert_eq!(preview.valid_count, 1);
     }
 
     #[test]

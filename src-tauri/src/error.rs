@@ -135,6 +135,16 @@ impl AppError {
             );
         }
 
+        if raw.contains(
+            "UNIQUE constraint failed: applications.name, applications.env, applications.type",
+        ) {
+            return Self::conflict(
+                command,
+                "保存失败，服务名称+环境+类型已存在，请调整后重试。",
+                Some(raw),
+            );
+        }
+
         if raw.contains("UNIQUE constraint failed") {
             return Self::conflict(command, "保存失败，存在重复数据，请检查后重试。", Some(raw));
         }
@@ -209,6 +219,20 @@ mod tests {
         assert_eq!(
             err.message,
             "保存失败，IP 地址与环境组合已存在，请勿重复创建。"
+        );
+    }
+
+    #[test]
+    fn map_application_name_env_type_unique_constraint_to_conflict() {
+        let err = AppError::from_db_error(
+            "save_application",
+            "保存应用",
+            "UNIQUE constraint failed: applications.name, applications.env, applications.type",
+        );
+        assert_eq!(err.code, AppErrorCode::Conflict);
+        assert_eq!(
+            err.message,
+            "保存失败，服务名称+环境+类型已存在，请调整后重试。"
         );
     }
 

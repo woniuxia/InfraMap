@@ -19,6 +19,10 @@ pub struct TopologyNodeV2 {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub host_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub host_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub host_ip_display: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<String>,
     pub importance: f32,
     #[serde(skip_serializing_if = "Option::is_none")]
