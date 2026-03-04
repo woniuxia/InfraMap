@@ -65,6 +65,8 @@
 - 后端逻辑在可行情况下补充 Rust `#[cfg(test)]` 覆盖。
 
 ## 8. 提交与 PR 要求
+- 提交前必须先分析当前改动内容，至少检查 `git status`、`git diff --stat` 与关键文件 `git diff`/`git diff --cached`，确认范围与目标一致。
+- commit message 必须有明确语义，至少说明“改了什么 + 为什么改”；禁止使用 `update`、`misc`、`tmp` 等无信息提交说明。
 - 提交信息建议沿用 `type: summary` 风格（如 `feat:`、`fix:`、`refactor:`、`test:`）。
 - 单次提交保持聚焦与原子化，避免将无关改动混入同一提交。
 - PR 需包含：用户可见影响说明、关联任务/Issue（如有）、测试依据（`pnpm test`/`pnpm test:backend`）。
