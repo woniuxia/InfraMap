@@ -21,13 +21,37 @@ describe("nodeIconResolver", () => {
     expect(resolveApplicationTypeKey("unknown")).toBe("other");
   });
 
-  it("resolves application node icon with fallback support", () => {
+  it("resolves frontend application icon to window", () => {
     const frontend = resolveApplicationNodeIcon("frontend");
-    expect(frontend.iconKey.length).toBeGreaterThan(0);
+    expect(frontend.iconKey).toContain("window");
     expect(frontend.src.startsWith("data:image/svg+xml")).toBe(true);
   });
 
-  it("uses custom middleware icon key when runtime icon exists", () => {
+  it("resolves backend application icon to server", () => {
+    const backend = resolveApplicationNodeIcon("backend");
+    expect(backend.iconKey).toContain("server-stack");
+    expect(backend.src.startsWith("data:image/svg+xml")).toBe(true);
+  });
+
+  it("resolves gateway and unknown application icons to server", () => {
+    const gateway = resolveApplicationNodeIcon("gateway");
+    const unknown = resolveApplicationNodeIcon("unknown");
+    expect(gateway.iconKey).toContain("server-stack");
+    expect(unknown.iconKey).toContain("server-stack");
+  });
+
+  it("uses custom application icon key when runtime icon exists", () => {
+    registerRuntimeIconSet("runtime", {
+      custom: CUSTOM_SVG,
+    });
+
+    const icon = resolveApplicationNodeIcon("frontend", "runtime:custom");
+
+    expect(icon.iconKey).toBe("runtime:custom");
+    expect(icon.src.startsWith("data:image/svg+xml")).toBe(true);
+  });
+
+  it("always uses middleware type icon even when custom icon key exists", () => {
     registerRuntimeIconSet("runtime", {
       custom: CUSTOM_SVG,
     });
@@ -38,7 +62,8 @@ describe("nodeIconResolver", () => {
       type: "Redis",
     });
 
-    expect(icon.iconKey).toBe("runtime:custom");
+    expect(icon.iconKey).toContain("redis");
+    expect(icon.iconKey).not.toBe("runtime:custom");
     expect(icon.src.startsWith("data:image/svg+xml")).toBe(true);
   });
 

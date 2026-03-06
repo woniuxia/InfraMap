@@ -27,14 +27,10 @@ const APPLICATION_ICON_ALTS: Record<ApplicationTypeKey, string> = {
 const APPLICATION_ICON_CANDIDATES: Record<ApplicationTypeKey, string[]> = {
   frontend: ["heroicons:window", "heroicons:window-20-solid", "heroicons:window-16-solid"],
   backend: ["heroicons:server-stack", "heroicons:server-stack-20-solid", "heroicons:server-stack-16-solid"],
-  gateway: [
-    "heroicons:arrows-right-left",
-    "heroicons:arrows-right-left-20-solid",
-    "heroicons:arrows-right-left-16-solid",
-  ],
-  batch_job: ["heroicons:clock", "heroicons:clock-20-solid", "heroicons:clock-16-solid"],
-  microservice: ["heroicons:squares-2x2", "heroicons:squares-2x2-20-solid", "heroicons:squares-2x2-16-solid"],
-  other: ["heroicons:cube", "heroicons:cube-20-solid", "heroicons:cube-16-solid"],
+  gateway: ["heroicons:server-stack", "heroicons:server-stack-20-solid", "heroicons:server-stack-16-solid"],
+  batch_job: ["heroicons:server-stack", "heroicons:server-stack-20-solid", "heroicons:server-stack-16-solid"],
+  microservice: ["heroicons:server-stack", "heroicons:server-stack-20-solid", "heroicons:server-stack-16-solid"],
+  other: ["heroicons:server-stack", "heroicons:server-stack-20-solid", "heroicons:server-stack-16-solid"],
 };
 
 const DEFAULT_ICON_KEY = "local-middleware:default-middleware";
@@ -112,18 +108,6 @@ export function resolveApplicationNodeIcon(rawType?: string, customIconKey?: str
 }
 
 export function resolveMiddlewareNodeIcon(extra?: Record<string, unknown>): ResolvedNodeIcon {
-  const customIconKey = extractStringValue(extra?.icon_key);
-  if (customIconKey) {
-    const icon = resolveIconDataUri(customIconKey);
-    if (icon) {
-      return {
-        iconKey: customIconKey,
-        src: icon,
-        alt: "中间件",
-      };
-    }
-  }
-
   const category = extractStringValue(extra?.category);
   const type = extractStringValue(extra?.type);
   const icon = getMiddlewareIconByType(type, category);

@@ -58,6 +58,8 @@ let resizeAnimationFrame: number | null = null;
 let syncVersion = 0;
 let graphTheme: GraphTheme | null = null;
 let hasRenderedGraph = false;
+let pendingInitialResizeRefit = false;
+let hasUserAdjustedViewport = false;
 
 const renderFlags = {
   isLargeGraph: false,
@@ -406,8 +408,15 @@ function activateFocusDensity(durationMs = 14_000) {
   }
 }
 
-function handleViewportTransform() {
+function markViewportAsUserAdjusted(event?: { originalEvent?: unknown }) {
+  if (!event?.originalEvent) return;
+  hasUserAdjustedViewport = true;
+  pendingInitialResizeRefit = false;
+}
+
+function handleViewportTransform(event?: { originalEvent?: unknown }) {
   if (!cy) return;
+  markViewportAsUserAdjusted(event);
   const zoom = cy.zoom();
   viewportState.value.zoom = zoom;
   const nextDensity = getDensityByZoom(zoom);
@@ -419,6 +428,10 @@ function handleViewportTransform() {
     viewportState.value.density = nextDensity;
     scheduleDensitySync();
   }
+}
+
+function handleViewportPan(event?: { originalEvent?: unknown }) {
+  markViewportAsUserAdjusted(event);
 }
 
 function resolveAppTypeColor(data: Record<string, unknown>, theme: GraphTheme): string {
@@ -521,10 +534,10 @@ function buildStylesheet(
         },
         "background-fit": "contain",
         "background-repeat": "no-repeat",
-        "background-width": "66%",
-        "background-height": "66%",
         "background-position-x": "50%",
         "background-position-y": "50%",
+        "background-offset-x": 0,
+        "background-offset-y": 0,
         "background-image-opacity": 0.96,
         "border-color": (ele: cytoscape.NodeSingular) => resolveNodeStroke(ele.data(), theme),
         "border-width": (ele: cytoscape.NodeSingular) => resolveNodeBorderWidth(ele.data()),
@@ -1025,6 +1038,7 @@ async function ensureCy() {
   cy.on("tap", "node", (evt) => handleNodeTap(evt as EventObjectNode));
   cy.on("cxttap", "node", (evt) => handleNodeContextTap(evt as EventObjectNode));
   cy.on("zoom", handleViewportTransform);
+  cy.on("pan", handleViewportPan);
 
   viewportState.value.zoom = cy.zoom();
   viewportState.value.density = getDensityByZoom(viewportState.value.zoom);
@@ -1051,6 +1065,7 @@ async function syncGraphData(options: { preserveViewport?: boolean; runLayout?: 
   if (!props.graphData) {
     viewportState.value.totalEdges = 0;
     viewportState.value.visibleEdges = 0;
+    pendingInitialResizeRefit = false;
     rebuildIndexes(null);
     cy.elements().remove();
     hasRenderedGraph = false;
@@ -1104,6 +1119,8 @@ async function syncGraphData(options: { preserveViewport?: boolean; runLayout?: 
     cy.pan(preservedPan);
   } else if (!hasRenderedGraph && cy.elements().nonempty()) {
     cy.fit(undefined, 40);
+    pendingInitialResizeRefit = true;
+    hasUserAdjustedViewport = false;
   }
 
   hasRenderedGraph = true;
@@ -1147,6 +1164,11 @@ onMounted(() => {
         resizeAnimationFrame = null;
         if (!cy || !containerRef.value) return;
         cy.resize();
+        // 仅在首屏阶段补一次 refit，避免容器首次稳定后拓扑图贴边，同时不打断用户手动缩放/平移。
+        if (pendingInitialResizeRefit && !hasUserAdjustedViewport && cy.elements().nonempty()) {
+          cy.fit(undefined, 40);
+          pendingInitialResizeRefit = false;
+        }
       });
     });
     resizeObserver.observe(containerRef.value);

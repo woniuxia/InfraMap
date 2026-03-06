@@ -3,8 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import TopologyCanvas from "@/components/topology/TopologyCanvas.vue";
 import type { TopologyGraph } from "@/types";
 
-const { capturedStylesheets } = vi.hoisted(() => ({
+const { capturedStylesheets, capturedCores } = vi.hoisted(() => ({
   capturedStylesheets: [] as Array<Array<{ selector: string; style: Record<string, unknown> }>>,
+  capturedCores: [] as Array<Record<string, any>>,
 }));
 
 vi.mock("cytoscape-dagre", () => ({
@@ -84,9 +85,21 @@ vi.mock("cytoscape", () => {
       const state = {
         elements: [] as Array<{ data?: Record<string, unknown> }>,
       };
+      const eventHandlers = new Map<string, Array<(event?: unknown) => void>>();
 
       const core = {
-        on: vi.fn(),
+        on: vi.fn((events: string, selectorOrHandler: unknown, maybeHandler?: unknown) => {
+          const handler = typeof selectorOrHandler === "function"
+            ? selectorOrHandler as (event?: unknown) => void
+            : maybeHandler as ((event?: unknown) => void) | undefined;
+          if (!handler) return core;
+          events.split(/\s+/).filter(Boolean).forEach((eventName) => {
+            const handlers = eventHandlers.get(eventName) || [];
+            handlers.push(handler);
+            eventHandlers.set(eventName, handlers);
+          });
+          return core;
+        }),
         zoom: vi.fn(() => 1),
         pan: vi.fn(() => ({ x: 0, y: 0 })),
         nodes: vi.fn((selector?: string) => {
@@ -137,9 +150,13 @@ vi.mock("cytoscape", () => {
         animate: vi.fn(),
         png: vi.fn(() => "data:image/png;base64,mock"),
         svg: vi.fn(() => "<svg></svg>"),
+        __emit(eventName: string, event?: unknown) {
+          (eventHandlers.get(eventName) || []).forEach((handler) => handler(event));
+        },
       };
 
       capturedStylesheets.push(options.style);
+      capturedCores.push(core);
       return core;
     }),
     { use: vi.fn() },
@@ -197,6 +214,12 @@ function getLatestStylesheet() {
   return stylesheet!;
 }
 
+function getLatestCore() {
+  const core = capturedCores[capturedCores.length - 1];
+  expect(core).toBeTruthy();
+  return core!;
+}
+
 function findStyleBlock(
   stylesheet: Array<{ selector: string; style: Record<string, unknown> }>,
   selector: string,
@@ -226,9 +249,16 @@ function decodeSvgDataUri(uri: string): string {
 }
 
 describe("TopologyCanvas", () => {
+  let resizeObserverCallback: ResizeObserverCallback | null = null;
+
   beforeEach(() => {
     capturedStylesheets.length = 0;
+    capturedCores.length = 0;
+    resizeObserverCallback = null;
     vi.stubGlobal("ResizeObserver", class {
+      constructor(callback: ResizeObserverCallback) {
+        resizeObserverCallback = callback;
+      }
       observe() {}
       disconnect() {}
     });
@@ -276,5 +306,75 @@ describe("TopologyCanvas", () => {
     expect(externalBlock.style["background-color"]).toBeUndefined();
     expect(parentBlock.style["background-color"]).toBeTruthy();
     expect(decodeSvgDataUri(String(backgroundImage))).toContain('color="#5ca3ff"');
+  });
+
+  it("centers node icons and lets them fill the node without fixed scaling", async () => {
+    mount(TopologyCanvas, {
+      props: {
+        graphData: graphFixture,
+      },
+    });
+
+    await flushPromises();
+
+    const stylesheet = getLatestStylesheet();
+    const nodeBlock = findStyleBlock(stylesheet, "node[shape][size][label_font_size]");
+
+    expect(nodeBlock.style["background-fit"]).toBe("contain");
+    expect(nodeBlock.style["background-position-x"]).toBe("50%");
+    expect(nodeBlock.style["background-position-y"]).toBe("50%");
+    expect(nodeBlock.style["background-offset-x"]).toBe(0);
+    expect(nodeBlock.style["background-offset-y"]).toBe(0);
+    expect(nodeBlock.style["background-width"]).toBeUndefined();
+    expect(nodeBlock.style["background-height"]).toBeUndefined();
+  });
+
+  it("performs a one-time refit after the first container resize during initialization", async () => {
+    mount(TopologyCanvas, {
+      props: {
+        graphData: graphFixture,
+      },
+    });
+
+    await flushPromises();
+
+    const core = getLatestCore();
+    expect(core.fit).toHaveBeenCalledTimes(1);
+    expect(resizeObserverCallback).toBeTypeOf("function");
+
+    resizeObserverCallback?.([], {} as ResizeObserver);
+    await flushPromises();
+
+    expect(core.resize).toHaveBeenCalledTimes(1);
+    expect(core.fit).toHaveBeenCalledTimes(2);
+
+    resizeObserverCallback?.([], {} as ResizeObserver);
+    await flushPromises();
+
+    expect(core.resize).toHaveBeenCalledTimes(2);
+    expect(core.fit).toHaveBeenCalledTimes(2);
+  });
+
+  it("skips the initialization refit after the user changes the viewport", async () => {
+    mount(TopologyCanvas, {
+      props: {
+        graphData: graphFixture,
+      },
+    });
+
+    await flushPromises();
+
+    const core = getLatestCore();
+    expect(core.fit).toHaveBeenCalledTimes(1);
+    expect(resizeObserverCallback).toBeTypeOf("function");
+
+    core.zoom.mockReturnValue(1.8);
+    core.__emit("zoom", { originalEvent: new Event("wheel") });
+
+    resizeObserverCallback?.([], {} as ResizeObserver);
+    await flushPromises();
+
+    expect(core.resize).toHaveBeenCalledTimes(1);
+    expect(core.fit).toHaveBeenCalledTimes(1);
   });
 });

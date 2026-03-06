@@ -21,8 +21,25 @@ function encodeSvgDataUri(svgContent: string): string {
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgContent)}`;
 }
 
+function upsertSvgRootAttribute(openTag: string, name: string, value: string): string {
+  const attributePattern = new RegExp(`\\s${name}=("[^"]*"|'[^']*')`, "i");
+  if (attributePattern.test(openTag)) {
+    return openTag.replace(attributePattern, ` ${name}="${value}"`);
+  }
+
+  return openTag.replace(/>$/, ` ${name}="${value}">`);
+}
+
 function normalizeSvgMarkup(raw: string): string {
-  return raw.replace(/\r\n/g, "\n").trim();
+  const normalized = raw.replace(/\r\n/g, "\n").trim();
+  const openTagMatch = normalized.match(/^<svg\b[^>]*>/i);
+  if (!openTagMatch) return normalized;
+
+  let openTag = openTagMatch[0];
+  openTag = openTag.replace(/\s(?:width|height)=("[^"]*"|'[^']*')/gi, "");
+  openTag = upsertSvgRootAttribute(openTag, "preserveAspectRatio", "xMidYMid meet");
+
+  return normalized.replace(/^<svg\b[^>]*>/i, openTag);
 }
 
 function parseIconKey(iconKey?: string): ParsedIconKey | null {
@@ -71,7 +88,7 @@ function resolveIconifyDataUri(collection: IconifyJSON, iconName: string): strin
     .map(([key, value]) => `${key}="${escapeHtmlAttribute(String(value))}"`)
     .join(" ");
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" ${attrs}>${rendered.body}</svg>`;
-  return encodeSvgDataUri(svg);
+  return encodeSvgDataUri(normalizeSvgMarkup(svg));
 }
 
 function bootstrapBuiltinCollections() {

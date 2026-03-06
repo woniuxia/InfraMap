@@ -29,7 +29,7 @@ function createGraphFixture(): TopologyGraph {
       env: "prod",
       group_kind: "middleware",
       host_id: "host-prod-1",
-      extra: { category: "cache", type: "Redis" },
+      extra: { category: "cache", type: "Redis", icon_key: "heroicons:window" },
     }),
     createNode({
       id: "app-test-1",
@@ -144,13 +144,19 @@ describe("topologyCytoscape utils", () => {
       isLargeGraph: false,
     });
 
-    const appNode = elements.find((item) => item.data?.id === "app-prod-1");
+    const frontendAppNode = elements.find((item) => item.data?.id === "app-prod-1");
+    const otherAppNode = elements.find((item) => item.data?.id === "app-test-1");
     const middlewareNode = elements.find((item) => item.data?.id === "mw-prod-1");
     const edge = elements.find((item) => item.data?.id === "edge-1");
 
-    expect(appNode?.data?.app_type_key).toBe("frontend");
-    expect(String(appNode?.data?.icon_src || "")).toContain("data:image/svg+xml");
+    expect(frontendAppNode?.data?.app_type_key).toBe("frontend");
+    expect(String(frontendAppNode?.data?.icon_src || "")).toContain("data:image/svg+xml");
+    expect(String(frontendAppNode?.data?.icon_key || "")).toContain("heroicons:window");
+    expect(otherAppNode?.data?.app_type_key).toBe("other");
+    expect(String(otherAppNode?.data?.icon_key || "")).toContain("heroicons:server-stack");
     expect(String(middlewareNode?.data?.icon_src || "")).toContain("data:image/svg+xml");
+    expect(String(middlewareNode?.data?.icon_key || "")).toContain("redis");
+    expect(String(middlewareNode?.data?.icon_key || "")).not.toBe("heroicons:window");
     expect(edge?.data?.source_node_type).toBe("application");
     expect(edge?.data?.source_app_type_key).toBe("frontend");
   });
