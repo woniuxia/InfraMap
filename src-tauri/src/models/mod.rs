@@ -13,3 +13,4 @@ pub mod middleware;
 pub mod nginx_config;
 pub mod settings;
 pub mod topology;
+pub mod topology_v3;

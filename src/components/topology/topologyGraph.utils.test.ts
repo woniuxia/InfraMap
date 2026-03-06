@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import type { TopologyGraph, TopologyNode } from "@/types";
 import {
   DEFAULT_TOPOLOGY_FILTER,
-  buildTopologyG6Data,
   computeLegendStats,
   filterTopologyGraph,
   formatHostDisplayName,
@@ -220,66 +219,6 @@ describe("topologyGraph utils", () => {
     expect(filtered).not.toBeNull();
     expect(filtered!.edges).toHaveLength(260);
     expect(filtered!.nodes).toHaveLength(261);
-  });
-
-  it("should build host combo and external combo for g6 rendering", () => {
-    const graph = createGraphFixture();
-    const filtered = filterTopologyGraph(graph, {
-      env: "prod",
-      nodeKinds: [],
-      edgeTypes: [],
-      showAllEdges: true,
-    });
-
-    const g6Data = buildTopologyG6Data(filtered!);
-    const combos = g6Data.combos || [];
-    const hostCombos = combos.filter((combo) => combo.data?.kind === "host");
-    const externalCombo = combos.find((combo) => combo.id === "external-zone");
-
-    expect(hostCombos).toHaveLength(1);
-    expect(hostCombos[0].id).toBe("host-host-prod-1");
-    expect(externalCombo).toBeTruthy();
-    expect(g6Data.nodes?.some((node) => node.combo === "external-zone")).toBe(true);
-  });
-
-  it("should not create host combo for single-node host", () => {
-    const graph: TopologyGraph = {
-      lanes: [
-        { id: "prod", label: "生产", order: 0, node_count: 2, app_count: 2 },
-        { id: "test", label: "测试", order: 1, node_count: 0, app_count: 0 },
-        { id: "dev", label: "开发", order: 2, node_count: 0, app_count: 0 },
-      ],
-      nodes: [
-        createNode({
-          id: "app-a",
-          name: "A",
-          node_type: "application",
-          env: "prod",
-          group_kind: "application_service",
-          host_id: "host-a",
-        }),
-        createNode({
-          id: "app-b",
-          name: "B",
-          node_type: "application",
-          env: "prod",
-          group_kind: "application_service",
-          host_id: "host-b",
-        }),
-      ],
-      edges: [],
-      legend_stats: computeLegendStats([], [], "prod"),
-      layout_hints: {
-        lane_order: ["prod", "test", "dev"],
-        default_collapsed_groups: [],
-        high_density_mode: false,
-      },
-    };
-
-    const g6Data = buildTopologyG6Data(graph);
-    const hostCombos = (g6Data.combos || []).filter((combo) => combo.data?.kind === "host");
-    expect(hostCombos).toHaveLength(0);
-    expect(g6Data.nodes?.every((node) => !node.combo)).toBe(true);
   });
 
   it("should format opaque host id into readable combo label", () => {

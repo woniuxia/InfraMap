@@ -4,9 +4,16 @@ import { ElMessage } from "element-plus";
 import TopologyCanvas from "@/components/topology/TopologyCanvas.vue";
 import TopologyControlBar from "@/components/topology/TopologyControlBar.vue";
 import TopologyDetailPanel from "@/components/topology/TopologyDetailPanel.vue";
-import { findPaths, analyzeImpact } from "@/api/topology";
+import { getTopologyEvidenceV3, getTopologyImpactV3, getTopologyPathsV3 } from "@/api/topologyV3";
 import { useTopologyStore } from "@/stores/topology";
-import type { TopologyNode, PathResult, ImpactResult } from "@/types";
+import type {
+  ImpactResult,
+  PathResult,
+  TopologyNode,
+  TopologyTaskViewMode,
+  TopologyV3EvidenceItem,
+  TopologyV3TaskInsight,
+} from "@/types";
 import {
   DEFAULT_TOPOLOGY_FILTER,
   filterTopologyGraph,
@@ -15,12 +22,26 @@ import {
 } from "@/components/topology/topologyGraph.utils";
 
 const topologyStore = useTopologyStore();
+const MAX_DEPTH_RANGE = {
+  min: 1,
+  max: 8,
+};
+
+const TASK_VIEW_OPTIONS: Array<{ value: TopologyTaskViewMode; label: string }> = [
+  { value: "explore", label: "探索" },
+  { value: "troubleshoot", label: "故障排查" },
+  { value: "impact", label: "影响面" },
+  { value: "change", label: "变更评估" },
+];
 
 const rawGraphData = computed(() => topologyStore.graphData);
 const loading = computed(() => topologyStore.loading);
+const taskInsights = computed(() => topologyStore.taskInsights || []);
 const activeFilter = ref<TopologyFilterState>({ ...DEFAULT_TOPOLOGY_FILTER });
 const graphData = computed(() => filterTopologyGraph(rawGraphData.value, activeFilter.value));
 const canvasRef = ref<InstanceType<typeof TopologyCanvas>>();
+const selectedLayout = ref<"force" | "dagre">("force");
+const warnedLayoutFallbackReasons = new Set<string>();
 
 const panelMode = ref<"detail" | "path" | "impact" | null>(null);
 const selectedNode = ref<TopologyNode | null>(null);
@@ -36,7 +57,13 @@ const contextMenuPos = ref({ x: 0, y: 0 });
 const contextMenuNode = ref<TopologyNode | null>(null);
 
 const isFullscreen = ref(false);
+const focusNeighborhoodEnabled = ref(true);
 const containerRef = ref<HTMLDivElement>();
+const evidenceItems = ref<TopologyV3EvidenceItem[]>([]);
+const evidenceTotal = ref(0);
+const evidenceLoading = ref(false);
+const evidenceCache = new Map<string, { items: TopologyV3EvidenceItem[]; total: number; loadedAt: number }>();
+let evidenceRequestVersion = 0;
 
 const nodeNameMap = computed(() => {
   const map: Record<string, string> = {};
@@ -56,8 +83,98 @@ function isExternalNode(node: TopologyNode | null): boolean {
   return isExternalTopologyNode(node);
 }
 
+function evidenceCacheKey(nodeId: string): string {
+  return `${topologyStore.taskView}:${topologyStore.maxDepth}:${nodeId}`;
+}
+
+function resetEvidenceState() {
+  evidenceRequestVersion += 1;
+  evidenceLoading.value = false;
+  evidenceItems.value = [];
+  evidenceTotal.value = 0;
+}
+
+function resolveInsightNodeIds(insight: TopologyV3TaskInsight): string[] {
+  return Array.from(new Set((insight.nodeIds || insight.node_ids || []).filter(Boolean)));
+}
+
+function insightSeverityLabel(insight: TopologyV3TaskInsight): string {
+  if (insight.severity === "critical") return "高风险";
+  if (insight.severity === "warning") return "需关注";
+  return "提示";
+}
+
+async function loadEvidenceForNode(node: TopologyNode, forceRefresh = false) {
+  const currentVersion = ++evidenceRequestVersion;
+  const cacheKey = evidenceCacheKey(node.id);
+  if (!forceRefresh) {
+    const cached = evidenceCache.get(cacheKey);
+    if (cached) {
+      evidenceItems.value = cached.items;
+      evidenceTotal.value = cached.total;
+      evidenceLoading.value = false;
+      return;
+    }
+  }
+
+  evidenceLoading.value = true;
+
+  try {
+    const response = await getTopologyEvidenceV3({
+      nodeId: node.id,
+      taskView: topologyStore.taskView,
+      maxItems: 20,
+    });
+    if (currentVersion !== evidenceRequestVersion) return;
+
+    const items = (response.items || []).slice(0, 20);
+    const total = response.total ?? items.length;
+    evidenceItems.value = items;
+    evidenceTotal.value = total;
+    evidenceCache.set(cacheKey, {
+      items,
+      total,
+      loadedAt: Date.now(),
+    });
+  } catch {
+    if (currentVersion !== evidenceRequestVersion) return;
+    evidenceItems.value = [];
+    evidenceTotal.value = 0;
+  } finally {
+    if (currentVersion === evidenceRequestVersion) {
+      evidenceLoading.value = false;
+    }
+  }
+}
+
 async function loadData() {
   await topologyStore.fetchGraph(true);
+}
+
+function normalizeMaxDepth(value: number): number {
+  const normalized = Number.isFinite(value) ? Math.round(value) : topologyStore.maxDepth;
+  return Math.min(MAX_DEPTH_RANGE.max, Math.max(MAX_DEPTH_RANGE.min, normalized));
+}
+
+async function handleTaskViewChange(taskView: TopologyTaskViewMode) {
+  if (topologyStore.taskView === taskView) return;
+  topologyStore.setTaskView(taskView);
+  await loadData();
+  if (panelMode.value === "detail" && selectedNode.value) {
+    await loadEvidenceForNode(selectedNode.value, true);
+  }
+}
+
+async function handleMaxDepthChange(event: Event) {
+  const input = event.target as HTMLInputElement | null;
+  if (!input) return;
+  const nextDepth = normalizeMaxDepth(Number(input.value));
+  if (topologyStore.maxDepth === nextDepth) return;
+  topologyStore.setMaxDepth(nextDepth);
+  await loadData();
+  if (panelMode.value === "detail" && selectedNode.value) {
+    await loadEvidenceForNode(selectedNode.value, true);
+  }
 }
 
 function handleNodeClick(node: TopologyNode) {
@@ -82,6 +199,7 @@ function handleNodeClick(node: TopologyNode) {
 
   selectedNode.value = node;
   panelMode.value = "detail";
+  void loadEvidenceForNode(node);
 }
 
 function handleCanvasNodeClick(node: TopologyNode) {
@@ -120,7 +238,22 @@ function startPathTrace() {
 
 async function handleFindPaths(sourceId: string, targetId: string) {
   try {
-    pathResult.value = await findPaths(sourceId, targetId);
+    const result = await getTopologyPathsV3({
+      sourceId,
+      targetId,
+      taskView: topologyStore.taskView,
+      maxDepth: topologyStore.maxDepth,
+    });
+
+    const paths = result.paths
+      .map((path) => (Array.isArray(path) ? path : path.nodeIds || path.node_ids || []))
+      .filter((path) => path.length > 0);
+
+    pathResult.value = {
+      paths,
+      truncated: result.truncated,
+    };
+
     panelMode.value = "path";
     if (pathResult.value.paths.length > 0) {
       canvasRef.value?.highlightPaths(pathResult.value.paths);
@@ -142,7 +275,25 @@ async function handleAnalyzeImpact() {
   }
 
   try {
-    impactResult.value = await analyzeImpact(node.id);
+    const result = await getTopologyImpactV3({
+      nodeId: node.id,
+      taskView: topologyStore.taskView,
+      maxDepth: topologyStore.maxDepth,
+    });
+
+    const affectedNodes = (result.affectedNodes || result.affected_nodes || []).map((item) => ({
+      id: item.id,
+      name: item.name,
+      node_type: item.nodeType || item.node_type || "application",
+      depth: item.depth,
+    }));
+
+    impactResult.value = {
+      affected_nodes: affectedNodes,
+      total_count: result.totalCount ?? result.total_count ?? affectedNodes.length,
+      max_depth: result.maxDepth ?? result.max_depth ?? 0,
+    };
+
     selectedNode.value = node;
     panelMode.value = "impact";
     canvasRef.value?.highlightImpact(node.id, impactResult.value);
@@ -159,6 +310,21 @@ function handleSearch(payload: { matchIds: string[]; focusId?: string }) {
   canvasRef.value?.highlightSearch(payload.matchIds, payload.focusId);
 }
 
+function handleInsightClick(insight: TopologyV3TaskInsight) {
+  const nodeIds = resolveInsightNodeIds(insight);
+  if (nodeIds.length === 0) {
+    ElMessage.info("该洞察暂无可高亮节点");
+    return;
+  }
+  canvasRef.value?.highlightSearch(nodeIds, nodeIds[0]);
+  const focusNode = rawGraphData.value?.nodes.find((node) => node.id === nodeIds[0]) || null;
+  if (focusNode && !isExternalNode(focusNode)) {
+    selectedNode.value = focusNode;
+    panelMode.value = "detail";
+    void loadEvidenceForNode(focusNode);
+  }
+}
+
 function handleFilterChange(payload: Partial<TopologyFilterState>) {
   activeFilter.value = {
     ...activeFilter.value,
@@ -167,7 +333,27 @@ function handleFilterChange(payload: Partial<TopologyFilterState>) {
 }
 
 function handleLayoutChange(type: "force" | "dagre") {
-  canvasRef.value?.setLayout(type);
+  selectedLayout.value = type;
+}
+
+function handleLayoutResolved(payload: { requested: "force" | "dagre"; applied: "force" | "dagre"; reason?: string }) {
+  selectedLayout.value = payload.applied;
+  if (payload.requested === payload.applied) return;
+
+  const reasonKey = payload.reason?.trim() || "__unknown__";
+  if (warnedLayoutFallbackReasons.has(reasonKey)) return;
+  warnedLayoutFallbackReasons.add(reasonKey);
+
+  const layoutLabel = payload.applied === "dagre" ? "层次布局" : "力导向布局";
+  const reasonText = payload.reason ? `（${payload.reason}）` : "";
+  ElMessage.warning(`布局已自动回退为${layoutLabel}${reasonText}`);
+}
+
+function handleFocusModeChange(enabled: boolean) {
+  focusNeighborhoodEnabled.value = enabled;
+  if (!enabled) {
+    canvasRef.value?.clearHighlight();
+  }
 }
 
 async function handleExport(type: "png" | "svg") {
@@ -186,6 +372,7 @@ function handlePanelClose() {
   selectedNode.value = null;
   pathResult.value = null;
   impactResult.value = null;
+  resetEvidenceState();
   canvasRef.value?.clearHighlight();
 }
 
@@ -220,13 +407,76 @@ onBeforeUnmount(() => {
       :nodes="graphData?.nodes || []"
       :stats="graphData?.legend_stats || null"
       :filter="activeFilter"
+      :layout="selectedLayout"
+      :focus-neighborhood-enabled="focusNeighborhoodEnabled"
       @search="handleSearch"
       @filter-change="handleFilterChange"
       @layout-change="handleLayoutChange"
+      @focus-mode-change="handleFocusModeChange"
       @export="handleExport"
       @refresh="loadData"
       @fullscreen="toggleFullscreen"
     />
+
+    <div class="task-view-bar">
+      <div class="task-view-switch">
+        <span class="task-view-title">任务视图</span>
+        <button
+          v-for="option in TASK_VIEW_OPTIONS"
+          :key="option.value"
+          :data-testid="`task-view-${option.value}`"
+          type="button"
+          class="task-view-btn"
+          :class="{ active: topologyStore.taskView === option.value }"
+          @click="handleTaskViewChange(option.value)"
+        >
+          {{ option.label }}
+        </button>
+      </div>
+
+      <div class="depth-control">
+        <label class="depth-label" for="max-depth-number">层级深度</label>
+        <input
+          id="max-depth-range"
+          data-testid="max-depth-range"
+          class="depth-range"
+          type="range"
+          :min="MAX_DEPTH_RANGE.min"
+          :max="MAX_DEPTH_RANGE.max"
+          :value="topologyStore.maxDepth"
+          @change="handleMaxDepthChange"
+        >
+        <input
+          id="max-depth-number"
+          data-testid="max-depth-number"
+          class="depth-number"
+          type="number"
+          :min="MAX_DEPTH_RANGE.min"
+          :max="MAX_DEPTH_RANGE.max"
+          :value="topologyStore.maxDepth"
+          @change="handleMaxDepthChange"
+        >
+      </div>
+    </div>
+
+    <div v-if="taskInsights.length > 0" class="task-insight-bar">
+      <span class="task-insight-title">任务洞察</span>
+      <button
+        v-for="(insight, index) in taskInsights"
+        :key="`${insight.kind}-${index}`"
+        :data-testid="`task-insight-${index}`"
+        type="button"
+        class="task-insight-chip"
+        :class="{
+          warning: insight.severity === 'warning',
+          critical: insight.severity === 'critical',
+        }"
+        @click="handleInsightClick(insight)"
+      >
+        <span class="task-insight-severity">{{ insightSeverityLabel(insight) }}</span>
+        <span class="task-insight-text">{{ insight.title }}</span>
+      </button>
+    </div>
 
     <!-- Path trace hint -->
     <div v-if="pathTraceMode" class="path-trace-bar">
@@ -248,8 +498,11 @@ onBeforeUnmount(() => {
         <TopologyCanvas
           ref="canvasRef"
           :graph-data="graphData"
+          :layout="selectedLayout"
+          :focus-neighborhood="focusNeighborhoodEnabled && !pathTraceMode"
           @node-click="handleCanvasNodeClick"
           @node-contextmenu="handleContextMenu"
+          @layout-resolved="handleLayoutResolved"
         />
 
         <!-- Empty state -->
@@ -264,6 +517,9 @@ onBeforeUnmount(() => {
         :selected-node="selectedNode"
         :path-result="pathResult"
         :impact-result="impactResult"
+        :evidence-items="evidenceItems"
+        :evidence-total="evidenceTotal"
+        :evidence-loading="evidenceLoading"
         :node-name-map="nodeNameMap"
         @close="handlePanelClose"
       />
@@ -277,10 +533,10 @@ onBeforeUnmount(() => {
         :style="{ left: contextMenuPos.x + 'px', top: contextMenuPos.y + 'px' }"
         @click.stop
       >
-        <div class="context-menu-item" @click="startPathTrace">
+        <div data-testid="context-path-trace" class="context-menu-item" @click="startPathTrace">
           路径追踪（从此节点出发）
         </div>
-        <div class="context-menu-item" @click="handleAnalyzeImpact">
+        <div data-testid="context-impact" class="context-menu-item" @click="handleAnalyzeImpact">
           影响分析
         </div>
       </div>
@@ -295,6 +551,136 @@ onBeforeUnmount(() => {
   height: 100%;
   background: var(--im-surface-1);
   position: relative;
+}
+.task-view-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--im-border-subtle);
+  background: var(--im-surface-0);
+  flex-shrink: 0;
+}
+.task-view-switch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.task-view-title {
+  font-size: 12px;
+  color: var(--im-text-secondary);
+}
+.task-view-btn {
+  min-height: 32px;
+  padding: 4px 10px;
+  border-radius: var(--im-radius-sm);
+  border: 1px solid var(--im-border-subtle);
+  background: var(--im-surface-1);
+  color: var(--im-text-primary);
+  font-size: 12px;
+  cursor: pointer;
+  transition:
+    border-color var(--im-duration-fast) var(--im-ease-standard),
+    background var(--im-duration-fast) var(--im-ease-standard),
+    color var(--im-duration-fast) var(--im-ease-standard);
+}
+.task-view-btn:hover {
+  background: var(--im-surface-2);
+}
+.task-view-btn.active {
+  border-color: var(--im-border-active);
+  background: var(--im-accent-soft);
+  color: var(--im-accent);
+}
+.task-view-btn:focus-visible {
+  outline: 2px solid var(--im-accent);
+  outline-offset: 1px;
+}
+.depth-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.depth-label {
+  font-size: 12px;
+  color: var(--im-text-secondary);
+}
+.depth-range {
+  width: 140px;
+  accent-color: var(--im-accent);
+}
+.depth-number {
+  width: 56px;
+  min-height: 32px;
+  border-radius: var(--im-radius-sm);
+  border: 1px solid var(--im-border-subtle);
+  background: var(--im-surface-1);
+  color: var(--im-text-primary);
+  padding: 4px 8px;
+}
+.depth-number:focus-visible {
+  outline: 2px solid var(--im-accent);
+  outline-offset: 1px;
+}
+.task-insight-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--im-border-subtle);
+  background: color-mix(in srgb, var(--im-accent-soft) 40%, transparent);
+  flex-shrink: 0;
+}
+.task-insight-title {
+  font-size: 12px;
+  color: var(--im-text-secondary);
+  font-weight: 600;
+}
+.task-insight-chip {
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--im-border-subtle);
+  border-radius: var(--im-radius-sm);
+  background: var(--im-surface-0);
+  color: var(--im-text-primary);
+  cursor: pointer;
+  transition:
+    border-color var(--im-duration-fast) var(--im-ease-standard),
+    background var(--im-duration-fast) var(--im-ease-standard),
+    transform var(--im-duration-fast) var(--im-ease-standard);
+}
+.task-insight-chip:hover {
+  border-color: var(--im-border-active);
+  background: var(--im-accent-soft);
+  transform: translateY(-1px);
+}
+.task-insight-chip:focus-visible {
+  outline: 2px solid var(--im-accent);
+  outline-offset: 1px;
+}
+.task-insight-chip.warning {
+  border-color: color-mix(in srgb, var(--im-warning) 55%, var(--im-border-subtle));
+}
+.task-insight-chip.critical {
+  border-color: color-mix(in srgb, var(--im-danger) 55%, var(--im-border-subtle));
+}
+.task-insight-severity {
+  font-size: 11px;
+  color: var(--im-text-muted);
+}
+.task-insight-text {
+  font-size: 12px;
+  max-width: 260px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .path-trace-bar {
   display: flex;
@@ -349,6 +735,16 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 1080px) {
+  .task-view-bar {
+    align-items: flex-start;
+  }
+  .task-insight-bar {
+    align-items: flex-start;
+  }
+  .depth-control {
+    width: 100%;
+    justify-content: flex-start;
+  }
   .topology-content {
     flex-direction: column;
   }

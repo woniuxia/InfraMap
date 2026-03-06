@@ -1,62 +1,11 @@
 import type { Middleware } from "@/types";
-import defaultMiddlewareIcon from "@/assets/middleware-icons/default-middleware.svg";
-import categoryDatabaseIcon from "@/assets/middleware-icons/category-database.svg";
-import categoryMessageQueueIcon from "@/assets/middleware-icons/category-message-queue.svg";
-import categoryCacheIcon from "@/assets/middleware-icons/category-cache.svg";
-import categorySearchEngineIcon from "@/assets/middleware-icons/category-search-engine.svg";
-import categoryConfigCenterIcon from "@/assets/middleware-icons/category-config-center.svg";
-import categoryOtherIcon from "@/assets/middleware-icons/category-other.svg";
-import mysqlIcon from "@/assets/middleware-icons/mysql.svg";
-import postgresqlIcon from "@/assets/middleware-icons/postgresql.svg";
-import mariadbIcon from "@/assets/middleware-icons/mariadb.svg";
-import sqlserverIcon from "@/assets/middleware-icons/sqlserver.svg";
-import oracleIcon from "@/assets/middleware-icons/oracle.svg";
-import mongodbIcon from "@/assets/middleware-icons/mongodb.svg";
-import clickhouseIcon from "@/assets/middleware-icons/clickhouse.svg";
-import kafkaIcon from "@/assets/middleware-icons/kafka.svg";
-import rabbitmqIcon from "@/assets/middleware-icons/rabbitmq.svg";
-import rocketmqIcon from "@/assets/middleware-icons/rocketmq.svg";
-import pulsarIcon from "@/assets/middleware-icons/pulsar.svg";
-import activemqIcon from "@/assets/middleware-icons/activemq.svg";
-import nsqIcon from "@/assets/middleware-icons/nsq.svg";
-import redisIcon from "@/assets/middleware-icons/redis.svg";
-import keydbIcon from "@/assets/middleware-icons/keydb.svg";
-import tairIcon from "@/assets/middleware-icons/tair.svg";
-import couchbaseIcon from "@/assets/middleware-icons/couchbase.svg";
-import elasticsearchIcon from "@/assets/middleware-icons/elasticsearch.svg";
-import opensearchIcon from "@/assets/middleware-icons/opensearch.svg";
-import solrIcon from "@/assets/middleware-icons/solr.svg";
-import meilisearchIcon from "@/assets/middleware-icons/meilisearch.svg";
-import sphinxIcon from "@/assets/middleware-icons/sphinx.svg";
-import nacosIcon from "@/assets/middleware-icons/nacos.svg";
-import apolloIcon from "@/assets/middleware-icons/apollo.svg";
-import consulIcon from "@/assets/middleware-icons/consul.svg";
-import etcdIcon from "@/assets/middleware-icons/etcd.svg";
-import zookeeperIcon from "@/assets/middleware-icons/zookeeper.svg";
-import memcachedIcon from "@/assets/middleware-icons/memcached.svg";
-import tidbIcon from "@/assets/middleware-icons/tidb.svg";
-import opengaussIcon from "@/assets/middleware-icons/opengauss.svg";
-import dmdatabaseIcon from "@/assets/middleware-icons/dmdatabase.svg";
-import kingbaseesIcon from "@/assets/middleware-icons/kingbasees.svg";
-import gaussdbIcon from "@/assets/middleware-icons/gaussdb.svg";
-import oceanbaseIcon from "@/assets/middleware-icons/oceanbase.svg";
-import emqxIcon from "@/assets/middleware-icons/emqx.svg";
-import natsIcon from "@/assets/middleware-icons/nats.svg";
-import redpandaIcon from "@/assets/middleware-icons/redpanda.svg";
-import typesenseIcon from "@/assets/middleware-icons/typesense.svg";
-import springcloudconfigIcon from "@/assets/middleware-icons/springcloudconfig.svg";
-import minioIcon from "@/assets/middleware-icons/minio.svg";
-import apacheapisixIcon from "@/assets/middleware-icons/apacheapisix.svg";
-import tongwebIcon from "@/assets/middleware-icons/tongweb.svg";
-import goldendbIcon from "@/assets/middleware-icons/goldendb.svg";
-import apachedorisIcon from "@/assets/middleware-icons/apachedoris.svg";
-import memgraphIcon from "@/assets/middleware-icons/memgraph.svg";
-import db2Icon from "@/assets/middleware-icons/db2.svg";
+import { resolveIconDataUri } from "@/icons/iconRegistry";
 
 export type MiddlewareCategory = Middleware["category"];
 
 export interface MiddlewareIconMeta {
   key: string;
+  iconKey: string;
   src: string;
   alt: string;
   isFallback: boolean;
@@ -67,6 +16,8 @@ export interface MiddlewareTypeOption {
   value: string;
   icon: MiddlewareIconMeta;
 }
+
+const DEFAULT_ICON_KEY = "local-middleware:default-middleware";
 
 const COMMON_MIDDLEWARE_TYPES: Record<MiddlewareCategory, string[]> = {
   database: [
@@ -103,64 +54,64 @@ const MIDDLEWARE_CATEGORY_LABELS: Record<MiddlewareCategory, string> = {
   other: "其他",
 };
 
-const MIDDLEWARE_CATEGORY_ICONS: Record<MiddlewareCategory, string> = {
-  database: categoryDatabaseIcon,
-  message_queue: categoryMessageQueueIcon,
-  cache: categoryCacheIcon,
-  search_engine: categorySearchEngineIcon,
-  config_center: categoryConfigCenterIcon,
-  other: categoryOtherIcon,
+const MIDDLEWARE_CATEGORY_ICONS: Record<MiddlewareCategory, { iconKey: string; alt: string }> = {
+  database: { iconKey: "local-middleware:category-database", alt: "数据库" },
+  message_queue: { iconKey: "local-middleware:category-message-queue", alt: "消息队列" },
+  cache: { iconKey: "local-middleware:category-cache", alt: "缓存" },
+  search_engine: { iconKey: "local-middleware:category-search-engine", alt: "搜索引擎" },
+  config_center: { iconKey: "local-middleware:category-config-center", alt: "配置中心" },
+  other: { iconKey: "local-middleware:category-other", alt: "其他" },
 };
 
-const MIDDLEWARE_TYPE_ICONS: Record<string, { src: string; alt: string }> = {
-  mysql: { src: mysqlIcon, alt: "MySQL" },
-  postgresql: { src: postgresqlIcon, alt: "PostgreSQL" },
-  postgres: { src: postgresqlIcon, alt: "PostgreSQL" },
-  mariadb: { src: mariadbIcon, alt: "MariaDB" },
-  sqlserver: { src: sqlserverIcon, alt: "SQL Server" },
-  oracle: { src: oracleIcon, alt: "Oracle" },
-  mongodb: { src: mongodbIcon, alt: "MongoDB" },
-  clickhouse: { src: clickhouseIcon, alt: "ClickHouse" },
-  tidb: { src: tidbIcon, alt: "TiDB" },
-  opengauss: { src: opengaussIcon, alt: "openGauss" },
-  apachedoris: { src: apachedorisIcon, alt: "Apache Doris" },
-  memgraph: { src: memgraphIcon, alt: "Memgraph" },
-  db2: { src: db2Icon, alt: "DB2" },
-  dmdatabase: { src: dmdatabaseIcon, alt: "DM Database" },
-  kingbasees: { src: kingbaseesIcon, alt: "KingbaseES" },
-  gaussdb: { src: gaussdbIcon, alt: "GaussDB" },
-  oceanbase: { src: oceanbaseIcon, alt: "OceanBase" },
-  kafka: { src: kafkaIcon, alt: "Kafka" },
-  rabbitmq: { src: rabbitmqIcon, alt: "RabbitMQ" },
-  rocketmq: { src: rocketmqIcon, alt: "RocketMQ" },
-  pulsar: { src: pulsarIcon, alt: "Pulsar" },
-  activemq: { src: activemqIcon, alt: "ActiveMQ" },
-  nsq: { src: nsqIcon, alt: "NSQ" },
-  emqx: { src: emqxIcon, alt: "EMQX" },
-  nats: { src: natsIcon, alt: "NATS" },
-  natsio: { src: natsIcon, alt: "NATS" },
-  redpanda: { src: redpandaIcon, alt: "Redpanda" },
-  redis: { src: redisIcon, alt: "Redis" },
-  keydb: { src: keydbIcon, alt: "KeyDB" },
-  tair: { src: tairIcon, alt: "Tair" },
-  couchbase: { src: couchbaseIcon, alt: "Couchbase" },
-  memcached: { src: memcachedIcon, alt: "Memcached" },
-  elasticsearch: { src: elasticsearchIcon, alt: "Elasticsearch" },
-  opensearch: { src: opensearchIcon, alt: "OpenSearch" },
-  solr: { src: solrIcon, alt: "Solr" },
-  meilisearch: { src: meilisearchIcon, alt: "Meilisearch" },
-  sphinx: { src: sphinxIcon, alt: "Sphinx" },
-  typesense: { src: typesenseIcon, alt: "Typesense" },
-  nacos: { src: nacosIcon, alt: "Nacos" },
-  apollo: { src: apolloIcon, alt: "Apollo" },
-  consul: { src: consulIcon, alt: "Consul" },
-  etcd: { src: etcdIcon, alt: "etcd" },
-  zookeeper: { src: zookeeperIcon, alt: "ZooKeeper" },
-  springcloudconfig: { src: springcloudconfigIcon, alt: "Spring Cloud Config" },
-  minio: { src: minioIcon, alt: "MinIO" },
-  apacheapisix: { src: apacheapisixIcon, alt: "Apache APISIX" },
-  tongweb: { src: tongwebIcon, alt: "TongWeb" },
-  goldendb: { src: goldendbIcon, alt: "GoldenDB" },
+const MIDDLEWARE_TYPE_ICONS: Record<string, { iconKey: string; alt: string }> = {
+  mysql: { iconKey: "local-middleware:mysql", alt: "MySQL" },
+  postgresql: { iconKey: "local-middleware:postgresql", alt: "PostgreSQL" },
+  postgres: { iconKey: "local-middleware:postgresql", alt: "PostgreSQL" },
+  mariadb: { iconKey: "local-middleware:mariadb", alt: "MariaDB" },
+  sqlserver: { iconKey: "local-middleware:sqlserver", alt: "SQL Server" },
+  oracle: { iconKey: "local-middleware:oracle", alt: "Oracle" },
+  mongodb: { iconKey: "local-middleware:mongodb", alt: "MongoDB" },
+  clickhouse: { iconKey: "local-middleware:clickhouse", alt: "ClickHouse" },
+  tidb: { iconKey: "local-middleware:tidb", alt: "TiDB" },
+  opengauss: { iconKey: "local-middleware:opengauss", alt: "openGauss" },
+  apachedoris: { iconKey: "local-middleware:apachedoris", alt: "Apache Doris" },
+  memgraph: { iconKey: "local-middleware:memgraph", alt: "Memgraph" },
+  db2: { iconKey: "local-middleware:db2", alt: "DB2" },
+  dmdatabase: { iconKey: "local-middleware:dmdatabase", alt: "DM Database" },
+  kingbasees: { iconKey: "local-middleware:kingbasees", alt: "KingbaseES" },
+  gaussdb: { iconKey: "local-middleware:gaussdb", alt: "GaussDB" },
+  oceanbase: { iconKey: "local-middleware:oceanbase", alt: "OceanBase" },
+  kafka: { iconKey: "local-middleware:kafka", alt: "Kafka" },
+  rabbitmq: { iconKey: "local-middleware:rabbitmq", alt: "RabbitMQ" },
+  rocketmq: { iconKey: "local-middleware:rocketmq", alt: "RocketMQ" },
+  pulsar: { iconKey: "local-middleware:pulsar", alt: "Pulsar" },
+  activemq: { iconKey: "local-middleware:activemq", alt: "ActiveMQ" },
+  nsq: { iconKey: "local-middleware:nsq", alt: "NSQ" },
+  emqx: { iconKey: "local-middleware:emqx", alt: "EMQX" },
+  nats: { iconKey: "local-middleware:nats", alt: "NATS" },
+  natsio: { iconKey: "local-middleware:nats", alt: "NATS" },
+  redpanda: { iconKey: "local-middleware:redpanda", alt: "Redpanda" },
+  redis: { iconKey: "local-middleware:redis", alt: "Redis" },
+  keydb: { iconKey: "local-middleware:keydb", alt: "KeyDB" },
+  tair: { iconKey: "local-middleware:tair", alt: "Tair" },
+  couchbase: { iconKey: "local-middleware:couchbase", alt: "Couchbase" },
+  memcached: { iconKey: "local-middleware:memcached", alt: "Memcached" },
+  elasticsearch: { iconKey: "local-middleware:elasticsearch", alt: "Elasticsearch" },
+  opensearch: { iconKey: "local-middleware:opensearch", alt: "OpenSearch" },
+  solr: { iconKey: "local-middleware:solr", alt: "Solr" },
+  meilisearch: { iconKey: "local-middleware:meilisearch", alt: "Meilisearch" },
+  sphinx: { iconKey: "local-middleware:sphinx", alt: "Sphinx" },
+  typesense: { iconKey: "local-middleware:typesense", alt: "Typesense" },
+  nacos: { iconKey: "local-middleware:nacos", alt: "Nacos" },
+  apollo: { iconKey: "local-middleware:apollo", alt: "Apollo" },
+  consul: { iconKey: "local-middleware:consul", alt: "Consul" },
+  etcd: { iconKey: "local-middleware:etcd", alt: "etcd" },
+  zookeeper: { iconKey: "local-middleware:zookeeper", alt: "ZooKeeper" },
+  springcloudconfig: { iconKey: "local-middleware:springcloudconfig", alt: "Spring Cloud Config" },
+  minio: { iconKey: "local-middleware:minio", alt: "MinIO" },
+  apacheapisix: { iconKey: "local-middleware:apacheapisix", alt: "Apache APISIX" },
+  tongweb: { iconKey: "local-middleware:tongweb", alt: "TongWeb" },
+  goldendb: { iconKey: "local-middleware:goldendb", alt: "GoldenDB" },
 };
 
 const MIDDLEWARE_DEFAULT_PORTS: Record<string, number> = {
@@ -240,6 +191,34 @@ function normalizeMiddlewareCategory(category?: string): MiddlewareCategory | un
   return undefined;
 }
 
+function buildResolvedIcon(
+  key: string,
+  iconKey: string,
+  alt: string,
+  isFallback: boolean,
+): MiddlewareIconMeta | null {
+  const src = resolveIconDataUri(iconKey);
+  if (!src) return null;
+  return {
+    key,
+    iconKey,
+    src,
+    alt,
+    isFallback,
+  };
+}
+
+function resolveDefaultIcon(): MiddlewareIconMeta {
+  const src = resolveIconDataUri(DEFAULT_ICON_KEY) || "";
+  return {
+    key: "middleware",
+    iconKey: DEFAULT_ICON_KEY,
+    src,
+    alt: "中间件",
+    isFallback: true,
+  };
+}
+
 export const MIDDLEWARE_CATEGORY_OPTIONS = (
   Object.entries(MIDDLEWARE_CATEGORY_LABELS) as Array<[MiddlewareCategory, string]>
 ).map(([value, label]) => ({ value, label }));
@@ -262,31 +241,24 @@ export function getMiddlewareIconByType(type?: string, category?: string): Middl
   if (normalizedType) {
     const typeIcon = MIDDLEWARE_TYPE_ICONS[normalizedType];
     if (typeIcon) {
-      return {
-        key: normalizedType,
-        src: typeIcon.src,
-        alt: typeIcon.alt,
-        isFallback: false,
-      };
+      const resolved = buildResolvedIcon(normalizedType, typeIcon.iconKey, typeIcon.alt, false);
+      if (resolved) return resolved;
     }
   }
 
   const normalizedCategory = normalizeMiddlewareCategory(category);
   if (normalizedCategory) {
-    return {
-      key: normalizedCategory,
-      src: MIDDLEWARE_CATEGORY_ICONS[normalizedCategory],
-      alt: MIDDLEWARE_CATEGORY_LABELS[normalizedCategory],
-      isFallback: true,
-    };
+    const categoryIcon = MIDDLEWARE_CATEGORY_ICONS[normalizedCategory];
+    const resolved = buildResolvedIcon(
+      normalizedCategory,
+      categoryIcon.iconKey,
+      categoryIcon.alt,
+      true,
+    );
+    if (resolved) return resolved;
   }
 
-  return {
-    key: "middleware",
-    src: defaultMiddlewareIcon,
-    alt: "中间件",
-    isFallback: true,
-  };
+  return resolveDefaultIcon();
 }
 
 export function getMiddlewareIcon(category?: string, type?: string): MiddlewareIconMeta {

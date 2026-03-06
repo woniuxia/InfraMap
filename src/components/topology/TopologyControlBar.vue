@@ -12,6 +12,8 @@ const props = defineProps<{
   nodes: TopologyNode[];
   stats: TopologyLegendStats | null;
   filter: TopologyFilterState;
+  focusNeighborhoodEnabled: boolean;
+  layout: "force" | "dagre";
 }>();
 
 const emit = defineEmits<{
@@ -21,6 +23,7 @@ const emit = defineEmits<{
   (e: "export", type: "png" | "svg"): void;
   (e: "refresh"): void;
   (e: "fullscreen"): void;
+  (e: "focus-mode-change", enabled: boolean): void;
 }>();
 
 const NODE_KIND_LABELS: Record<TopologyGroupKind, string> = {
@@ -53,7 +56,6 @@ const EDGE_KIND_ORDER: TopologyEdgeType[] = [
 const searchText = ref("");
 const matchIds = ref<string[]>([]);
 const currentMatchIndex = ref(0);
-const selectedLayout = ref<"force" | "dagre">("dagre");
 let searchTimer: ReturnType<typeof setTimeout> | null = null;
 
 const searchCountText = computed(() => {
@@ -193,9 +195,13 @@ function updateShowAllEdges(event: Event) {
   emit("filter-change", { showAllEdges: Boolean(target?.checked) });
 }
 
+function updateFocusNeighborhood(event: Event) {
+  const target = event.target as HTMLInputElement | null;
+  emit("focus-mode-change", Boolean(target?.checked));
+}
+
 function changeLayout(layout: "force" | "dagre") {
-  if (selectedLayout.value === layout) return;
-  selectedLayout.value = layout;
+  if (props.layout === layout) return;
   emit("layout-change", layout);
 }
 
@@ -241,7 +247,7 @@ onBeforeUnmount(() => {
             data-testid="layout-dagre"
             type="button"
             class="chip-btn"
-            :class="{ active: selectedLayout === 'dagre' }"
+            :class="{ active: layout === 'dagre' }"
             @click="changeLayout('dagre')"
           >
             层级
@@ -250,7 +256,7 @@ onBeforeUnmount(() => {
             data-testid="layout-force"
             type="button"
             class="chip-btn"
-            :class="{ active: selectedLayout === 'force' }"
+            :class="{ active: layout === 'force' }"
             @click="changeLayout('force')"
           >
             力导向
@@ -332,6 +338,16 @@ onBeforeUnmount(() => {
           @change="updateShowAllEdges"
         >
         <span>显示全部关系线</span>
+      </label>
+
+      <label class="switch-wrap">
+        <input
+          data-testid="focus-neighborhood"
+          type="checkbox"
+          :checked="focusNeighborhoodEnabled"
+          @change="updateFocusNeighborhood"
+        >
+        <span>点击节点聚焦邻接</span>
       </label>
 
       <div class="metric-group">

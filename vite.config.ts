@@ -25,6 +25,25 @@ export default defineConfig(async () => ({
       "@": path.resolve(__dirname, "src"),
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          const normalized = id.replaceAll("\\", "/");
+          if (normalized.includes("cytoscape")) {
+            return "topology-cytoscape";
+          }
+          if (
+            normalized.includes("/src/components/topology/")
+            || normalized.includes("/src/views/TopologyView.vue")
+          ) {
+            return "topology-ui";
+          }
+          return undefined;
+        },
+      },
+    },
+  },
   clearScreen: false,
   server: {
     port: 1420,

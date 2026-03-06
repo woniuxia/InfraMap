@@ -15,3 +15,4 @@ pub mod nginx_configs;
 pub mod settings;
 pub mod taxonomy;
 pub mod topology;
+pub mod topology_v3;

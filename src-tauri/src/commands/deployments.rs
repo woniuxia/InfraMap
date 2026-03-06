@@ -140,8 +140,8 @@ fn query_resource_address_env(
                 rusqlite::params![resource_id],
                 |row| {
                     let endpoints_raw: String = row.get(0)?;
-                    let endpoints: Vec<NginxEndpoint> =
-                        serde_json::from_str(&endpoints_raw).map_err(|err| {
+                    let endpoints: Vec<NginxEndpoint> = serde_json::from_str(&endpoints_raw)
+                        .map_err(|err| {
                             rusqlite::Error::FromSqlConversionFailure(
                                 0,
                                 rusqlite::types::Type::Text,
@@ -567,8 +567,9 @@ mod tests {
         )
         .expect("update app address");
 
-        let context = build_resource_deploy_context("test", &conn, "application", "app1", None, None)
-            .expect("build context");
+        let context =
+            build_resource_deploy_context("test", &conn, "application", "app1", None, None)
+                .expect("build context");
         assert_eq!(context.address.as_deref(), Some("https://api.example.com"));
         assert_eq!(context.parsed_ip, None);
         assert_eq!(context.matched_host_id, None);

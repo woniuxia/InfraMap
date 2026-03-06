@@ -43,7 +43,7 @@ const filterFixture: TopologyFilterState = {
   showAllEdges: false,
 };
 
-function mountControlBar() {
+function mountControlBar(layout: "force" | "dagre" = "force") {
   const nodes = [
     createNode({ id: "n-1", name: "订单服务", extra: { address: "10.0.0.11" } }),
     createNode({ id: "n-2", name: "订单网关", node_type: "nginx", group_kind: "nginx", extra: { ip: "10.0.0.21" } }),
@@ -55,6 +55,8 @@ function mountControlBar() {
       nodes,
       stats: statsFixture,
       filter: filterFixture,
+      focusNeighborhoodEnabled: true,
+      layout,
     },
   });
 }
@@ -102,11 +104,38 @@ describe("TopologyControlBar", () => {
     expect(wrapper.emitted("filter-change")?.[3]?.[0]).toEqual({ showAllEdges: true });
   });
 
-  it("emits layout, export and action events", async () => {
+  it("emits focus mode changes", async () => {
     const wrapper = mountControlBar();
 
+    await wrapper.get('[data-testid="focus-neighborhood"]').setValue(false);
+    expect(wrapper.emitted("focus-mode-change")?.[0]?.[0]).toBe(false);
+  });
+
+  it("uses controlled layout active state and emits layout-change only when target layout differs", async () => {
+    const wrapper = mountControlBar();
+
+    const forceButton = wrapper.get('[data-testid="layout-force"]');
+    const dagreButton = wrapper.get('[data-testid="layout-dagre"]');
+
+    expect(forceButton.classes()).toContain("active");
+    expect(dagreButton.classes()).not.toContain("active");
+
     await wrapper.get('[data-testid="layout-force"]').trigger("click");
-    expect(wrapper.emitted("layout-change")?.[0]?.[0]).toBe("force");
+    expect(wrapper.emitted("layout-change")).toBeFalsy();
+
+    await wrapper.get('[data-testid="layout-dagre"]').trigger("click");
+    expect(wrapper.emitted("layout-change")?.[0]?.[0]).toBe("dagre");
+
+    expect(forceButton.classes()).toContain("active");
+    expect(dagreButton.classes()).not.toContain("active");
+
+    await wrapper.setProps({ layout: "dagre" });
+    expect(forceButton.classes()).not.toContain("active");
+    expect(dagreButton.classes()).toContain("active");
+  });
+
+  it("emits export and action events", async () => {
+    const wrapper = mountControlBar();
 
     await wrapper.get('[data-testid="export-png"]').trigger("click");
     await wrapper.get('[data-testid="export-svg"]').trigger("click");
@@ -119,4 +148,3 @@ describe("TopologyControlBar", () => {
     expect(wrapper.emitted("fullscreen")).toHaveLength(1);
   });
 });
-

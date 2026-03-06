@@ -67,23 +67,24 @@ const deploymentPanelRef = ref<DeploymentPanelExposed | null>(null);
 const selectedBusinessApplicationId = computed(() =>
   normalizeBusinessApplicationId(editingApp.value.business_application_id)
 );
-const allBusinessApplicationOptions = computed(() => {
+const allBusinessApplicationOptions = computed<BusinessApplication[]>(() => {
   const activeOptions = businessApplicationOptions.value.filter((item) => item.status === "active");
   const selectedId = selectedBusinessApplicationId.value;
   const selectedName = editingApp.value.business_application_name?.trim();
   if (!selectedId || activeOptions.some((item) => item.id === selectedId) || !selectedName) {
     return activeOptions;
   }
+  const fallbackInactiveOption: BusinessApplication = {
+    id: selectedId,
+    name: selectedName,
+    status: "inactive",
+    env: undefined,
+    created_at: "",
+    updated_at: "",
+  };
   return [
     ...activeOptions,
-    {
-      id: selectedId,
-      name: selectedName,
-      status: "inactive",
-      env: undefined,
-      created_at: "",
-      updated_at: "",
-    },
+    fallbackInactiveOption,
   ];
 });
 const businessApplicationSelectOptions = computed(() => {

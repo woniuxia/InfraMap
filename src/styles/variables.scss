@@ -29,6 +29,12 @@
   --im-warning: #f2b645;
   --im-danger: #ef6b73;
   --im-info: #5ca3ff;
+  --im-app-type-frontend: #5ca3ff;
+  --im-app-type-backend: #41c58a;
+  --im-app-type-gateway: #f2b645;
+  --im-app-type-batch-job: #ef8f62;
+  --im-app-type-microservice: #3ec7c5;
+  --im-app-type-other: #8b9bb9;
 
   --im-radius-sm: 8px;
   --im-radius-md: 12px;
@@ -115,6 +121,12 @@ html[data-theme="light"] {
   --im-accent-light: #679cf4;
   --im-accent-dim: rgba(72, 132, 228, 0.12);
   --im-accent-soft: rgba(72, 132, 228, 0.07);
+  --im-app-type-frontend: #3f7de2;
+  --im-app-type-backend: #2eaa77;
+  --im-app-type-gateway: #da9a2d;
+  --im-app-type-batch-job: #d66f3e;
+  --im-app-type-microservice: #269f9d;
+  --im-app-type-other: #667a9f;
 
   --im-shadow-sm: 0 2px 8px rgba(20, 44, 90, 0.08);
   --im-shadow-md: 0 8px 24px rgba(20, 44, 90, 0.12);

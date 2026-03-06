@@ -1,13 +1,16 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { WarningFilled } from '@element-plus/icons-vue'
-import type { TopologyNode, PathResult, ImpactResult } from '@/types'
+import type { TopologyNode, PathResult, ImpactResult, TopologyV3EvidenceItem } from '@/types'
 
 const props = defineProps<{
   mode: 'detail' | 'path' | 'impact' | null
   selectedNode: TopologyNode | null
   pathResult: PathResult | null
   impactResult: ImpactResult | null
+  evidenceItems: TopologyV3EvidenceItem[]
+  evidenceTotal: number
+  evidenceLoading: boolean
   nodeNameMap: Record<string, string>
 }>()
 
@@ -33,6 +36,18 @@ const ENV_LABELS: Record<string, string> = {
   prod: '生产',
   dev: '开发',
   test: '测试',
+}
+
+const EVIDENCE_TYPE_LABELS: Record<string, string> = {
+  profile: '节点画像',
+  dependency_summary: '依赖摘要',
+  deployment: '部署记录',
+  audit: '审计事件',
+  call_relation: '调用关系',
+  metric: '监控指标',
+  alert: '告警',
+  change: '变更',
+  annotation: '注释',
 }
 
 function getNodeName(id: string): string {
@@ -73,6 +88,24 @@ function extraEntries(node: TopologyNode): { key: string; value: string }[] {
   }
   return entries
 }
+
+function evidenceTypeLabel(item: TopologyV3EvidenceItem): string {
+  const type = item.evidenceType || item.evidence_type || 'annotation'
+  return EVIDENCE_TYPE_LABELS[type] || type
+}
+
+function evidenceTagType(item: TopologyV3EvidenceItem): 'danger' | 'warning' | 'info' {
+  if (item.severity === 'critical') return 'danger'
+  if (item.severity === 'warning') return 'warning'
+  return 'info'
+}
+
+function formatEvidenceTime(timestamp?: string): string {
+  if (!timestamp) return '未知时间'
+  const date = new Date(timestamp)
+  if (Number.isNaN(date.getTime())) return timestamp
+  return date.toLocaleString('zh-CN', { hour12: false })
+}
 </script>
 
 <template>
@@ -112,6 +145,39 @@ function extraEntries(node: TopologyNode): { key: string; value: string }[] {
               {{ entry.value }}
             </el-descriptions-item>
           </el-descriptions>
+
+          <div class="detail-evidence">
+            <div class="detail-evidence-head">
+              <span class="detail-evidence-title">关联证据</span>
+              <span class="detail-evidence-total">共 {{ evidenceTotal }} 条</span>
+            </div>
+
+            <div v-if="evidenceLoading" data-testid="evidence-loading" class="evidence-loading">
+              证据加载中...
+            </div>
+            <div v-else-if="evidenceItems.length === 0" class="empty-tip">
+              <el-empty description="暂无关联证据" :image-size="50" />
+            </div>
+            <div v-else class="evidence-list">
+              <article
+                v-for="item in evidenceItems"
+                :key="item.id"
+                class="evidence-item"
+              >
+                <div class="evidence-item-head">
+                  <el-tag size="small" :type="evidenceTagType(item)">
+                    {{ evidenceTypeLabel(item) }}
+                  </el-tag>
+                  <span class="evidence-item-time">{{ formatEvidenceTime(item.timestamp) }}</span>
+                </div>
+                <div class="evidence-item-title">{{ item.title }}</div>
+                <div v-if="item.description" class="evidence-item-description">
+                  {{ item.description }}
+                </div>
+                <div class="evidence-item-source">{{ item.source || 'topology_v3' }}</div>
+              </article>
+            </div>
+          </div>
         </template>
 
         <!-- Path mode -->
@@ -199,6 +265,69 @@ function extraEntries(node: TopologyNode): { key: string; value: string }[] {
   flex: 1;
   overflow-y: auto;
   padding: 16px;
+}
+.detail-evidence {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--im-border-subtle);
+}
+.detail-evidence-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.detail-evidence-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--im-text-primary);
+}
+.detail-evidence-total {
+  font-size: 12px;
+  color: var(--im-text-secondary);
+}
+.evidence-loading {
+  font-size: 12px;
+  color: var(--im-text-secondary);
+  padding: 8px 0;
+}
+.evidence-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.evidence-item {
+  border: 1px solid var(--im-border-subtle);
+  border-radius: var(--im-radius-sm);
+  background: var(--im-surface-1);
+  padding: 8px 10px;
+}
+.evidence-item-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.evidence-item-time {
+  font-size: 11px;
+  color: var(--im-text-muted);
+}
+.evidence-item-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--im-text-primary);
+}
+.evidence-item-description {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--im-text-secondary);
+  line-height: 1.45;
+}
+.evidence-item-source {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--im-text-muted);
 }
 .path-summary {
   display: flex;

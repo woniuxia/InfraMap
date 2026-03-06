@@ -26,7 +26,8 @@ fn row_to_nginx_config(row: &rusqlite::Row) -> rusqlite::Result<NginxConfig> {
     })
 }
 
-const SELECT_COLUMNS: &str = "id, name, endpoints, strategy, env, status, description, created_at, updated_at";
+const SELECT_COLUMNS: &str =
+    "id, name, endpoints, strategy, env, status, description, created_at, updated_at";
 
 #[tauri::command]
 pub fn list_nginx_configs(

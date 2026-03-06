@@ -1,4 +1,3 @@
-import type { ComboData, EdgeData, GraphData, NodeData } from "@antv/g6";
 import type {
   TopologyEdge,
   TopologyEnv,
@@ -265,10 +264,6 @@ export function filterTopologyGraph(
   };
 }
 
-function hostComboId(hostId: string): string {
-  return `host-${hostId}`;
-}
-
 export function compactLabel(value: string, maxLength = 16): string {
   if (value.length <= maxLength) return value;
   return `${value.slice(0, Math.max(1, maxLength - 1))}…`;
@@ -346,92 +341,4 @@ export function formatHostComboLabel(hostId: string, hostNodes: TopologyNode[]):
   const baseLabel = displayName
     || (isOpaqueIdentifier(hostId) ? `主机 #${hostId.slice(-6)}` : hostId);
   return compactLabel(baseLabel, 22);
-}
-
-export function buildTopologyG6Data(graph: TopologyGraph): GraphData {
-  const nodesByHost = new Map<string, TopologyNode[]>();
-  for (const node of graph.nodes) {
-    if (!node.host_id || isExternalTopologyNode(node)) continue;
-    const items = nodesByHost.get(node.host_id);
-    if (items) {
-      items.push(node);
-    } else {
-      nodesByHost.set(node.host_id, [node]);
-    }
-  }
-
-  const comboHostIds = new Set<string>();
-  const hostCombos: ComboData[] = [];
-  for (const [hostId, hostNodes] of nodesByHost.entries()) {
-    if (hostNodes.length < 2) continue;
-    comboHostIds.add(hostId);
-    hostCombos.push({
-      id: hostComboId(hostId),
-      type: "rect",
-      data: {
-        kind: "host",
-        host_id: hostId,
-        label: formatHostComboLabel(hostId, hostNodes),
-        node_count: hostNodes.length,
-      },
-    });
-  }
-
-  const hasExternalNodes = graph.nodes.some((node) => isExternalTopologyNode(node));
-  const externalCombo: ComboData[] = hasExternalNodes
-    ? [{
-      id: EXTERNAL_ZONE_COMBO_ID,
-      type: "rect",
-      data: {
-        kind: "external",
-        label: "跨环境依赖",
-      },
-    }]
-    : [];
-
-  const nodes: NodeData[] = graph.nodes.map((node) => {
-    let combo: string | undefined;
-    if (isExternalTopologyNode(node)) {
-      combo = EXTERNAL_ZONE_COMBO_ID;
-    } else if (node.host_id && comboHostIds.has(node.host_id)) {
-      combo = hostComboId(node.host_id);
-    }
-
-    return {
-      id: node.id,
-      combo,
-      data: {
-        name: node.name,
-        node_type: node.node_type,
-        group_kind: node.group_kind,
-        status: node.status,
-        env: node.env,
-        host_id: node.host_id,
-        host_name: node.host_name,
-        host_ip_display: node.host_ip_display,
-        importance: node.importance,
-        is_external: isExternalTopologyNode(node),
-        external_ref_id: node.external_ref_id || node.extra?.external_ref_id,
-        extra: node.extra,
-      },
-    };
-  });
-
-  const edges: EdgeData[] = graph.edges.map((edge) => ({
-    id: edge.id,
-    source: edge.source,
-    target: edge.target,
-    data: {
-      edge_type: edge.edge_type,
-      label: edge.label,
-      strength: edge.strength,
-      cross_env: edge.cross_env,
-    },
-  }));
-
-  return {
-    nodes,
-    edges,
-    combos: [...hostCombos, ...externalCombo],
-  };
 }

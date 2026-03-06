@@ -1,35 +1,131 @@
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, watch, nextTick } from "vue";
-import { Graph } from "@antv/g6";
-import type { ComboData, EdgeData, GraphData, IElementEvent, NodeData } from "@antv/g6";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import cytoscape, { type Core, type EventObjectNode, type LayoutOptions } from "cytoscape";
+import dagre from "cytoscape-dagre";
+import fcose from "cytoscape-fcose";
+import cytoscapeSvg from "cytoscape-svg";
 import type { TopologyGraph, TopologyNode } from "@/types";
+import { toExternalNodeId } from "@/components/topology/topologyGraph.utils";
+import { buildTopologyCyElements } from "@/components/topology/topologyCytoscape.utils";
+import { colorizeSvgDataUri } from "@/icons/iconColorize";
 import {
-  buildTopologyG6Data,
-  compactLabel,
-  isOpaqueIdentifier,
-  toExternalNodeId,
-} from "@/components/topology/topologyGraph.utils";
-import { getMiddlewareIconByType } from "@/utils/middlewareCatalog";
+  DENSITY_OPTIONS,
+  getDensityByZoom,
+  normalizeEdgesForDensity,
+  normalizeNodesForDensity,
+  selectVisibleEdgeIds,
+  type ZoomDensity,
+} from "@/components/topology/topologyDensity.utils";
+import {
+  hasTopologyNodeSetChanged,
+  isDegenerateNodeDistribution,
+} from "@/components/topology/topologyLayoutSafety.utils";
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   graphData: TopologyGraph | null;
-}>();
+  focusNeighborhood?: boolean;
+  layout?: "force" | "dagre";
+}>(), {
+  focusNeighborhood: true,
+  layout: "force",
+});
 
 const emit = defineEmits<{
   (e: "node-click", node: TopologyNode): void;
   (e: "node-contextmenu", payload: { node: TopologyNode; x: number; y: number }): void;
+  (e: "layout-resolved", payload: { requested: "force" | "dagre"; applied: "force" | "dagre"; reason?: string }): void;
 }>();
 
-const containerRef = ref<HTMLDivElement>();
-const activeLayout = ref<"force" | "dagre">("dagre");
+type LayoutType = "force" | "dagre";
 
-let graph: Graph | null = null;
+let cytoscapeExtensionsRegistered = false;
+
+function registerCytoscapeExtensions() {
+  if (cytoscapeExtensionsRegistered) return;
+  cytoscape.use(dagre);
+  cytoscape.use(fcose);
+  cytoscapeSvg(cytoscape);
+  cytoscapeExtensionsRegistered = true;
+}
+
+const containerRef = ref<HTMLDivElement>();
+const activeLayout = ref<LayoutType>(props.layout);
+
+let cy: Core | null = null;
 let resizeObserver: ResizeObserver | null = null;
 let themeObserver: MutationObserver | null = null;
+let resizeAnimationFrame: number | null = null;
+let syncVersion = 0;
+let graphTheme: GraphTheme | null = null;
+let hasRenderedGraph = false;
+
+const renderFlags = {
+  isLargeGraph: false,
+  hideEdgeLabels: false,
+};
+
+let nodeById = new Map<string, TopologyNode>();
+let renderableNodeIds = new Set<string>();
+let edgeIdByPair = new Map<string, string>();
+let zoomDensityRaf: number | null = null;
+let densityWorker: Worker | null = null;
+let densityWorkerRequestId = 0;
+const densityWorkerResolvers = new Map<number, (edgeIds?: string[]) => void>();
+const densitySelectionCache = new WeakMap<TopologyGraph, Partial<Record<ZoomDensity, string[]>>>();
+let forcedDensity: ZoomDensity | null = null;
+let pendingDensityAfterFocus: ZoomDensity | null = null;
+let focusDensityTimer: number | null = null;
+
+type HighlightState
+  = { kind: "none" }
+  | { kind: "paths"; paths: string[][] }
+  | { kind: "impact"; nodeId: string; result: { affected_nodes: { id: string; depth: number }[] } }
+  | { kind: "neighborhood"; nodeId: string; depth: number }
+  | { kind: "search"; nodeIds: string[]; focusId?: string };
+
+let activeHighlightState: HighlightState = { kind: "none" };
+
+const viewportState = ref({
+  zoom: 1,
+  density: "medium" as ZoomDensity,
+  totalEdges: 0,
+  visibleEdges: 0,
+});
+
+interface DensityWorkerRequest {
+  requestId: number;
+  density: ZoomDensity;
+  nodes: { id: string; importance: number }[];
+  edges: { id: string; source: string; target: string; strength: number; cross_env: boolean }[];
+}
+
+interface DensityWorkerResponse {
+  requestId: number;
+  visibleEdgeIds: string[];
+}
+
+interface LayoutRunResult {
+  requested: LayoutType;
+  applied: LayoutType;
+  reason?: string;
+}
 
 interface GraphTheme {
   statusColors: Record<string, string>;
   envColors: Record<string, string>;
+  nodeTypeColors: {
+    application: string;
+    middleware: string;
+    nginx: string;
+  };
+  applicationTypeColors: {
+    frontend: string;
+    backend: string;
+    gateway: string;
+    batch_job: string;
+    microservice: string;
+    other: string;
+  };
   edgeStyles: Record<string, { stroke: string; lineDash?: number[] }>;
   labelPrimary: string;
   labelSecondary: string;
@@ -44,15 +140,31 @@ function cssVar(name: string, fallback: string): string {
   return value || fallback;
 }
 
-function withAlpha(hex: string, alphaHex: string): string {
-  if (!hex.startsWith("#") || (hex.length !== 7 && hex.length !== 4)) return hex;
+function parseHexColor(hex: string): { r: number; g: number; b: number } | null {
+  if (!hex.startsWith("#")) return null;
   if (hex.length === 4) {
-    const r = hex[1];
-    const g = hex[2];
-    const b = hex[3];
-    return `#${r}${r}${g}${g}${b}${b}${alphaHex}`;
+    const r = Number.parseInt(`${hex[1]}${hex[1]}`, 16);
+    const g = Number.parseInt(`${hex[2]}${hex[2]}`, 16);
+    const b = Number.parseInt(`${hex[3]}${hex[3]}`, 16);
+    if (Number.isNaN(r) || Number.isNaN(g) || Number.isNaN(b)) return null;
+    return { r, g, b };
   }
-  return `${hex}${alphaHex}`;
+  if (hex.length === 7) {
+    const r = Number.parseInt(hex.slice(1, 3), 16);
+    const g = Number.parseInt(hex.slice(3, 5), 16);
+    const b = Number.parseInt(hex.slice(5, 7), 16);
+    if (Number.isNaN(r) || Number.isNaN(g) || Number.isNaN(b)) return null;
+    return { r, g, b };
+  }
+  return null;
+}
+
+function withAlpha(hex: string, alphaHex: string): string {
+  const rgb = parseHexColor(hex);
+  const alphaInt = Number.parseInt(alphaHex, 16);
+  if (!rgb || Number.isNaN(alphaInt)) return hex;
+  const alpha = Math.max(0, Math.min(255, alphaInt)) / 255;
+  return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${alpha.toFixed(3)})`;
 }
 
 function buildGraphTheme(): GraphTheme {
@@ -75,6 +187,19 @@ function buildGraphTheme(): GraphTheme {
       test: cssVar("--im-accent", "#5ca3ff"),
       dev: cssVar("--im-success", "#41c58a"),
     },
+    nodeTypeColors: {
+      application: accent,
+      middleware: warning,
+      nginx: success,
+    },
+    applicationTypeColors: {
+      frontend: cssVar("--im-app-type-frontend", "#5ca3ff"),
+      backend: cssVar("--im-app-type-backend", "#41c58a"),
+      gateway: cssVar("--im-app-type-gateway", "#f2b645"),
+      batch_job: cssVar("--im-app-type-batch-job", "#ef8f62"),
+      microservice: cssVar("--im-app-type-microservice", "#3ec7c5"),
+      other: cssVar("--im-app-type-other", "#8b9bb9"),
+    },
     edgeStyles: {
       http_call: { stroke: accent },
       tcp: { stroke: cssVar("--el-color-info", "#5ca3ff") },
@@ -93,346 +218,442 @@ function buildGraphTheme(): GraphTheme {
   };
 }
 
-function isExternalDatum(datum: NodeData): boolean {
-  return datum.data?.is_external === true;
+function getTheme(): GraphTheme {
+  if (!graphTheme) graphTheme = buildGraphTheme();
+  return graphTheme;
 }
 
-function getNodeType(datum: NodeData): string {
-  const nodeType = datum.data?.node_type as string;
-  if (nodeType === "middleware") return "image";
-  if (nodeType === "nginx") return "hexagon";
-  return "circle";
+function refreshTheme() {
+  graphTheme = buildGraphTheme();
 }
 
-function humanizeOpaqueLabel(value: string): string {
-  if (!isOpaqueIdentifier(value)) return value;
-  const suffix = value.slice(-6);
-  return `节点 #${suffix}`;
+function getActiveDensity(): ZoomDensity {
+  return forcedDensity || viewportState.value.density;
 }
 
-function nodeLabel(datum: NodeData, isLargeGraph: boolean): string {
-  const raw = ((datum.data?.name as string) || `${datum.id || ""}`).trim() || "未命名节点";
-  const base = humanizeOpaqueLabel(raw);
-  return compactLabel(base, isLargeGraph ? 10 : 14);
+const densityHintText = computed(() => {
+  const density = DENSITY_OPTIONS[getActiveDensity()];
+  const focusSuffix = forcedDensity ? "（聚焦）" : "";
+  return `渲染: ${density.label}${focusSuffix} · 关系 ${viewportState.value.visibleEdges}/${viewportState.value.totalEdges}`;
+});
+
+function edgePairKey(source: string, target: string): string {
+  return `${source}=>${target}`;
 }
 
-function getNodeStyle(datum: NodeData, isLargeGraph: boolean): Record<string, unknown> {
-  const theme = buildGraphTheme();
-  const nodeType = datum.data?.node_type as string;
-  const groupKind = datum.data?.group_kind as string;
-  const env = (datum.data?.env as string) || "prod";
-  const external = isExternalDatum(datum);
-  const labelText = nodeLabel(datum, isLargeGraph);
+function rebuildIndexes(graphData: TopologyGraph | null) {
+  nodeById = new Map();
+  renderableNodeIds = new Set();
+  edgeIdByPair = new Map();
 
-  const size = isLargeGraph ? 18 : groupKind === "application_service" ? 34 : 28;
-  const labelFontSize = isLargeGraph ? 9 : groupKind === "application_service" ? 11 : 10;
-  const envColor = theme.envColors[env] || theme.envColors.prod;
+  if (!graphData) return;
 
-  if (nodeType === "middleware") {
-    const extra = (datum.data?.extra as Record<string, unknown> | undefined) ?? {};
-    const category = typeof extra.category === "string" ? extra.category : undefined;
-    const middlewareType = typeof extra.type === "string" ? extra.type : undefined;
-    const icon = getMiddlewareIconByType(middlewareType, category);
-    return {
-      img: icon.src,
-      src: icon.src,
-      size,
-      opacity: external ? 0.78 : 1,
-      labelText,
-      labelPlacement: "bottom",
-      labelFontSize,
-      labelFill: external ? theme.labelSecondary : theme.labelPrimary,
-      labelOffsetY: 5,
-      lineWidth: 1.5,
-      stroke: external ? withAlpha(envColor, "88") : withAlpha(envColor, "DD"),
-      lineDash: external ? [4, 4] : [],
-    };
-  }
+  graphData.nodes.forEach((node) => {
+    nodeById.set(node.id, node);
+    renderableNodeIds.add(node.id);
+  });
 
-  const status = datum.data?.status as string;
-  const baseFill = nodeType === "application"
-    ? withAlpha(envColor, external ? "66" : "CC")
-    : theme.statusColors[status] || theme.labelMuted;
-
-  return {
-    fill: baseFill,
-    stroke: external ? withAlpha(envColor, "88") : withAlpha(envColor, "EE"),
-    lineWidth: groupKind === "application_service" ? 2.6 : 1.8,
-    lineDash: external ? [4, 4] : [],
-    opacity: external ? 0.82 : 1,
-    labelText,
-    labelPlacement: "bottom",
-    labelFontSize,
-    labelFill: external ? theme.labelSecondary : theme.labelPrimary,
-    labelOffsetY: 4,
-    size,
-  };
-}
-
-function getEdgeStyle(datum: EdgeData, hideLabels: boolean): Record<string, unknown> {
-  const theme = buildGraphTheme();
-  const edgeType = datum.data?.edge_type as string;
-  const edgeConf = theme.edgeStyles[edgeType] || theme.edgeStyles.http_call;
-  const strength = Number((datum.data?.strength as number) || 1);
-  const crossEnv = Boolean(datum.data?.cross_env);
-
-  return {
-    stroke: crossEnv ? theme.impact : edgeConf.stroke,
-    lineWidth: Math.min(4, 1 + strength * 0.45),
-    lineDash: crossEnv ? [6, 4] : (edgeConf.lineDash || []),
-    endArrow: true,
-    endArrowSize: 8,
-    labelText: hideLabels ? "" : ((datum.data?.label as string) || ""),
-    labelFontSize: 10,
-    labelFill: theme.labelSecondary,
-    labelBackground: true,
-    labelBackgroundFill: withAlpha(theme.labelBg, "E6"),
-    labelBackgroundOpacity: 0.85,
-    labelPadding: [2, 4],
-  };
-}
-
-function getComboStyle(datum: ComboData): Record<string, unknown> {
-  const theme = buildGraphTheme();
-  const kind = datum.data?.kind as string;
-
-  if (kind === "external") {
-    return {
-      fill: withAlpha(theme.impact, "10"),
-      stroke: withAlpha(theme.impact, "B8"),
-      lineWidth: 1.4,
-      lineDash: [8, 4],
-      radius: 12,
-      labelText: (datum.data?.label as string) || "跨环境依赖",
-      labelPlacement: "top-left",
-      labelOffsetX: 8,
-      labelOffsetY: 8,
-      labelFontSize: 12,
-      labelFill: theme.impact,
-      padding: [20, 12, 12, 12],
-    };
-  }
-
-  const hostLabel = compactLabel(((datum.data?.label as string) || datum.id), 18);
-  const nodeCount = Number((datum.data?.node_count as number) || 0);
-  const labelText = nodeCount > 1 ? `${hostLabel} (${nodeCount})` : hostLabel;
-
-  return {
-    fill: withAlpha(theme.labelBg, "16"),
-    stroke: withAlpha(theme.labelMuted, "AA"),
-    lineWidth: 1.2,
-    lineDash: [5, 3],
-    collapsedSize: [140, 48],
-    labelText,
-    labelFontSize: 11,
-    labelFill: theme.labelSecondary,
-    labelPlacement: "top",
-    labelOffsetY: 4,
-    padding: [14, 10, 10, 10],
-  };
-}
-
-function getLayoutConfig(g6Data: GraphData, layoutType: "force" | "dagre") {
-  if (layoutType === "dagre") {
-    return {
-      type: "dagre" as const,
-      rankdir: "LR" as const,
-      nodesep: 72,
-      ranksep: 180,
-      controlPoints: true,
-      sortByCombo: true,
-    };
-  }
-
-  if ((g6Data.nodes?.length || 0) > 500) {
-    return {
-      type: "fruchterman" as const,
-      maxIteration: 260,
-      gravity: 4.8,
-      speed: 5,
-    };
-  }
-
-  return {
-    type: "force" as const,
-    preventOverlap: true,
-    nodeSize: 40,
-    linkDistance: (datum: EdgeData) => (datum.data?.cross_env ? 210 : 165),
-    nodeStrength: (datum: NodeData) => {
-      const groupKind = datum.data?.group_kind as string;
-      const external = Boolean(datum.data?.is_external);
-      if (external) return -40;
-      return groupKind === "application_service" ? -95 : -78;
-    },
-    edgeStrength: (datum: EdgeData) => {
-      const isCrossEnv = Boolean(datum.data?.cross_env);
-      const strength = Number((datum.data?.strength as number) || 1);
-      if (isCrossEnv) return Math.min(0.72, 0.34 + strength * 0.08);
-      return Math.min(0.92, 0.55 + strength * 0.1);
-    },
-  };
+  graphData.edges.forEach((edge) => {
+    edgeIdByPair.set(edgePairKey(edge.source, edge.target), edge.id);
+  });
 }
 
 function resolveRenderableNodeId(rawNodeId: string): string | null {
-  const allNodeIds = new Set((props.graphData?.nodes || []).map((node) => node.id));
-  if (allNodeIds.has(rawNodeId)) return rawNodeId;
+  if (renderableNodeIds.has(rawNodeId)) return rawNodeId;
   const externalId = toExternalNodeId(rawNodeId);
-  if (allNodeIds.has(externalId)) return externalId;
+  if (renderableNodeIds.has(externalId)) return externalId;
   return null;
 }
 
-function initGraph() {
-  if (!containerRef.value || !props.graphData) return;
+function cacheVisibleEdgeIds(graphData: TopologyGraph, density: ZoomDensity, edgeIds: string[]) {
+  const cache = densitySelectionCache.get(graphData) || {};
+  cache[density] = edgeIds;
+  densitySelectionCache.set(graphData, cache);
+}
 
-  const container = containerRef.value;
-  const { width, height } = container.getBoundingClientRect();
-  const g6Data = buildTopologyG6Data(props.graphData);
-  const hideEdgeLabels = props.graphData.layout_hints.high_density_mode || (g6Data.edges?.length || 0) > 90;
-  const isLargeGraph = (g6Data.nodes?.length || 0) > 500;
-  const theme = buildGraphTheme();
+function ensureDensityWorker(): Worker | null {
+  if (densityWorker || typeof Worker === "undefined") return densityWorker;
 
-  if (graph) {
-    graph.destroy();
-    graph = null;
+  densityWorker = new Worker(new URL("./topologyDensity.worker.ts", import.meta.url), { type: "module" });
+  densityWorker.onmessage = (event: MessageEvent<DensityWorkerResponse>) => {
+    const { requestId, visibleEdgeIds } = event.data;
+    const resolve = densityWorkerResolvers.get(requestId);
+    if (!resolve) return;
+    densityWorkerResolvers.delete(requestId);
+    resolve(visibleEdgeIds);
+  };
+  densityWorker.onerror = () => {
+    densityWorkerResolvers.forEach((resolve) => resolve(undefined));
+    densityWorkerResolvers.clear();
+    densityWorker?.terminate();
+    densityWorker = null;
+  };
+
+  return densityWorker;
+}
+
+async function resolveVisibleEdgeIds(graphData: TopologyGraph, density: ZoomDensity): Promise<string[]> {
+  const cache = densitySelectionCache.get(graphData);
+  const cachedEdgeIds = cache?.[density];
+  if (cachedEdgeIds) return cachedEdgeIds;
+
+  const nodes = normalizeNodesForDensity(graphData.nodes);
+  const edges = normalizeEdgesForDensity(graphData.edges);
+
+  const computeSynchronously = () => {
+    const edgeIds = selectVisibleEdgeIds(density, nodes, edges);
+    cacheVisibleEdgeIds(graphData, density, edgeIds);
+    return edgeIds;
+  };
+
+  if (density === "detail" || edges.length < 260) {
+    return computeSynchronously();
   }
 
-  graph = new Graph({
-    container,
-    width: width || 800,
-    height: height || 600,
-    autoFit: "view",
-    animation: false,
-    data: g6Data,
-    layout: getLayoutConfig(g6Data, activeLayout.value),
-    node: {
-      type: getNodeType,
-      style: (datum: NodeData) => getNodeStyle(datum, isLargeGraph),
-      state: {
-        highlight: {
-          lineWidth: 3,
-          shadowColor: theme.highlight,
-          shadowBlur: 10,
-        },
-        dim: {
-          opacity: 0.2,
-          labelOpacity: 0.35,
-        },
-        impact: {
-          lineWidth: 3,
-          shadowColor: theme.impact,
-          shadowBlur: 10,
-        },
-      },
-    },
-    edge: {
-      type: "line",
-      style: (datum: EdgeData) => getEdgeStyle(datum, hideEdgeLabels),
-      state: {
-        highlight: {
-          lineWidth: 3,
-          shadowColor: theme.highlight,
-          shadowBlur: 6,
-        },
-        dim: {
-          opacity: 0.13,
-        },
-      },
-    },
-    combo: {
-      type: "rect",
-      style: getComboStyle,
-      state: {
-        highlight: {
-          lineWidth: 2,
-          shadowColor: theme.highlight,
-          shadowBlur: 8,
-        },
-        dim: {
-          opacity: 0.18,
-        },
-      },
-    },
-    behaviors: ["drag-canvas", "zoom-canvas", "drag-element"],
-    transforms: ["process-parallel-edges"],
-  });
+  const worker = ensureDensityWorker();
+  if (!worker) {
+    return computeSynchronously();
+  }
 
-  graph.on("node:click", (evt: IElementEvent) => {
-    const id = evt.target?.id as string;
-    if (!id) return;
-    const node = props.graphData?.nodes.find((item) => item.id === id);
-    if (node) emit("node-click", node);
-  });
+  const requestId = ++densityWorkerRequestId;
+  const payload: DensityWorkerRequest = {
+    requestId,
+    density,
+    nodes,
+    edges,
+  };
 
-  graph.on("node:contextmenu", (evt: IElementEvent) => {
-    const id = evt.target?.id as string;
-    if (!id) return;
-    const node = props.graphData?.nodes.find((item) => item.id === id);
-    if (node) {
-      emit("node-contextmenu", { node, x: evt.client.x, y: evt.client.y });
+  return new Promise((resolve) => {
+    const timeoutId = globalThis.setTimeout(() => {
+      densityWorkerResolvers.delete(requestId);
+      resolve(computeSynchronously());
+    }, 180);
+
+    densityWorkerResolvers.set(requestId, (edgeIds?: string[]) => {
+      globalThis.clearTimeout(timeoutId);
+      if (edgeIds === undefined) {
+        resolve(computeSynchronously());
+        return;
+      }
+      cacheVisibleEdgeIds(graphData, density, edgeIds);
+      resolve(edgeIds);
+    });
+
+    try {
+      worker.postMessage(payload);
+    } catch {
+      densityWorkerResolvers.delete(requestId);
+      globalThis.clearTimeout(timeoutId);
+      resolve(computeSynchronously());
     }
   });
-
-  graph.render();
 }
 
-watch(
-  () => props.graphData,
-  () => {
-    nextTick(initGraph);
-  },
-);
-
-onMounted(() => {
-  nextTick(initGraph);
-
-  if (containerRef.value) {
-    resizeObserver = new ResizeObserver(() => {
-      if (graph && containerRef.value) {
-        const { width, height } = containerRef.value.getBoundingClientRect();
-        graph.resize(width, height);
-      }
-    });
-    resizeObserver.observe(containerRef.value);
-  }
-
-  themeObserver = new MutationObserver((mutations) => {
-    const changed = mutations.some(
-      (mutation) => mutation.type === "attributes" && mutation.attributeName === "data-theme",
-    );
-    if (changed) nextTick(initGraph);
-  });
-  themeObserver.observe(document.documentElement, {
-    attributes: true,
-    attributeFilter: ["data-theme"],
-  });
-});
-
-onBeforeUnmount(() => {
-  resizeObserver?.disconnect();
-  themeObserver?.disconnect();
-  themeObserver = null;
-  if (graph) {
-    graph.destroy();
-    graph = null;
-  }
-});
-
-function clearHighlight() {
-  if (!graph) return;
-  const allNodes = graph.getNodeData();
-  const allEdges = graph.getEdgeData();
-  const allCombos = graph.getComboData();
-
-  allNodes.forEach((node) => graph!.setElementState(node.id, []));
-  allEdges.forEach((edge) => {
-    if (edge.id) graph!.setElementState(edge.id, []);
-  });
-  allCombos.forEach((combo) => graph!.setElementState(combo.id, []));
+async function buildDensityGraphData(graphData: TopologyGraph, density: ZoomDensity): Promise<TopologyGraph> {
+  const edgeIds = await resolveVisibleEdgeIds(graphData, density);
+  const edgeIdSet = new Set(edgeIds);
+  return {
+    ...graphData,
+    edges: graphData.edges.filter((edge) => edgeIdSet.has(edge.id)),
+  };
 }
 
-function highlightPaths(paths: string[][]) {
-  if (!graph) return;
-  clearHighlight();
+function clearFocusDensityTimer() {
+  if (focusDensityTimer) {
+    globalThis.clearTimeout(focusDensityTimer);
+    focusDensityTimer = null;
+  }
+}
+
+function scheduleDensitySync() {
+  if (zoomDensityRaf) {
+    cancelAnimationFrame(zoomDensityRaf);
+  }
+  zoomDensityRaf = requestAnimationFrame(() => {
+    zoomDensityRaf = null;
+    void syncGraphData({ preserveViewport: true, runLayout: false });
+  });
+}
+
+function deactivateFocusDensity(options: { sync?: boolean } = {}) {
+  const shouldSync = options.sync !== false;
+  if (!forcedDensity) return;
+
+  forcedDensity = null;
+  clearFocusDensityTimer();
+  const nextDensity = pendingDensityAfterFocus || getDensityByZoom(viewportState.value.zoom);
+  pendingDensityAfterFocus = null;
+  if (viewportState.value.density !== nextDensity) {
+    viewportState.value.density = nextDensity;
+    if (shouldSync) scheduleDensitySync();
+  } else if (shouldSync) {
+    scheduleDensitySync();
+  }
+}
+
+function activateFocusDensity(durationMs = 14_000) {
+  forcedDensity = "detail";
+  pendingDensityAfterFocus = getDensityByZoom(viewportState.value.zoom);
+  clearFocusDensityTimer();
+  focusDensityTimer = globalThis.setTimeout(() => {
+    focusDensityTimer = null;
+    deactivateFocusDensity();
+  }, durationMs);
+
+  if (viewportState.value.density !== "detail") {
+    viewportState.value.density = "detail";
+    scheduleDensitySync();
+  }
+}
+
+function handleViewportTransform() {
+  if (!cy) return;
+  const zoom = cy.zoom();
+  viewportState.value.zoom = zoom;
+  const nextDensity = getDensityByZoom(zoom);
+  if (forcedDensity) {
+    pendingDensityAfterFocus = nextDensity;
+    return;
+  }
+  if (nextDensity !== viewportState.value.density) {
+    viewportState.value.density = nextDensity;
+    scheduleDensitySync();
+  }
+}
+
+function resolveAppTypeColor(data: Record<string, unknown>, theme: GraphTheme): string {
+  const appType = String(data.app_type_key || "other");
+  return theme.applicationTypeColors[appType as keyof GraphTheme["applicationTypeColors"]]
+    || theme.applicationTypeColors.other;
+}
+
+function resolveNodeBaseColor(data: Record<string, unknown>, theme: GraphTheme): string {
+  const nodeType = String(data.node_type || "application");
+  const status = String(data.status || "");
+
+  if (nodeType === "application") {
+    return resolveAppTypeColor(data, theme);
+  }
+  if (nodeType === "middleware") {
+    return theme.nodeTypeColors.middleware;
+  }
+  if (nodeType === "nginx") {
+    return theme.nodeTypeColors.nginx;
+  }
+
+  return theme.statusColors[status] || theme.nodeTypeColors.application;
+}
+
+function resolveNodeStroke(data: Record<string, unknown>, theme: GraphTheme): string {
+  const isExternal = Boolean(data.is_external);
+  const typeColor = resolveNodeBaseColor(data, theme);
+  return isExternal ? withAlpha(typeColor, "A2") : withAlpha(typeColor, "EE");
+}
+
+function resolveNodeBorderWidth(data: Record<string, unknown>): number {
+  const groupKind = String(data.group_kind || "application_service");
+  if (groupKind === "nginx") return 2.8;
+  if (groupKind === "middleware") return 2.2;
+  return 2.6;
+}
+
+function resolveEdgeStroke(data: Record<string, unknown>, theme: GraphTheme): string {
+  if (Boolean(data.cross_env)) return theme.impact;
+  const sourceNodeType = String(data.source_node_type || "");
+  if (sourceNodeType === "application") {
+    const appType = String(data.source_app_type_key || "other");
+    const color = theme.applicationTypeColors[appType as keyof GraphTheme["applicationTypeColors"]];
+    if (color) return color;
+  }
+  const edgeType = String(data.edge_type || "http_call");
+  return theme.edgeStyles[edgeType]?.stroke || theme.edgeStyles.http_call.stroke;
+}
+
+function resolveEdgeDash(data: Record<string, unknown>, theme: GraphTheme): string {
+  if (Boolean(data.cross_env)) return "6 4";
+  const edgeType = String(data.edge_type || "http_call");
+  const dash = theme.edgeStyles[edgeType]?.lineDash;
+  return dash ? dash.join(" ") : "";
+}
+
+function resolveEdgeCurveStyle(
+  data: Record<string, unknown>,
+  runtime: { dense: boolean; layout: "force" | "dagre" },
+): "bezier" | "taxi" {
+  if (Boolean(data.cross_env)) return "bezier";
+  if (runtime.layout === "dagre" && runtime.dense) {
+    return "taxi";
+  }
+  return "bezier";
+}
+
+function buildStylesheet(
+  theme: GraphTheme,
+  runtime: { dense: boolean; layout: "force" | "dagre" },
+) {
+  const labelBg = withAlpha(theme.labelBg, "E6");
+  return [
+    {
+      selector: "node",
+      style: {
+        label: "data(label)",
+        "overlay-opacity": 0,
+      },
+    },
+    {
+      selector: "node[shape][size][label_font_size]",
+      style: {
+        shape: "data(shape)",
+        width: "data(size)",
+        height: "data(size)",
+        "font-size": "data(label_font_size)",
+        color: (ele: cytoscape.NodeSingular) => ele.data("is_external") ? theme.labelSecondary : theme.labelPrimary,
+        "text-halign": "center",
+        "text-valign": "bottom",
+        "text-margin-y": 6,
+        "text-outline-color": withAlpha(theme.labelBg, "D9"),
+        "text-outline-width": 1.2,
+        "background-color": (ele: cytoscape.NodeSingular) => resolveNodeBaseColor(ele.data(), theme),
+        "background-image": (ele: cytoscape.NodeSingular) => {
+          const src = String(ele.data("icon_src") || "").trim();
+          if (src.length === 0) return "none";
+          return colorizeSvgDataUri(src, resolveNodeBaseColor(ele.data(), theme));
+        },
+        "background-fit": "contain",
+        "background-repeat": "no-repeat",
+        "background-width": "66%",
+        "background-height": "66%",
+        "background-position-x": "50%",
+        "background-position-y": "50%",
+        "background-image-opacity": 0.96,
+        "border-color": (ele: cytoscape.NodeSingular) => resolveNodeStroke(ele.data(), theme),
+        "border-width": (ele: cytoscape.NodeSingular) => resolveNodeBorderWidth(ele.data()),
+        "border-style": (ele: cytoscape.NodeSingular) => {
+          if (ele.data("is_external")) return "dashed";
+          if (ele.data("group_kind") === "middleware") return "dashed";
+          return "solid";
+        },
+        "background-opacity": 0,
+      },
+    },
+    {
+      selector: "node:parent",
+      style: {
+        label: "data(label)",
+        shape: "round-rectangle",
+        "background-color": withAlpha(theme.labelBg, "16"),
+        "border-color": withAlpha(theme.labelMuted, "AA"),
+        "border-width": 1.2,
+        "border-style": "dashed",
+        "text-valign": "top",
+        "text-halign": "center",
+        "font-size": 11,
+        color: theme.labelSecondary,
+        padding: "14px",
+        "overlay-opacity": 0,
+      },
+    },
+    {
+      selector: 'node[kind = "external"]',
+      style: {
+        "border-color": withAlpha(theme.impact, "B8"),
+        color: theme.impact,
+      },
+    },
+    {
+      selector: "edge",
+      style: {
+        "curve-style": (ele: cytoscape.EdgeSingular) => resolveEdgeCurveStyle(ele.data(), runtime),
+        "taxi-direction": "rightward",
+        "taxi-turn": 20,
+        "taxi-turn-min-distance": 12,
+        "line-color": (ele: cytoscape.EdgeSingular) => resolveEdgeStroke(ele.data(), theme),
+        "target-arrow-color": (ele: cytoscape.EdgeSingular) => resolveEdgeStroke(ele.data(), theme),
+        "line-style": (ele: cytoscape.EdgeSingular) => resolveEdgeDash(ele.data(), theme) ? "dashed" : "solid",
+        width: "data(line_width)",
+        opacity: "data(opacity)",
+        "target-arrow-shape": "data(arrow)",
+        "arrow-scale": 0.9,
+        label: "data(display_label)",
+        "font-size": "data(label_font_size)",
+        color: theme.labelSecondary,
+        "text-background-color": labelBg,
+        "text-background-opacity": 0.85,
+        "text-background-shape": "roundrectangle",
+        "text-background-padding": "2px",
+        "overlay-opacity": 0,
+      },
+    },
+    {
+      selector: "node.im-highlight",
+      style: {
+        "border-color": theme.highlight,
+        "border-width": 3,
+      },
+    },
+    {
+      selector: "node.im-impact",
+      style: {
+        "border-color": theme.impact,
+        "border-width": 3.2,
+      },
+    },
+    {
+      selector: "node.im-dim",
+      style: {
+        opacity: 0.2,
+        "text-opacity": 0.35,
+      },
+    },
+    {
+      selector: "node:parent.im-dim",
+      style: {
+        opacity: 0.18,
+      },
+    },
+    {
+      selector: "edge.im-highlight",
+      style: {
+        opacity: 1,
+        "line-color": theme.highlight,
+        "target-arrow-color": theme.highlight,
+        label: "data(label)",
+        "font-size": 10,
+        color: theme.labelPrimary,
+        "text-background-opacity": 0.92,
+      },
+    },
+    {
+      selector: "edge.im-dim",
+      style: {
+        opacity: 0.13,
+      },
+    },
+  ];
+}
+
+function syncParentDimState() {
+  if (!cy) return;
+  cy.nodes(":parent").forEach((parent) => {
+    const children = parent.children();
+    const hasActiveChild = children.filter(".im-highlight, .im-impact").nonempty();
+    if (hasActiveChild) {
+      parent.removeClass("im-dim");
+    } else {
+      parent.addClass("im-dim");
+    }
+  });
+}
+
+function clearHighlightStates() {
+  if (!cy) return;
+  cy.nodes().removeClass("im-highlight im-dim im-impact");
+  cy.edges().removeClass("im-highlight im-dim");
+}
+
+function applyPathHighlight(paths: string[][]) {
+  if (!cy) return;
+  clearHighlightStates();
 
   const nodeIds = new Set<string>();
   const edgeIds = new Set<string>();
@@ -447,23 +668,24 @@ function highlightPaths(paths: string[][]) {
       const source = resolveRenderableNodeId(path[index]);
       const target = resolveRenderableNodeId(path[index + 1]);
       if (!source || !target) continue;
-      const edge = props.graphData?.edges.find((item) => item.source === source && item.target === target);
-      if (edge) edgeIds.add(edge.id);
+      const edgeId = edgeIdByPair.get(edgePairKey(source, target));
+      if (edgeId) edgeIds.add(edgeId);
     }
   });
 
-  graph.getNodeData().forEach((node) => {
-    graph!.setElementState(node.id, nodeIds.has(node.id as string) ? "highlight" : "dim");
+  cy.nodes().forEach((node) => {
+    if (node.isParent()) return;
+    node.addClass(nodeIds.has(node.id()) ? "im-highlight" : "im-dim");
   });
-  graph.getEdgeData().forEach((edge) => {
-    if (!edge.id) return;
-    graph!.setElementState(edge.id, edgeIds.has(edge.id as string) ? "highlight" : "dim");
+  cy.edges().forEach((edge) => {
+    edge.addClass(edgeIds.has(edge.id()) ? "im-highlight" : "im-dim");
   });
+  syncParentDimState();
 }
 
-function highlightImpact(nodeId: string, result: { affected_nodes: { id: string; depth: number }[] }) {
-  if (!graph) return;
-  clearHighlight();
+function applyImpactHighlight(nodeId: string, result: { affected_nodes: { id: string; depth: number }[] }) {
+  if (!cy) return;
+  clearHighlightStates();
 
   const focusNodeId = resolveRenderableNodeId(nodeId) || nodeId;
   const affectedIds = new Set<string>([focusNodeId]);
@@ -472,27 +694,92 @@ function highlightImpact(nodeId: string, result: { affected_nodes: { id: string;
     if (renderId) affectedIds.add(renderId);
   });
 
-  graph.getNodeData().forEach((node) => {
-    if (node.id === focusNodeId) {
-      graph!.setElementState(node.id, "impact");
-    } else if (affectedIds.has(node.id as string)) {
-      graph!.setElementState(node.id, "highlight");
+  cy.nodes().forEach((node) => {
+    if (node.isParent()) return;
+    if (node.id() === focusNodeId) {
+      node.addClass("im-impact");
+    } else if (affectedIds.has(node.id())) {
+      node.addClass("im-highlight");
     } else {
-      graph!.setElementState(node.id, "dim");
+      node.addClass("im-dim");
     }
   });
 
-  graph.getEdgeData().forEach((edge) => {
-    if (!edge.id) return;
-    const sourceHit = affectedIds.has(edge.source as string);
-    const targetHit = affectedIds.has(edge.target as string);
-    graph!.setElementState(edge.id, sourceHit && targetHit ? "highlight" : "dim");
+  cy.edges().forEach((edge) => {
+    const sourceHit = affectedIds.has(edge.source().id());
+    const targetHit = affectedIds.has(edge.target().id());
+    edge.addClass(sourceHit && targetHit ? "im-highlight" : "im-dim");
   });
+  syncParentDimState();
 }
 
-function highlightSearch(nodeIds: string[], focusId?: string) {
-  if (!graph) return;
-  clearHighlight();
+function applyNeighborhoodHighlight(nodeId: string, depth: number, allowFocus = true) {
+  if (!cy) return;
+  clearHighlightStates();
+
+  const renderFocusId = resolveRenderableNodeId(nodeId);
+  if (!renderFocusId) return;
+
+  const focus = cy.getElementById(renderFocusId);
+  if (focus.empty()) return;
+
+  const maxDepth = Math.max(1, Math.min(2, depth));
+  const visited = new Set<string>([renderFocusId]);
+  const frontier: string[] = [renderFocusId];
+  const highlightedNodeIds = new Set<string>([renderFocusId]);
+  const highlightedEdgeIds = new Set<string>();
+
+  for (let level = 0; level < maxDepth; level += 1) {
+    const nextFrontier: string[] = [];
+    for (const currentId of frontier) {
+      const currentNode = cy.getElementById(currentId);
+      if (currentNode.empty()) continue;
+
+      currentNode.connectedEdges().forEach((edge) => {
+        if (edge.empty()) return;
+        highlightedEdgeIds.add(edge.id());
+        const sourceId = edge.source().id();
+        const targetId = edge.target().id();
+        const neighborId = sourceId === currentId ? targetId : sourceId;
+        if (visited.has(neighborId)) return;
+        visited.add(neighborId);
+        highlightedNodeIds.add(neighborId);
+        nextFrontier.push(neighborId);
+      });
+    }
+    frontier.length = 0;
+    frontier.push(...nextFrontier);
+    if (frontier.length === 0) break;
+  }
+
+  cy.nodes().forEach((node) => {
+    if (node.isParent()) return;
+    if (node.id() === renderFocusId) {
+      node.addClass("im-impact");
+    } else if (highlightedNodeIds.has(node.id())) {
+      node.addClass("im-highlight");
+    } else {
+      node.addClass("im-dim");
+    }
+  });
+
+  cy.edges().forEach((edge) => {
+    edge.addClass(highlightedEdgeIds.has(edge.id()) ? "im-highlight" : "im-dim");
+  });
+
+  if (allowFocus) {
+    cy.animate({
+      center: { eles: focus },
+      duration: 220,
+    });
+  }
+
+  syncParentDimState();
+}
+
+function applySearchHighlight(nodeIds: string[], focusId?: string, allowFocus = true) {
+  if (!cy) return;
+  clearHighlightStates();
 
   const matchSet = new Set<string>();
   nodeIds.forEach((id) => {
@@ -500,37 +787,487 @@ function highlightSearch(nodeIds: string[], focusId?: string) {
     if (renderId) matchSet.add(renderId);
   });
 
-  graph.getNodeData().forEach((node) => {
-    graph!.setElementState(node.id, matchSet.has(node.id as string) ? "highlight" : "dim");
+  cy.nodes().forEach((node) => {
+    if (node.isParent()) return;
+    node.addClass(matchSet.has(node.id()) ? "im-highlight" : "im-dim");
   });
 
-  if (focusId) {
+  if (allowFocus && focusId) {
     const renderFocusId = resolveRenderableNodeId(focusId);
-    if (renderFocusId) graph.focusElement(renderFocusId, true);
+    if (renderFocusId) {
+      const target = cy.getElementById(renderFocusId);
+      if (target.nonempty()) {
+        cy.center(target);
+      }
+    }
   }
+  syncParentDimState();
 }
 
-function setLayout(type: "force" | "dagre") {
+function applyHighlightState(options: { allowFocus?: boolean } = {}) {
+  const allowFocus = options.allowFocus !== false;
+  if (!cy) return;
+
+  if (activeHighlightState.kind === "none") {
+    clearHighlightStates();
+    return;
+  }
+  if (activeHighlightState.kind === "paths") {
+    applyPathHighlight(activeHighlightState.paths);
+    return;
+  }
+  if (activeHighlightState.kind === "impact") {
+    applyImpactHighlight(activeHighlightState.nodeId, activeHighlightState.result);
+    return;
+  }
+  if (activeHighlightState.kind === "neighborhood") {
+    applyNeighborhoodHighlight(activeHighlightState.nodeId, activeHighlightState.depth, allowFocus);
+    return;
+  }
+  applySearchHighlight(activeHighlightState.nodeIds, activeHighlightState.focusId, allowFocus);
+}
+
+function snapshotLeafNodePositions(): Map<string, { x: number; y: number }> {
+  const positionMap = new Map<string, { x: number; y: number }>();
+  if (!cy) return positionMap;
+
+  cy.nodes()
+    .not(":parent")
+    .forEach((node: cytoscape.NodeSingular) => {
+      const position = node.position();
+      positionMap.set(node.id(), { x: position.x, y: position.y });
+    });
+  return positionMap;
+}
+
+function restoreLeafNodePositions(positionMap: Map<string, { x: number; y: number }>) {
+  if (!cy || positionMap.size === 0) return;
+  cy.batch(() => {
+    cy!.nodes()
+      .not(":parent")
+      .forEach((node: cytoscape.NodeSingular) => {
+        const position = positionMap.get(node.id());
+        if (!position) return;
+        node.position(position);
+      });
+  });
+}
+
+function hasDegenerateLayout(): boolean {
+  if (!cy) return false;
+  const points: Array<{ x: number; y: number }> = [];
+  cy.nodes()
+    .not(":parent")
+    .forEach((node: cytoscape.NodeSingular) => {
+      const position = node.position();
+      points.push({ x: position.x, y: position.y });
+    });
+  return isDegenerateNodeDistribution(points);
+}
+
+function buildLayoutOptions(layoutType: LayoutType): LayoutOptions {
+  if (layoutType === "dagre") {
+    return {
+      name: "dagre",
+      rankDir: "LR",
+      nodeSep: 72,
+      rankSep: 180,
+      fit: true,
+      padding: 36,
+      animate: false,
+    } as unknown as LayoutOptions;
+  }
+
+  return {
+    name: "fcose",
+    quality: renderFlags.isLargeGraph ? "default" : "proof",
+    randomize: true,
+    animate: false,
+    fit: true,
+    padding: 40,
+    packComponents: false,
+    nodeRepulsion: (node: cytoscape.NodeSingular) => node.data("is_external") ? 8000 : 12000,
+    idealEdgeLength: (edge: cytoscape.EdgeSingular) => edge.data("cross_env") ? 240 : 180,
+    numIter: renderFlags.isLargeGraph ? 1600 : 2200,
+    tile: true,
+  } as unknown as LayoutOptions;
+}
+
+function runLayoutOnce(layoutType: LayoutType): Promise<boolean> {
+  if (!cy) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (ok: boolean) => {
+      if (settled) return;
+      settled = true;
+      resolve(ok);
+    };
+
+    let layout: ReturnType<Core["layout"]> | null = null;
+    try {
+      layout = cy!.layout(buildLayoutOptions(layoutType));
+    } catch {
+      finish(false);
+      return;
+    }
+
+    layout.one("layoutstop", () => finish(true));
+    try {
+      layout.run();
+    } catch {
+      finish(false);
+      return;
+    }
+
+    globalThis.setTimeout(() => finish(true), renderFlags.isLargeGraph ? 2600 : 1800);
+  });
+}
+
+async function runLayout(layoutType: LayoutType): Promise<LayoutRunResult> {
+  const primaryOk = await runLayoutOnce(layoutType);
+  if (layoutType !== "dagre") {
+    return {
+      requested: layoutType,
+      applied: layoutType,
+      reason: primaryOk ? undefined : "force_layout_error",
+    };
+  }
+
+  if (primaryOk && !hasDegenerateLayout()) {
+    return {
+      requested: layoutType,
+      applied: layoutType,
+    };
+  }
+
+  const fallbackOk = await runLayoutOnce("force");
+  activeLayout.value = "force";
+  applyStyles();
+  return {
+    requested: layoutType,
+    applied: "force",
+    reason: primaryOk ? "dagre_degenerate" : (fallbackOk ? "dagre_error" : "dagre_and_force_error"),
+  };
+}
+
+function applyStyles() {
+  if (!cy) return;
+  const theme = getTheme();
+  const dense = renderFlags.hideEdgeLabels || viewportState.value.visibleEdges > 140;
+  cy.style(buildStylesheet(theme, {
+    dense,
+    layout: activeLayout.value,
+  }) as unknown as cytoscape.StylesheetJsonBlock[]);
+}
+
+function getContextMenuPosition(evt: EventObjectNode): { x: number; y: number } {
+  const mouse = evt.originalEvent as MouseEvent | undefined;
+  if (mouse && Number.isFinite(mouse.clientX) && Number.isFinite(mouse.clientY)) {
+    return { x: mouse.clientX, y: mouse.clientY };
+  }
+
+  const rect = containerRef.value?.getBoundingClientRect();
+  const rendered = evt.renderedPosition || evt.target.renderedPosition();
+  if (rect && rendered) {
+    return {
+      x: rect.left + rendered.x,
+      y: rect.top + rendered.y,
+    };
+  }
+
+  return { x: 0, y: 0 };
+}
+
+function handleNodeTap(evt: EventObjectNode) {
+  const target = evt.target;
+  if (!target.isNode() || target.isParent()) return;
+  if (props.focusNeighborhood) {
+    activeHighlightState = { kind: "neighborhood", nodeId: target.id(), depth: 1 };
+    activateFocusDensity(9_000);
+    applyHighlightState({ allowFocus: false });
+  }
+  const node = nodeById.get(target.id());
+  if (node) emit("node-click", node);
+}
+
+function handleNodeContextTap(evt: EventObjectNode) {
+  const target = evt.target;
+  if (!target.isNode() || target.isParent()) return;
+  const node = nodeById.get(target.id());
+  if (!node) return;
+  const position = getContextMenuPosition(evt);
+  emit("node-contextmenu", { node, x: position.x, y: position.y });
+}
+
+async function ensureCy() {
+  if (!containerRef.value || cy) return;
+
+  registerCytoscapeExtensions();
+  refreshTheme();
+
+  cy = cytoscape({
+    container: containerRef.value,
+    elements: [],
+    style: buildStylesheet(getTheme(), {
+      dense: false,
+      layout: activeLayout.value,
+    }) as unknown as cytoscape.StylesheetJsonBlock[],
+    zoomingEnabled: true,
+    userZoomingEnabled: true,
+    panningEnabled: true,
+    userPanningEnabled: true,
+    boxSelectionEnabled: false,
+    autounselectify: true,
+    minZoom: 0.15,
+    maxZoom: 4,
+  });
+
+  cy.on("tap", "node", (evt) => handleNodeTap(evt as EventObjectNode));
+  cy.on("cxttap", "node", (evt) => handleNodeContextTap(evt as EventObjectNode));
+  cy.on("zoom", handleViewportTransform);
+
+  viewportState.value.zoom = cy.zoom();
+  viewportState.value.density = getDensityByZoom(viewportState.value.zoom);
+}
+
+async function syncGraphData(options: { preserveViewport?: boolean; runLayout?: boolean } = {}) {
+  const currentVersion = ++syncVersion;
+  await nextTick();
+
+  if (!containerRef.value) return;
+  await ensureCy();
+  if (!cy || currentVersion !== syncVersion) return;
+
+  const preservedZoom = options.preserveViewport ? cy.zoom() : null;
+  const preservedPan = options.preserveViewport ? { ...cy.pan() } : null;
+  const preservedNodePositions = snapshotLeafNodePositions();
+  const previousNodeIds = new Set(
+    cy
+      .nodes()
+      .not(":parent")
+      .map((node) => node.id()),
+  );
+
+  if (!props.graphData) {
+    viewportState.value.totalEdges = 0;
+    viewportState.value.visibleEdges = 0;
+    rebuildIndexes(null);
+    cy.elements().remove();
+    hasRenderedGraph = false;
+    return;
+  }
+
+  const density = getActiveDensity();
+  const densityGraph = await buildDensityGraphData(props.graphData, density);
+  if (!cy || currentVersion !== syncVersion) return;
+
+  viewportState.value.totalEdges = props.graphData.edges.length;
+  viewportState.value.visibleEdges = densityGraph.edges.length;
+  renderFlags.isLargeGraph = densityGraph.nodes.length > 500;
+  renderFlags.hideEdgeLabels = DENSITY_OPTIONS[density].hideEdgeLabels
+    || props.graphData.layout_hints.high_density_mode
+    || densityGraph.edges.length > 90;
+  applyStyles();
+
+  const elements = buildTopologyCyElements(densityGraph, {
+    density,
+    hideEdgeLabels: renderFlags.hideEdgeLabels,
+    isLargeGraph: renderFlags.isLargeGraph,
+  });
+
+  rebuildIndexes(densityGraph);
+
+  cy.batch(() => {
+    cy!.elements().remove();
+    cy!.add(elements);
+  });
+
+  let shouldRunLayout = options.runLayout ?? !hasRenderedGraph;
+  if (!shouldRunLayout && hasTopologyNodeSetChanged(previousNodeIds, densityGraph.nodes)) {
+    shouldRunLayout = true;
+  }
+
+  let layoutResult: LayoutRunResult | null = null;
+  if (shouldRunLayout) {
+    layoutResult = await runLayout(activeLayout.value);
+  } else {
+    // 仅做边密度切换时保持节点坐标，避免 remove/add 导致节点回到原点聚团。
+    restoreLeafNodePositions(preservedNodePositions);
+  }
+
+  if (layoutResult && (layoutResult.reason || layoutResult.applied !== layoutResult.requested)) {
+    emit("layout-resolved", layoutResult);
+  }
+
+  if (options.preserveViewport && preservedZoom !== null && preservedPan) {
+    cy.zoom(preservedZoom);
+    cy.pan(preservedPan);
+  } else if (!hasRenderedGraph && cy.elements().nonempty()) {
+    cy.fit(undefined, 40);
+  }
+
+  hasRenderedGraph = true;
+  applyHighlightState({ allowFocus: false });
+}
+
+watch(
+  () => props.graphData,
+  () => {
+    void syncGraphData();
+  },
+);
+
+watch(
+  () => props.focusNeighborhood,
+  (enabled) => {
+    if (!enabled && activeHighlightState.kind === "neighborhood") {
+      clearHighlight();
+    }
+  },
+);
+
+watch(
+  () => props.layout,
+  (layout) => {
+    if (layout === activeLayout.value) return;
+    void setLayout(layout);
+  },
+);
+
+onMounted(() => {
+  void syncGraphData();
+
+  if (containerRef.value) {
+    resizeObserver = new ResizeObserver(() => {
+      if (!cy || !containerRef.value) return;
+      if (resizeAnimationFrame) {
+        cancelAnimationFrame(resizeAnimationFrame);
+      }
+      resizeAnimationFrame = requestAnimationFrame(() => {
+        resizeAnimationFrame = null;
+        if (!cy || !containerRef.value) return;
+        cy.resize();
+      });
+    });
+    resizeObserver.observe(containerRef.value);
+  }
+
+  themeObserver = new MutationObserver((mutations) => {
+    const changed = mutations.some(
+      (mutation) => mutation.type === "attributes" && mutation.attributeName === "data-theme",
+    );
+    if (changed) {
+      refreshTheme();
+      applyStyles();
+    }
+  });
+  themeObserver.observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ["data-theme"],
+  });
+});
+
+onBeforeUnmount(() => {
+  resizeObserver?.disconnect();
+  themeObserver?.disconnect();
+
+  if (resizeAnimationFrame) {
+    cancelAnimationFrame(resizeAnimationFrame);
+    resizeAnimationFrame = null;
+  }
+  if (zoomDensityRaf) {
+    cancelAnimationFrame(zoomDensityRaf);
+    zoomDensityRaf = null;
+  }
+
+  clearFocusDensityTimer();
+  forcedDensity = null;
+  pendingDensityAfterFocus = null;
+
+  if (densityWorker) {
+    densityWorker.terminate();
+    densityWorker = null;
+  }
+  densityWorkerResolvers.forEach((resolve) => resolve(undefined));
+  densityWorkerResolvers.clear();
+
+  if (cy) {
+    cy.destroy();
+    cy = null;
+  }
+
+  themeObserver = null;
+});
+
+function clearHighlight() {
+  activeHighlightState = { kind: "none" };
+  deactivateFocusDensity();
+  clearHighlightStates();
+}
+
+function highlightPaths(paths: string[][]) {
+  activeHighlightState = { kind: "paths", paths };
+  activateFocusDensity();
+  applyHighlightState();
+}
+
+function highlightImpact(nodeId: string, result: { affected_nodes: { id: string; depth: number }[] }) {
+  activeHighlightState = { kind: "impact", nodeId, result };
+  activateFocusDensity();
+  applyHighlightState();
+}
+
+function highlightSearch(nodeIds: string[], focusId?: string) {
+  if (nodeIds.length === 0) {
+    clearHighlight();
+    return;
+  }
+  activeHighlightState = { kind: "search", nodeIds, focusId };
+  activateFocusDensity(10_000);
+  applyHighlightState({ allowFocus: true });
+}
+
+function focusNeighborhood(nodeId: string, depth = 1) {
+  activeHighlightState = { kind: "neighborhood", nodeId, depth };
+  activateFocusDensity(9_000);
+  applyHighlightState({ allowFocus: true });
+}
+
+async function setLayout(type: LayoutType) {
   if (activeLayout.value === type) return;
   activeLayout.value = type;
-  nextTick(initGraph);
+  applyStyles();
+  await syncGraphData({ runLayout: true, preserveViewport: false });
 }
 
 function applyFilter(_payload: unknown) {
-  nextTick(initGraph);
+  void syncGraphData({ preserveViewport: true, runLayout: false });
 }
 
 async function exportImage(type: "png" | "svg"): Promise<string | undefined> {
-  if (!graph) return;
-  // G6 dataURL export does not support SVG mime in current runtime, fallback to PNG payload.
-  if (type === "svg") return graph.toDataURL({ type: "image/png" });
-  return graph.toDataURL({ type: "image/png" });
+  if (!cy) return;
+  if (type === "svg" && typeof cy.svg === "function") {
+    const svgText = cy.svg({
+      full: true,
+      scale: 1,
+      bg: cssVar("--im-surface-0", "#0f1728"),
+    });
+    return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgText)}`;
+  }
+
+  return cy.png({
+    full: true,
+    scale: 2,
+    bg: cssVar("--im-surface-0", "#0f1728"),
+    output: "base64uri",
+  });
 }
 
 defineExpose({
   highlightPaths,
   highlightImpact,
   highlightSearch,
+  focusNeighborhood,
   applyFilter,
   setLayout,
   exportImage,
@@ -539,7 +1276,12 @@ defineExpose({
 </script>
 
 <template>
-  <div ref="containerRef" class="topology-canvas" />
+  <div class="topology-canvas">
+    <div ref="containerRef" class="topology-canvas-surface" />
+    <div v-if="viewportState.totalEdges > 0" class="canvas-density-hint" data-testid="canvas-density-hint">
+      {{ densityHintText }}
+    </div>
+  </div>
 </template>
 
 <style scoped>
@@ -547,5 +1289,38 @@ defineExpose({
   width: 100%;
   height: 100%;
   min-height: 420px;
+  position: relative;
+}
+.topology-canvas-surface {
+  width: 100%;
+  height: 100%;
+  min-height: 420px;
+  background:
+    radial-gradient(120% 90% at 10% 0%, color-mix(in srgb, var(--im-accent) 8%, transparent) 0%, transparent 58%),
+    radial-gradient(140% 110% at 100% 100%, color-mix(in srgb, var(--im-success) 8%, transparent) 0%, transparent 62%),
+    repeating-linear-gradient(
+      0deg,
+      color-mix(in srgb, var(--im-border-subtle) 26%, transparent) 0 1px,
+      transparent 1px 26px
+    ),
+    repeating-linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--im-border-subtle) 20%, transparent) 0 1px,
+      transparent 1px 26px
+    ),
+    var(--im-surface-1);
+}
+.canvas-density-hint {
+  position: absolute;
+  left: 12px;
+  bottom: 10px;
+  padding: 5px 10px;
+  border-radius: var(--im-radius-sm);
+  background: color-mix(in srgb, var(--im-surface-0) 84%, transparent);
+  border: 1px solid color-mix(in srgb, var(--im-border-subtle) 75%, transparent);
+  font-size: 12px;
+  color: var(--im-text-secondary);
+  backdrop-filter: blur(6px);
+  pointer-events: none;
 }
 </style>
