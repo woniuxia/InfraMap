@@ -43,7 +43,10 @@ const filterFixture: TopologyFilterState = {
   showAllEdges: false,
 };
 
-function mountControlBar(layout: "force" | "dagre" = "force") {
+function mountControlBar(
+  layout: "force" | "dagre" = "force",
+  performanceOptimizationEnabled = true,
+) {
   const nodes = [
     createNode({ id: "n-1", name: "订单服务", extra: { address: "10.0.0.11" } }),
     createNode({ id: "n-2", name: "订单网关", node_type: "nginx", group_kind: "nginx", extra: { ip: "10.0.0.21" } }),
@@ -57,6 +60,7 @@ function mountControlBar(layout: "force" | "dagre" = "force") {
       filter: filterFixture,
       focusNeighborhoodEnabled: true,
       layout,
+      performanceOptimizationEnabled,
     },
   });
 }
@@ -102,6 +106,16 @@ describe("TopologyControlBar", () => {
 
     await wrapper.get('[data-testid="show-all-edges"]').setValue(true);
     expect(wrapper.emitted("filter-change")?.[3]?.[0]).toEqual({ showAllEdges: true });
+  });
+
+  it("emits performance optimization change and disables showAllEdges when optimization is off", async () => {
+    const wrapper = mountControlBar("force", false);
+
+    const showAllEdges = wrapper.get('[data-testid="show-all-edges"]');
+    expect(showAllEdges.attributes("disabled")).toBeDefined();
+
+    await wrapper.get('[data-testid="performance-optimization"]').setValue(true);
+    expect(wrapper.emitted("performance-optimization-change")?.[0]?.[0]).toBe(true);
   });
 
   it("emits focus mode changes", async () => {

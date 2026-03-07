@@ -14,6 +14,7 @@ const props = defineProps<{
   filter: TopologyFilterState;
   focusNeighborhoodEnabled: boolean;
   layout: "force" | "dagre";
+  performanceOptimizationEnabled: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -24,6 +25,7 @@ const emit = defineEmits<{
   (e: "refresh"): void;
   (e: "fullscreen"): void;
   (e: "focus-mode-change", enabled: boolean): void;
+  (e: "performance-optimization-change", enabled: boolean): void;
 }>();
 
 const NODE_KIND_LABELS: Record<TopologyGroupKind, string> = {
@@ -200,6 +202,11 @@ function updateFocusNeighborhood(event: Event) {
   emit("focus-mode-change", Boolean(target?.checked));
 }
 
+function updatePerformanceOptimization(event: Event) {
+  const target = event.target as HTMLInputElement | null;
+  emit("performance-optimization-change", Boolean(target?.checked));
+}
+
 function changeLayout(layout: "force" | "dagre") {
   if (props.layout === layout) return;
   emit("layout-change", layout);
@@ -332,9 +339,20 @@ onBeforeUnmount(() => {
 
       <label class="switch-wrap">
         <input
+          data-testid="performance-optimization"
+          type="checkbox"
+          :checked="performanceOptimizationEnabled"
+          @change="updatePerformanceOptimization"
+        >
+        <span>性能优化</span>
+      </label>
+
+      <label class="switch-wrap">
+        <input
           data-testid="show-all-edges"
           type="checkbox"
           :checked="filter.showAllEdges"
+          :disabled="!performanceOptimizationEnabled"
           @change="updateShowAllEdges"
         >
         <span>显示全部关系线</span>

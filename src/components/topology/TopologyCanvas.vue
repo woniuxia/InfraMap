@@ -29,9 +29,11 @@ const props = withDefaults(defineProps<{
   graphData: TopologyGraph | null;
   focusNeighborhood?: boolean;
   layout?: "force" | "dagre";
+  performanceOptimizationEnabled?: boolean;
 }>(), {
   focusNeighborhood: true,
   layout: "force",
+  performanceOptimizationEnabled: false,
 });
 
 const emit = defineEmits<{
@@ -234,14 +236,22 @@ function refreshTheme() {
   graphTheme = buildGraphTheme();
 }
 
+function resolveZoomDensity(zoom: number): ZoomDensity {
+  if (!props.performanceOptimizationEnabled) return "detail";
+  return getDensityByZoom(zoom);
+}
+
 function getActiveDensity(): ZoomDensity {
+  if (!props.performanceOptimizationEnabled) return "detail";
   return forcedDensity || viewportState.value.density;
 }
 
 const densityHintText = computed(() => {
   const density = DENSITY_OPTIONS[getActiveDensity()];
-  const focusSuffix = forcedDensity ? "（聚焦）" : "";
-  return `渲染: ${density.label}${focusSuffix} · 关系 ${viewportState.value.visibleEdges}/${viewportState.value.totalEdges}`;
+  const suffix = !props.performanceOptimizationEnabled
+    ? "（性能优化关闭）"
+    : (forcedDensity ? "（聚焦）" : "");
+  return `渲染: ${density.label}${suffix} · 关系 ${viewportState.value.visibleEdges}/${viewportState.value.totalEdges}`;
 });
 
 function edgePairKey(source: string, target: string): string {
@@ -357,6 +367,9 @@ async function resolveVisibleEdgeIds(graphData: TopologyGraph, density: ZoomDens
 }
 
 async function buildDensityGraphData(graphData: TopologyGraph, density: ZoomDensity): Promise<TopologyGraph> {
+  if (!props.performanceOptimizationEnabled) {
+    return graphData;
+  }
   const edgeIds = await resolveVisibleEdgeIds(graphData, density);
   const edgeIdSet = new Set(edgeIds);
   return {
@@ -388,7 +401,7 @@ function deactivateFocusDensity(options: { sync?: boolean } = {}) {
 
   forcedDensity = null;
   clearFocusDensityTimer();
-  const nextDensity = pendingDensityAfterFocus || getDensityByZoom(viewportState.value.zoom);
+  const nextDensity = pendingDensityAfterFocus || resolveZoomDensity(viewportState.value.zoom);
   pendingDensityAfterFocus = null;
   if (viewportState.value.density !== nextDensity) {
     viewportState.value.density = nextDensity;
@@ -399,8 +412,9 @@ function deactivateFocusDensity(options: { sync?: boolean } = {}) {
 }
 
 function activateFocusDensity(durationMs = 14_000) {
+  if (!props.performanceOptimizationEnabled) return;
   forcedDensity = "detail";
-  pendingDensityAfterFocus = getDensityByZoom(viewportState.value.zoom);
+  pendingDensityAfterFocus = resolveZoomDensity(viewportState.value.zoom);
   clearFocusDensityTimer();
   focusDensityTimer = globalThis.setTimeout(() => {
     focusDensityTimer = null;
@@ -424,7 +438,7 @@ function handleViewportTransform(event?: { originalEvent?: unknown }) {
   markViewportAsUserAdjusted(event);
   const zoom = cy.zoom();
   viewportState.value.zoom = zoom;
-  const nextDensity = getDensityByZoom(zoom);
+  const nextDensity = resolveZoomDensity(zoom);
   if (forcedDensity) {
     pendingDensityAfterFocus = nextDensity;
     return;
@@ -954,7 +968,8 @@ async function runLayout(layoutType: LayoutType): Promise<LayoutRunResult> {
 function applyStyles() {
   if (!cy) return;
   const theme = getTheme();
-  const dense = renderFlags.hideEdgeLabels || viewportState.value.visibleEdges > 140;
+  const dense = props.performanceOptimizationEnabled
+    && (renderFlags.hideEdgeLabels || viewportState.value.visibleEdges > 140);
   cy.style(buildStylesheet(theme, {
     dense,
     layout: activeLayout.value,
@@ -1038,7 +1053,7 @@ async function ensureCy() {
   cy.on("pan", handleViewportPan);
 
   viewportState.value.zoom = cy.zoom();
-  viewportState.value.density = getDensityByZoom(viewportState.value.zoom);
+  viewportState.value.density = resolveZoomDensity(viewportState.value.zoom);
 }
 
 async function syncGraphData(options: { preserveViewport?: boolean; runLayout?: boolean } = {}) {
@@ -1076,9 +1091,11 @@ async function syncGraphData(options: { preserveViewport?: boolean; runLayout?: 
   viewportState.value.totalEdges = props.graphData.edges.length;
   viewportState.value.visibleEdges = densityGraph.edges.length;
   renderFlags.isLargeGraph = densityGraph.nodes.length > 500;
-  renderFlags.hideEdgeLabels = DENSITY_OPTIONS[density].hideEdgeLabels
-    || props.graphData.layout_hints.high_density_mode
-    || densityGraph.edges.length > 90;
+  renderFlags.hideEdgeLabels = props.performanceOptimizationEnabled
+    ? (DENSITY_OPTIONS[density].hideEdgeLabels
+      || props.graphData.layout_hints.high_density_mode
+      || densityGraph.edges.length > 90)
+    : false;
   applyStyles();
 
   const elements = buildTopologyCyElements(densityGraph, {
@@ -1145,6 +1162,19 @@ watch(
   (layout) => {
     if (layout === activeLayout.value) return;
     void setLayout(layout);
+  },
+);
+
+watch(
+  () => props.performanceOptimizationEnabled,
+  (enabled) => {
+    if (!enabled) {
+      forcedDensity = null;
+      pendingDensityAfterFocus = null;
+      clearFocusDensityTimer();
+    }
+    viewportState.value.density = resolveZoomDensity(viewportState.value.zoom);
+    void syncGraphData({ preserveViewport: true, runLayout: false });
   },
 );
 

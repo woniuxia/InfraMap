@@ -1,6 +1,6 @@
 import { defineComponent, h } from "vue";
 import { flushPromises, mount } from "@vue/test-utils";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import TopologyView from "@/views/TopologyView.vue";
 import type { TopologyGraph } from "@/types";
 
@@ -167,15 +167,29 @@ const TopologyControlBarStub = defineComponent({
       type: String,
       default: "force",
     },
+    performanceOptimizationEnabled: {
+      type: Boolean,
+      default: false,
+    },
+    filter: {
+      type: Object,
+      default: () => ({
+        showAllEdges: false,
+      }),
+    },
   },
   template: `
     <div data-testid="control-bar">
       <span data-testid="control-layout">{{ layout }}</span>
+      <span data-testid="control-perf-opt">{{ performanceOptimizationEnabled ? 'on' : 'off' }}</span>
+      <span data-testid="control-show-all-edges">{{ filter.showAllEdges ? 'on' : 'off' }}</span>
       <button data-testid="emit-search-hit" @click="$emit('search', { matchIds: ['node-1'], focusId: 'node-1' })">hit</button>
       <button data-testid="emit-search-empty" @click="$emit('search', { matchIds: [] })">empty</button>
       <button data-testid="emit-focus-off" @click="$emit('focus-mode-change', false)">focus-off</button>
       <button data-testid="emit-layout-dagre" @click="$emit('layout-change', 'dagre')">layout-dagre</button>
       <button data-testid="emit-layout-force" @click="$emit('layout-change', 'force')">layout-force</button>
+      <button data-testid="emit-perf-opt-on" @click="$emit('performance-optimization-change', true)">perf-on</button>
+      <button data-testid="emit-perf-opt-off" @click="$emit('performance-optimization-change', false)">perf-off</button>
     </div>
   `,
 });
@@ -197,6 +211,10 @@ const TopologyCanvasStub = defineComponent({
       type: String,
       default: "force",
     },
+    performanceOptimizationEnabled: {
+      type: Boolean,
+      default: false,
+    },
   },
   setup(props, { expose, emit }) {
     const sampleNode = graphFixture.nodes[0];
@@ -212,7 +230,11 @@ const TopologyCanvasStub = defineComponent({
     });
 
     return () =>
-      h("div", { "data-testid": "topology-canvas", "data-layout": props.layout }, [
+      h("div", {
+        "data-testid": "topology-canvas",
+        "data-layout": props.layout,
+        "data-perf-opt": props.performanceOptimizationEnabled ? "on" : "off",
+      }, [
         h(
           "button",
           {
@@ -342,6 +364,42 @@ function mountView(options?: {
 }
 
 describe("TopologyView", () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it("defaults performance optimization to off and forces showAllEdges in control filter", async () => {
+    localStorage.removeItem("inframap.topology.performanceOptimizationEnabled");
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(wrapper.get('[data-testid="control-perf-opt"]').text()).toBe("off");
+    expect(wrapper.get('[data-testid="control-show-all-edges"]').text()).toBe("on");
+    expect(wrapper.get('[data-testid="topology-canvas"]').attributes("data-perf-opt")).toBe("off");
+  });
+
+  it("restores performance optimization preference from localStorage", async () => {
+    localStorage.setItem("inframap.topology.performanceOptimizationEnabled", "true");
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(wrapper.get('[data-testid="control-perf-opt"]').text()).toBe("on");
+    expect(wrapper.get('[data-testid="topology-canvas"]').attributes("data-perf-opt")).toBe("on");
+  });
+
+  it("persists performance optimization changes from control bar", async () => {
+    localStorage.removeItem("inframap.topology.performanceOptimizationEnabled");
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.get('[data-testid="emit-perf-opt-on"]').trigger("click");
+    await flushPromises();
+
+    expect(localStorage.getItem("inframap.topology.performanceOptimizationEnabled")).toBe("true");
+    expect(wrapper.get('[data-testid="control-perf-opt"]').text()).toBe("on");
+    expect(wrapper.get('[data-testid="topology-canvas"]').attributes("data-perf-opt")).toBe("on");
+  });
+
   it("renders new unified control bar and removes legacy toolbar/legend", async () => {
     const wrapper = mountView();
     await flushPromises();

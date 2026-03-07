@@ -31,6 +31,7 @@ import {
 } from "@/components/topology/topologyGraph.utils";
 
 const topologyStore = useTopologyStore();
+const PERFORMANCE_OPT_STORAGE_KEY = "inframap.topology.performanceOptimizationEnabled";
 const MAX_DEPTH_RANGE = {
   min: 1,
   max: 8,
@@ -47,7 +48,14 @@ const rawGraphData = computed(() => topologyStore.graphData);
 const loading = computed(() => topologyStore.loading);
 const taskInsights = computed(() => topologyStore.taskInsights || []);
 const activeFilter = ref<TopologyFilterState>({ ...DEFAULT_TOPOLOGY_FILTER });
-const graphData = computed(() => filterTopologyGraph(rawGraphData.value, activeFilter.value));
+const performanceOptimizationEnabled = ref(false);
+const effectiveFilter = computed<TopologyFilterState>(() => (performanceOptimizationEnabled.value
+  ? activeFilter.value
+  : {
+      ...activeFilter.value,
+      showAllEdges: true,
+    }));
+const graphData = computed(() => filterTopologyGraph(rawGraphData.value, effectiveFilter.value));
 const canvasRef = ref<InstanceType<typeof TopologyCanvas>>();
 const selectedLayout = ref<"force" | "dagre">("force");
 const warnedLayoutFallbackReasons = new Set<string>();
@@ -169,6 +177,25 @@ async function loadData() {
 function normalizeMaxDepth(value: number): number {
   const normalized = Number.isFinite(value) ? Math.round(value) : topologyStore.maxDepth;
   return Math.min(MAX_DEPTH_RANGE.max, Math.max(MAX_DEPTH_RANGE.min, normalized));
+}
+
+function readPerformanceOptimizationPreference(): boolean {
+  try {
+    const raw = localStorage.getItem(PERFORMANCE_OPT_STORAGE_KEY);
+    if (raw === "true") return true;
+    if (raw === "false") return false;
+  } catch {
+    // ignore storage read failures and fallback to default
+  }
+  return false;
+}
+
+function persistPerformanceOptimizationPreference(enabled: boolean) {
+  try {
+    localStorage.setItem(PERFORMANCE_OPT_STORAGE_KEY, enabled ? "true" : "false");
+  } catch {
+    // ignore storage write failures
+  }
 }
 
 async function handleTaskViewChange(taskView: TopologyTaskViewMode) {
@@ -433,6 +460,11 @@ function handleFilterChange(payload: Partial<TopologyFilterState>) {
   };
 }
 
+function handlePerformanceOptimizationChange(enabled: boolean) {
+  performanceOptimizationEnabled.value = enabled;
+  persistPerformanceOptimizationPreference(enabled);
+}
+
 function handleLayoutChange(type: "force" | "dagre") {
   selectedLayout.value = type;
 }
@@ -493,6 +525,7 @@ function handleFullscreenChange() {
 }
 
 onMounted(() => {
+  performanceOptimizationEnabled.value = readPerformanceOptimizationPreference();
   loadData();
   document.addEventListener("fullscreenchange", handleFullscreenChange);
 });
@@ -507,11 +540,13 @@ onBeforeUnmount(() => {
     <TopologyControlBar
       :nodes="graphData?.nodes || []"
       :stats="graphData?.legend_stats || null"
-      :filter="activeFilter"
+      :filter="effectiveFilter"
       :layout="selectedLayout"
       :focus-neighborhood-enabled="focusNeighborhoodEnabled"
+      :performance-optimization-enabled="performanceOptimizationEnabled"
       @search="handleSearch"
       @filter-change="handleFilterChange"
+      @performance-optimization-change="handlePerformanceOptimizationChange"
       @layout-change="handleLayoutChange"
       @focus-mode-change="handleFocusModeChange"
       @export="handleExport"
@@ -600,6 +635,7 @@ onBeforeUnmount(() => {
           ref="canvasRef"
           :graph-data="graphData"
           :layout="selectedLayout"
+          :performance-optimization-enabled="performanceOptimizationEnabled"
           :focus-neighborhood="focusNeighborhoodEnabled && !pathTraceMode"
           @node-click="handleCanvasNodeClick"
           @canvas-blank-click="handleCanvasBlankClick"

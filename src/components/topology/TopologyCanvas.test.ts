@@ -208,6 +208,51 @@ const graphFixture: TopologyGraph = {
   },
 };
 
+const edgeGraphFixture: TopologyGraph = {
+  ...graphFixture,
+  lanes: [
+    { id: "prod", label: "生产", order: 0, node_count: 2, app_count: 2 },
+    { id: "test", label: "测试", order: 1, node_count: 0, app_count: 0 },
+    { id: "dev", label: "开发", order: 2, node_count: 0, app_count: 0 },
+  ],
+  nodes: [
+    ...graphFixture.nodes,
+    {
+      id: "app-prod-2",
+      name: "库存服务",
+      node_type: "application",
+      env: "prod",
+      group_kind: "application_service",
+      importance: 1,
+      status: "running",
+      extra: {
+        type: "backend",
+      },
+    },
+  ],
+  edges: [
+    {
+      id: "edge-1",
+      source: "app-prod-1",
+      target: "app-prod-2",
+      edge_type: "http_call",
+      label: "http",
+      strength: 1,
+      cross_env: false,
+    },
+  ],
+  legend_stats: {
+    ...graphFixture.legend_stats,
+    env_counts: [
+      { env: "prod", count: 2, app_count: 2 },
+      { env: "test", count: 0, app_count: 0 },
+      { env: "dev", count: 0, app_count: 0 },
+    ],
+    edge_type_counts: [{ kind: "http_call", count: 1 }],
+    application_service_count: 2,
+  },
+};
+
 function getLatestStylesheet() {
   const stylesheet = capturedStylesheets[capturedStylesheets.length - 1];
   expect(stylesheet).toBeTruthy();
@@ -402,5 +447,43 @@ describe("TopologyCanvas", () => {
     core.__emit("tap", { target: core });
 
     expect(wrapper.emitted("canvas-blank-click")).toHaveLength(1);
+  });
+
+  it("drops weak edges on overview density when performance optimization is enabled", async () => {
+    const wrapper = mount(TopologyCanvas, {
+      props: {
+        graphData: edgeGraphFixture,
+        performanceOptimizationEnabled: true,
+      },
+    });
+
+    await flushPromises();
+    expect(wrapper.get('[data-testid="canvas-density-hint"]').text()).toContain("关系 1/1");
+
+    const core = getLatestCore();
+    core.zoom.mockReturnValue(0.6);
+    core.__emit("zoom", { originalEvent: new Event("wheel") });
+    await flushPromises();
+
+    expect(wrapper.get('[data-testid="canvas-density-hint"]').text()).toContain("关系 0/1");
+  });
+
+  it("keeps all edges when zooming out and performance optimization is disabled", async () => {
+    const wrapper = mount(TopologyCanvas, {
+      props: {
+        graphData: edgeGraphFixture,
+        performanceOptimizationEnabled: false,
+      },
+    });
+
+    await flushPromises();
+    expect(wrapper.get('[data-testid="canvas-density-hint"]').text()).toContain("关系 1/1");
+
+    const core = getLatestCore();
+    core.zoom.mockReturnValue(0.6);
+    core.__emit("zoom", { originalEvent: new Event("wheel") });
+    await flushPromises();
+
+    expect(wrapper.get('[data-testid="canvas-density-hint"]').text()).toContain("关系 1/1");
   });
 });
