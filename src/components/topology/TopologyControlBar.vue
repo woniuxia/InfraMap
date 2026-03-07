@@ -347,7 +347,7 @@ onBeforeUnmount(() => {
           :checked="focusNeighborhoodEnabled"
           @change="updateFocusNeighborhood"
         >
-        <span>点击节点聚焦邻接</span>
+        <span>点击节点聚焦上下游</span>
       </label>
 
       <div class="metric-group">

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import cytoscape, { type Core, type EventObjectNode, type LayoutOptions } from "cytoscape";
+import cytoscape, { type Core, type EventObject, type EventObjectNode, type LayoutOptions } from "cytoscape";
 import dagre from "cytoscape-dagre";
 import fcose from "cytoscape-fcose";
 import cytoscapeSvg from "cytoscape-svg";
@@ -20,6 +20,10 @@ import {
   hasTopologyNodeSetChanged,
   isDegenerateNodeDistribution,
 } from "@/components/topology/topologyLayoutSafety.utils";
+import {
+  collectDirectionalReachability,
+  type DirectionalReachabilityEdge,
+} from "@/components/topology/topologyDirectionalReachability.utils";
 
 const props = withDefaults(defineProps<{
   graphData: TopologyGraph | null;
@@ -33,6 +37,7 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{
   (e: "node-click", node: TopologyNode): void;
   (e: "node-contextmenu", payload: { node: TopologyNode; x: number; y: number }): void;
+  (e: "canvas-blank-click"): void;
   (e: "layout-resolved", payload: { requested: "force" | "dagre"; applied: "force" | "dagre"; reason?: string }): void;
 }>();
 
@@ -82,7 +87,7 @@ type HighlightState
   = { kind: "none" }
   | { kind: "paths"; paths: string[][] }
   | { kind: "impact"; nodeId: string; result: { affected_nodes: { id: string; depth: number }[] } }
-  | { kind: "neighborhood"; nodeId: string; depth: number }
+  | { kind: "neighborhood"; nodeId: string }
   | { kind: "search"; nodeIds: string[]; focusId?: string };
 
 let activeHighlightState: HighlightState = { kind: "none" };
@@ -726,7 +731,7 @@ function applyImpactHighlight(nodeId: string, result: { affected_nodes: { id: st
   syncParentDimState();
 }
 
-function applyNeighborhoodHighlight(nodeId: string, depth: number, allowFocus = true) {
+function applyNeighborhoodHighlight(nodeId: string, allowFocus = true) {
   if (!cy) return;
   clearHighlightStates();
 
@@ -736,34 +741,17 @@ function applyNeighborhoodHighlight(nodeId: string, depth: number, allowFocus = 
   const focus = cy.getElementById(renderFocusId);
   if (focus.empty()) return;
 
-  const maxDepth = Math.max(1, Math.min(2, depth));
-  const visited = new Set<string>([renderFocusId]);
-  const frontier: string[] = [renderFocusId];
-  const highlightedNodeIds = new Set<string>([renderFocusId]);
-  const highlightedEdgeIds = new Set<string>();
+  const visibleEdges: DirectionalReachabilityEdge[] = [];
+  cy.edges().forEach((edge: cytoscape.EdgeSingular) => {
+    visibleEdges.push({
+      id: edge.id(),
+      source: edge.source().id(),
+      target: edge.target().id(),
+    });
+  });
 
-  for (let level = 0; level < maxDepth; level += 1) {
-    const nextFrontier: string[] = [];
-    for (const currentId of frontier) {
-      const currentNode = cy.getElementById(currentId);
-      if (currentNode.empty()) continue;
-
-      currentNode.connectedEdges().forEach((edge) => {
-        if (edge.empty()) return;
-        highlightedEdgeIds.add(edge.id());
-        const sourceId = edge.source().id();
-        const targetId = edge.target().id();
-        const neighborId = sourceId === currentId ? targetId : sourceId;
-        if (visited.has(neighborId)) return;
-        visited.add(neighborId);
-        highlightedNodeIds.add(neighborId);
-        nextFrontier.push(neighborId);
-      });
-    }
-    frontier.length = 0;
-    frontier.push(...nextFrontier);
-    if (frontier.length === 0) break;
-  }
+  const { highlightedNodeIds, highlightedEdgeIds } = collectDirectionalReachability(renderFocusId, visibleEdges);
+  highlightedNodeIds.add(renderFocusId);
 
   cy.nodes().forEach((node) => {
     if (node.isParent()) return;
@@ -834,7 +822,7 @@ function applyHighlightState(options: { allowFocus?: boolean } = {}) {
     return;
   }
   if (activeHighlightState.kind === "neighborhood") {
-    applyNeighborhoodHighlight(activeHighlightState.nodeId, activeHighlightState.depth, allowFocus);
+    applyNeighborhoodHighlight(activeHighlightState.nodeId, allowFocus);
     return;
   }
   applySearchHighlight(activeHighlightState.nodeIds, activeHighlightState.focusId, allowFocus);
@@ -991,11 +979,18 @@ function getContextMenuPosition(evt: EventObjectNode): { x: number; y: number } 
   return { x: 0, y: 0 };
 }
 
+function handleCanvasTap(evt: EventObject) {
+  if (!cy) return;
+  if (evt.target !== cy) return;
+  emit("canvas-blank-click");
+}
+
 function handleNodeTap(evt: EventObjectNode) {
   const target = evt.target;
-  if (!target.isNode() || target.isParent()) return;
+  if (typeof target.isNode !== "function" || !target.isNode()) return;
+  if (typeof target.isParent === "function" && target.isParent()) return;
   if (props.focusNeighborhood) {
-    activeHighlightState = { kind: "neighborhood", nodeId: target.id(), depth: 1 };
+    activeHighlightState = { kind: "neighborhood", nodeId: target.id() };
     activateFocusDensity(9_000);
     applyHighlightState({ allowFocus: false });
   }
@@ -1005,7 +1000,8 @@ function handleNodeTap(evt: EventObjectNode) {
 
 function handleNodeContextTap(evt: EventObjectNode) {
   const target = evt.target;
-  if (!target.isNode() || target.isParent()) return;
+  if (typeof target.isNode !== "function" || !target.isNode()) return;
+  if (typeof target.isParent === "function" && target.isParent()) return;
   const node = nodeById.get(target.id());
   if (!node) return;
   const position = getContextMenuPosition(evt);
@@ -1036,6 +1032,7 @@ async function ensureCy() {
   });
 
   cy.on("tap", "node", (evt) => handleNodeTap(evt as EventObjectNode));
+  cy.on("tap", (evt) => handleCanvasTap(evt as EventObject));
   cy.on("cxttap", "node", (evt) => handleNodeContextTap(evt as EventObjectNode));
   cy.on("zoom", handleViewportTransform);
   cy.on("pan", handleViewportPan);
@@ -1249,8 +1246,8 @@ function highlightSearch(nodeIds: string[], focusId?: string) {
   applyHighlightState({ allowFocus: true });
 }
 
-function focusNeighborhood(nodeId: string, depth = 1) {
-  activeHighlightState = { kind: "neighborhood", nodeId, depth };
+function focusNeighborhood(nodeId: string, _depth?: number) {
+  activeHighlightState = { kind: "neighborhood", nodeId };
   activateFocusDensity(9_000);
   applyHighlightState({ allowFocus: true });
 }

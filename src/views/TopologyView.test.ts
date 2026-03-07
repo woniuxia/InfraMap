@@ -238,6 +238,17 @@ const TopologyCanvasStub = defineComponent({
         h(
           "button",
           {
+            "data-testid": "emit-canvas-blank-click",
+            onClick: (event: MouseEvent) => {
+              event.stopPropagation();
+              emit("canvas-blank-click");
+            },
+          },
+          "emit-canvas-blank-click",
+        ),
+        h(
+          "button",
+          {
             "data-testid": "emit-layout-resolved-fallback",
             onClick: (event: MouseEvent) => {
               event.stopPropagation();
@@ -357,6 +368,26 @@ describe("TopologyView", () => {
 
     await wrapper.get('[data-testid="emit-focus-off"]').trigger("click");
     expect(clearHighlightMock).toHaveBeenCalled();
+  });
+
+  it("clears selected node when canvas blank area is clicked", async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.get('[data-testid="emit-node-click"]').trigger("click");
+    await flushPromises();
+    clearHighlightMock.mockClear();
+
+    await wrapper.get('[data-testid="emit-canvas-blank-click"]').trigger("click");
+    expect(clearHighlightMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does nothing on canvas blank click when no node is selected", async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.get('[data-testid="emit-canvas-blank-click"]').trigger("click");
+    expect(clearHighlightMock).not.toHaveBeenCalled();
   });
 
   it("syncs selected layout between control bar and canvas, including fallback resolve", async () => {

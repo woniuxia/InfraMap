@@ -221,6 +221,14 @@ function handleCanvasNodeClick(node: TopologyNode) {
   handleNodeClick(node);
 }
 
+function handleCanvasBlankClick() {
+  if (panelMode.value !== "detail" || !selectedNode.value) return;
+  panelMode.value = null;
+  selectedNode.value = null;
+  resetEvidenceState();
+  canvasRef.value?.clearHighlight();
+}
+
 function handleContextMenu(payload: { node: TopologyNode; x: number; y: number }) {
   if (isExternalNode(payload.node)) {
     ElMessage.info("外部节点仅用于展示跨环境依赖，不支持操作");
@@ -594,6 +602,7 @@ onBeforeUnmount(() => {
           :layout="selectedLayout"
           :focus-neighborhood="focusNeighborhoodEnabled && !pathTraceMode"
           @node-click="handleCanvasNodeClick"
+          @canvas-blank-click="handleCanvasBlankClick"
           @node-contextmenu="handleContextMenu"
           @layout-resolved="handleLayoutResolved"
         />

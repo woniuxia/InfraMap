@@ -388,4 +388,19 @@ describe("TopologyCanvas", () => {
     expect(core.resize).toHaveBeenCalledTimes(1);
     expect(core.fit).toHaveBeenCalledTimes(1);
   });
+
+  it("emits canvas-blank-click when tapping background", async () => {
+    const wrapper = mount(TopologyCanvas, {
+      props: {
+        graphData: graphFixture,
+      },
+    });
+
+    await flushPromises();
+
+    const core = getLatestCore();
+    core.__emit("tap", { target: core });
+
+    expect(wrapper.emitted("canvas-blank-click")).toHaveLength(1);
+  });
 });
