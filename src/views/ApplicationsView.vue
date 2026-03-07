@@ -1,24 +1,14 @@
 <script setup lang="ts">
-import { computed, ref, onMounted } from "vue";
-import { ElMessage } from "element-plus";
-import type { Application, BusinessApplication } from "@/types";
+import { ref, onMounted } from "vue";
+import type { Application } from "@/types";
 import type { SearchFieldConfig, SearchToolbarQueryPayload } from "@/types/searchToolbar";
-import {
-  listApplications,
-  saveApplication,
-  deleteApplication,
-} from "@/api/applications";
-import { listBusinessApplications } from "@/api/business-applications";
-import { listApplicationOwnerTerms, listApplicationTechStackTerms } from "@/api/taxonomy";
-import type { TaxonomyAppType } from "@/api/taxonomy";
-import { replaceResourceCallRelations } from "@/api/call-relations";
-import { saveDeployment } from "@/api/deployments";
+import { listApplications, deleteApplication } from "@/api/applications";
 import { useResourceList } from "@/composables/useResourceList";
-import { buildTechStackSuggestions, parseTechStack, techStackToText } from "@/utils/techStack";
 import { buildApplicationCopyDraft } from "@/utils/resourceCopy";
 import SearchToolbar from "@/components/filters/SearchToolbar.vue";
-import CallRelationsEditor from "@/components/CallRelationsEditor.vue";
-import DeploymentPanel from "@/components/DeploymentPanel.vue";
+import ApplicationEditorDialog from "@/components/resource-editors/ApplicationEditorDialog.vue";
+
+type ApplicationEditorMode = "create" | "edit" | "copy";
 
 const {
   loading,
@@ -37,84 +27,9 @@ const {
 });
 
 const searchText = ref("");
-const drawerVisible = ref(false);
-const editingApp = ref<Partial<Application>>({});
-const isEditing = ref(false);
-const saveLoading = ref(false);
-const businessApplicationOptionsLoading = ref(false);
-
-const techStackList = ref<string[]>([]);
-const topTechStackOptions = ref<string[]>([]);
-const ownerList = ref<string[]>([]);
-const ownerOptions = ref<string[]>([]);
-const businessApplicationOptions = ref<BusinessApplication[]>([]);
-const techStackSuggestions = computed(() =>
-  buildTechStackSuggestions(
-    topTechStackOptions.value.map((item) => ({ tech_stack: item })),
-    techStackList.value
-  )
-);
-const ownerSuggestions = computed(() => normalizeOwners([...ownerOptions.value, ...ownerList.value], ""));
-const callRelationsEditorRef = ref<InstanceType<typeof CallRelationsEditor> | null>(null);
-interface DraftDeploymentItem {
-  host_id: string;
-  port?: number;
-}
-interface DeploymentPanelExposed {
-  getDraftDeployments: () => DraftDeploymentItem[];
-}
-const deploymentPanelRef = ref<DeploymentPanelExposed | null>(null);
-const selectedBusinessApplicationId = computed(() =>
-  normalizeBusinessApplicationId(editingApp.value.business_application_id)
-);
-const allBusinessApplicationOptions = computed<BusinessApplication[]>(() => {
-  const activeOptions = businessApplicationOptions.value.filter((item) => item.status === "active");
-  const selectedId = selectedBusinessApplicationId.value;
-  const selectedName = editingApp.value.business_application_name?.trim();
-  if (!selectedId || activeOptions.some((item) => item.id === selectedId) || !selectedName) {
-    return activeOptions;
-  }
-  const fallbackInactiveOption: BusinessApplication = {
-    id: selectedId,
-    name: selectedName,
-    status: "inactive",
-    env: undefined,
-    created_at: "",
-    updated_at: "",
-  };
-  return [
-    ...activeOptions,
-    fallbackInactiveOption,
-  ];
-});
-const businessApplicationSelectOptions = computed(() => {
-  const selectedId = selectedBusinessApplicationId.value;
-  const appEnv = editingApp.value.env?.trim();
-  if (!appEnv) {
-    return allBusinessApplicationOptions.value;
-  }
-  return allBusinessApplicationOptions.value.filter((item) => item.id === selectedId || item.env === appEnv);
-});
-const selectedBusinessApplicationEnvMismatch = computed(() => {
-  const selectedId = selectedBusinessApplicationId.value;
-  if (!selectedId) {
-    return false;
-  }
-  const selectedOption = allBusinessApplicationOptions.value.find((item) => item.id === selectedId);
-  if (!selectedOption) {
-    return true;
-  }
-  if (selectedOption.status !== "active") {
-    return true;
-  }
-  const appEnv = editingApp.value.env?.trim();
-  if (!appEnv) {
-    return false;
-  }
-  return selectedOption.env !== appEnv;
-});
-
-const BUSINESS_APPLICATION_OPTION_LIMIT = 500;
+const editorVisible = ref(false);
+const editorMode = ref<ApplicationEditorMode>("create");
+const editorInitialDraft = ref<Partial<Application>>({});
 
 interface ApplicationListFilters {
   type: string[];
@@ -203,10 +118,6 @@ function handleToolbarQuery(payload: SearchToolbarQueryPayload) {
   handleQuery(payload);
 }
 
-function handleTechStackChange(values: string[]) {
-  techStackList.value = buildTechStackSuggestions([], values);
-}
-
 function normalizeOwners(owners?: string[], owner?: string) {
   const values = [...(owners ?? []), owner ?? ""]
     .map((item) => item.trim())
@@ -214,26 +125,8 @@ function normalizeOwners(owners?: string[], owner?: string) {
   return Array.from(new Set(values));
 }
 
-function handleOwnerChange(values: string[]) {
-  ownerList.value = normalizeOwners(values);
-}
-
 function ownersForRow(row: Application) {
   return normalizeOwners(row.owners, row.owner);
-}
-
-function resolveTechStackSide(type: Application["type"] | undefined): TaxonomyAppType {
-  return type === "frontend" ? "frontend" : "backend";
-}
-
-function applyDefaultPortByType(type: Application["type"] | undefined) {
-  if (type === "frontend") {
-    editingApp.value.port = 80;
-    return;
-  }
-  if (type === "backend") {
-    editingApp.value.port = 8080;
-  }
 }
 
 function generateDraftApplicationId() {
@@ -244,7 +137,7 @@ function generateDraftApplicationId() {
 }
 
 function openAdd() {
-  editingApp.value = {
+  editorInitialDraft.value = {
     id: generateDraftApplicationId(),
     status: "running",
     env: "prod",
@@ -255,168 +148,30 @@ function openAdd() {
     created_at: "",
     updated_at: "",
   };
-  techStackList.value = [];
-  ownerList.value = [];
-  topTechStackOptions.value = [];
-  ownerOptions.value = [];
-  isEditing.value = false;
-  drawerVisible.value = true;
-  fetchTopTechStackOptions(editingApp.value.type);
-  fetchOwnerOptions();
-  fetchBusinessApplicationOptions();
+  editorMode.value = "create";
+  editorVisible.value = true;
 }
 
 function openEdit(row: Application) {
-  editingApp.value = { ...row };
-  techStackList.value = parseTechStack(row.tech_stack);
-  ownerList.value = normalizeOwners(row.owners, row.owner);
-  isEditing.value = true;
-  drawerVisible.value = true;
-  fetchTopTechStackOptions(editingApp.value.type);
-  fetchOwnerOptions();
-  fetchBusinessApplicationOptions();
+  editorInitialDraft.value = {
+    ...row,
+    owners: Array.isArray(row.owners) ? [...row.owners] : row.owners,
+  };
+  editorMode.value = "edit";
+  editorVisible.value = true;
 }
 
 function openCopy(row: Application) {
-  editingApp.value = {
+  editorInitialDraft.value = {
     ...buildApplicationCopyDraft(row),
     id: generateDraftApplicationId(),
   };
-  techStackList.value = parseTechStack(editingApp.value.tech_stack);
-  ownerList.value = normalizeOwners(editingApp.value.owners, editingApp.value.owner);
-  isEditing.value = false;
-  drawerVisible.value = true;
-  fetchTopTechStackOptions(editingApp.value.type);
-  fetchOwnerOptions();
-  fetchBusinessApplicationOptions();
+  editorMode.value = "copy";
+  editorVisible.value = true;
 }
 
-function handleTypeChange(type: Application["type"] | undefined) {
-  applyDefaultPortByType(type);
-  fetchTopTechStackOptions(type);
-}
-
-async function fetchTopTechStackOptions(type: Application["type"] | undefined) {
-  try {
-    topTechStackOptions.value = await listApplicationTechStackTerms({
-      app_type: resolveTechStackSide(type),
-      limit: 10,
-    });
-  } catch {
-    // error shown by tauriInvoke
-  }
-}
-
-async function fetchOwnerOptions() {
-  try {
-    ownerOptions.value = await listApplicationOwnerTerms(100);
-  } catch {
-    // error shown by tauriInvoke
-  }
-}
-
-function normalizeBusinessApplicationId(value: unknown): string {
-  return typeof value === "string" ? value.trim() : "";
-}
-
-function businessApplicationLabel(item: BusinessApplication) {
-  const envText = item.env ? envLabel(item.env) : "未设置环境";
-  return `${item.name?.trim() || "-"}（${envText}）`;
-}
-
-function handleBusinessApplicationChange(value: string | number | undefined | null) {
-  const nextId = normalizeBusinessApplicationId(value);
-  editingApp.value.business_application_id = nextId || undefined;
-  if (!nextId) {
-    editingApp.value.business_application_name = undefined;
-    return;
-  }
-  const selected = allBusinessApplicationOptions.value.find((item) => item.id === nextId);
-  editingApp.value.business_application_name = selected?.name?.trim() || editingApp.value.business_application_name;
-}
-
-async function fetchBusinessApplicationOptions() {
-  businessApplicationOptionsLoading.value = true;
-  try {
-    const result = await listBusinessApplications({
-      page: 1,
-      page_size: BUSINESS_APPLICATION_OPTION_LIMIT,
-      filters: {
-        status: "active",
-      },
-    });
-    businessApplicationOptions.value = result.data.filter((item) => item.status === "active");
-  } catch {
-    // error shown by tauriInvoke
-  } finally {
-    businessApplicationOptionsLoading.value = false;
-  }
-}
-
-async function handleSave() {
-  const draftItems = callRelationsEditorRef.value?.getDraftItems();
-  if (draftItems === null) {
-    return;
-  }
-  if (selectedBusinessApplicationEnvMismatch.value) {
-    ElMessage.warning("所属业务应用与当前环境不一致，请重新选择。");
-    return;
-  }
-
-  const wasEditing = isEditing.value;
-  const owners = normalizeOwners(ownerList.value);
-  const businessApplicationId = normalizeBusinessApplicationId(editingApp.value.business_application_id);
-  const draftDeployments = !wasEditing ? deploymentPanelRef.value?.getDraftDeployments?.() ?? [] : [];
-  const payload: Partial<Application> = {
-    id: "",
-    created_at: "",
-    updated_at: "",
-    ...editingApp.value,
-    business_application_id: businessApplicationId || undefined,
-    business_application_name: undefined,
-    owner: owners[0],
-    owners,
-    tech_stack: techStackToText(techStackList.value),
-  };
-  saveLoading.value = true;
-  try {
-    const appId = await saveApplication(payload);
-    try {
-      await replaceResourceCallRelations({
-        resource_id: appId,
-        resource_type: "application",
-        items: draftItems ?? [],
-      });
-    } catch {
-      ElMessage.warning("应用已保存，调用关系保存失败，请重新编辑后重试。");
-    }
-    if (!wasEditing && draftDeployments.length > 0) {
-      try {
-        await Promise.all(
-          draftDeployments.map((item) =>
-            saveDeployment({
-              id: "",
-              resource_id: appId,
-              resource_type: "application",
-              host_id: item.host_id,
-              port: item.port,
-            })
-          )
-        );
-      } catch {
-        ElMessage.warning("应用已保存，部署关系保存失败，请在部署关系中重试。");
-      }
-    }
-    ElMessage.success(wasEditing ? "更新成功" : "创建成功");
-    drawerVisible.value = false;
-    fetchData();
-    fetchTopTechStackOptions((payload.type as Application["type"] | undefined) ?? editingApp.value.type);
-    fetchOwnerOptions();
-  } catch {
-    // error shown by tauriInvoke
-  } finally {
-    saveLoading.value = false;
-  }
+function handleEditorSaved() {
+  fetchData();
 }
 
 function statusTagType(status: string): "primary" | "success" | "warning" | "info" | "danger" {
@@ -460,8 +215,6 @@ function envTagType(env: string): "primary" | "success" | "warning" | "info" | "
 
 onMounted(() => {
   fetchData();
-  fetchTopTechStackOptions("backend");
-  fetchOwnerOptions();
 });
 </script>
 
@@ -531,137 +284,12 @@ onMounted(() => {
       />
     </div>
 
-    <el-dialog
-      v-model="drawerVisible"
-      :title="isEditing ? '编辑应用' : '新增应用'"
-      width="700px"
-      align-center
-      destroy-on-close
-    >
-      <el-form :model="editingApp" label-width="96px">
-        <el-divider content-position="left">基础信息</el-divider>
-        <el-form-item label="服务名称" required>
-          <el-input v-model="editingApp.name" placeholder="请输入服务名称" />
-        </el-form-item>
-        <el-form-item label="类型" required>
-          <el-select v-model="editingApp.type" class="w-full" @change="(v) => handleTypeChange(v as Application['type'])">
-            <el-option label="前端" value="frontend" />
-            <el-option label="后端" value="backend" />
-            <el-option label="网关" value="gateway" />
-            <el-option label="批处理" value="batch_job" />
-            <el-option label="微服务" value="microservice" />
-            <el-option label="其他" value="other" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="访问地址">
-          <el-input v-model="editingApp.address" placeholder="如 api.example.com、https://app.example.com 或 192.168.1.100" />
-        </el-form-item>
-        <el-form-item label="端口">
-          <el-input-number v-model="editingApp.port" :min="1" :max="65535" class="w-full" />
-        </el-form-item>
-
-        <el-divider content-position="left">部署信息</el-divider>
-        <el-form-item label="技术栈">
-          <el-select
-            v-model="techStackList"
-            class="w-full"
-            multiple
-            filterable
-            allow-create
-            default-first-option
-            :reserve-keyword="false"
-            placeholder="输入技术栈进行筛选，按回车可新增"
-            @change="(values) => handleTechStackChange(values as string[])"
-          >
-            <el-option v-for="item in techStackSuggestions" :key="item" :label="item" :value="item" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="部署方式">
-          <el-select v-model="editingApp.deploy_mode" clearable placeholder="请选择部署方式" class="w-full">
-            <el-option v-for="item in deployModeOptions" :key="item.value" :label="item.label" :value="item.value" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="环境" required>
-          <el-select v-model="editingApp.env" class="w-full">
-            <el-option label="生产" value="prod" />
-            <el-option label="开发" value="dev" />
-            <el-option label="测试" value="test" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="Git仓库">
-          <el-input v-model="editingApp.git_repo" placeholder="Git 仓库地址" />
-        </el-form-item>
-        <el-form-item label="负责人">
-          <el-select
-            v-model="ownerList"
-            class="w-full"
-            multiple
-            filterable
-            allow-create
-            default-first-option
-            :reserve-keyword="false"
-            placeholder="输入负责人姓名进行筛选，按回车可新增"
-            @change="(values) => handleOwnerChange(values as string[])"
-          >
-            <el-option v-for="item in ownerSuggestions" :key="item" :label="item" :value="item" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="所属业务应用">
-          <el-select
-            v-model="editingApp.business_application_id"
-            class="w-full"
-            clearable
-            filterable
-            :loading="businessApplicationOptionsLoading"
-            placeholder="请选择所属业务应用"
-            @change="(value) => handleBusinessApplicationChange(value as string | number | undefined)"
-            @clear="() => handleBusinessApplicationChange(undefined)"
-          >
-            <el-option
-              v-for="item in businessApplicationSelectOptions"
-              :key="item.id"
-              :label="businessApplicationLabel(item)"
-              :value="item.id"
-            />
-          </el-select>
-          <div v-if="selectedBusinessApplicationEnvMismatch" class="business-app-warning">
-            当前选择与环境不一致，保存前请重新选择或清空。
-          </div>
-        </el-form-item>
-
-        <el-divider content-position="left">运维信息</el-divider>
-        <el-form-item label="状态" required>
-          <el-select v-model="editingApp.status" class="w-full">
-            <el-option label="运行中" value="running" />
-            <el-option label="已停止" value="stopped" />
-            <el-option label="维护中" value="maintenance" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="描述">
-          <el-input v-model="editingApp.description" type="textarea" :rows="3" maxlength="300" show-word-limit />
-        </el-form-item>
-      </el-form>
-
-      <CallRelationsEditor
-        ref="callRelationsEditorRef"
-        :resource-id="isEditing ? editingApp.id : undefined"
-        resource-type="application"
-      />
-
-      <DeploymentPanel
-        v-if="Boolean(editingApp.id)"
-        ref="deploymentPanelRef"
-        :resource-id="editingApp.id!"
-        resource-type="application"
-        :resource-persisted="isEditing"
-        :default-port="editingApp.port"
-      />
-
-      <template #footer>
-        <el-button @click="drawerVisible = false">取消</el-button>
-        <el-button type="primary" :loading="saveLoading" @click="handleSave">保存</el-button>
-      </template>
-    </el-dialog>
+    <ApplicationEditorDialog
+      v-model="editorVisible"
+      :mode="editorMode"
+      :initial-draft="editorInitialDraft"
+      @saved="handleEditorSaved"
+    />
   </div>
 </template>
 

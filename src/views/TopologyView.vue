@@ -5,9 +5,18 @@ import TopologyCanvas from "@/components/topology/TopologyCanvas.vue";
 import TopologyControlBar from "@/components/topology/TopologyControlBar.vue";
 import TopologyDetailPanel from "@/components/topology/TopologyDetailPanel.vue";
 import { getTopologyEvidenceV3, getTopologyImpactV3, getTopologyPathsV3 } from "@/api/topologyV3";
+import { getApplication } from "@/api/applications";
+import { getMiddleware } from "@/api/middlewares";
+import { getNginxConfig } from "@/api/nginx-configs";
 import { useTopologyStore } from "@/stores/topology";
+import ApplicationEditorDialog from "@/components/resource-editors/ApplicationEditorDialog.vue";
+import MiddlewareEditorDialog from "@/components/resource-editors/MiddlewareEditorDialog.vue";
+import NginxConfigEditorDialog from "@/components/resource-editors/NginxConfigEditorDialog.vue";
 import type {
+  Application,
   ImpactResult,
+  Middleware,
+  NginxConfig,
   PathResult,
   TopologyNode,
   TopologyTaskViewMode,
@@ -55,6 +64,12 @@ const pathTraceHint = ref("");
 const contextMenuVisible = ref(false);
 const contextMenuPos = ref({ x: 0, y: 0 });
 const contextMenuNode = ref<TopologyNode | null>(null);
+const applicationEditorVisible = ref(false);
+const middlewareEditorVisible = ref(false);
+const nginxEditorVisible = ref(false);
+const applicationEditorDraft = ref<Partial<Application>>({});
+const middlewareEditorDraft = ref<Partial<Middleware>>({});
+const nginxEditorDraft = ref<Partial<NginxConfig>>({});
 
 const isFullscreen = ref(false);
 const focusNeighborhoodEnabled = ref(true);
@@ -218,6 +233,84 @@ function handleContextMenu(payload: { node: TopologyNode; x: number; y: number }
 
 function closeContextMenu() {
   contextMenuVisible.value = false;
+}
+
+function closeNodeEditors() {
+  applicationEditorVisible.value = false;
+  middlewareEditorVisible.value = false;
+  nginxEditorVisible.value = false;
+}
+
+function resolveEnvLabel(env: string) {
+  return ({ prod: "生产", dev: "开发", test: "测试" } as Record<string, string>)[env] || env;
+}
+
+async function handleEditNode() {
+  const node = contextMenuNode.value;
+  closeContextMenu();
+  if (!node) return;
+  if (isExternalNode(node)) {
+    ElMessage.info("外部节点仅用于展示跨环境依赖，不支持编辑");
+    return;
+  }
+
+  closeNodeEditors();
+
+  try {
+    if (node.node_type === "application") {
+      const detail = await getApplication(node.id);
+      applicationEditorDraft.value = {
+        ...detail,
+        owners: Array.isArray(detail.owners) ? [...detail.owners] : detail.owners,
+      };
+      applicationEditorVisible.value = true;
+      return;
+    }
+
+    if (node.node_type === "middleware") {
+      const detail = await getMiddleware(node.id);
+      middlewareEditorDraft.value = { ...detail };
+      middlewareEditorVisible.value = true;
+      return;
+    }
+
+    if (node.node_type === "nginx") {
+      const detail = await getNginxConfig(node.id);
+      nginxEditorDraft.value = {
+        ...detail,
+        endpoints: Array.isArray(detail.endpoints) ? detail.endpoints.map((item) => ({ ...item })) : detail.endpoints,
+      };
+      nginxEditorVisible.value = true;
+    }
+  } catch {
+    // error shown by tauriInvoke
+  }
+}
+
+async function handleNodeEditorSaved(payload: { id: string }) {
+  await loadData();
+  const refreshedNode = rawGraphData.value?.nodes.find((node) => node.id === payload.id) || null;
+  if (!refreshedNode) {
+    if (selectedNode.value?.id === payload.id) {
+      handlePanelClose();
+    }
+    return;
+  }
+
+  if (activeFilter.value.env !== refreshedNode.env) {
+    if (selectedNode.value?.id === payload.id) {
+      handlePanelClose();
+    }
+    ElMessage.info(`节点已迁移到${resolveEnvLabel(refreshedNode.env)}环境，当前筛选下不可见`);
+    return;
+  }
+
+  if (selectedNode.value?.id === payload.id) {
+    selectedNode.value = refreshedNode;
+    if (panelMode.value === "detail") {
+      void loadEvidenceForNode(refreshedNode, true);
+    }
+  }
 }
 
 function startPathTrace() {
@@ -533,6 +626,9 @@ onBeforeUnmount(() => {
         :style="{ left: contextMenuPos.x + 'px', top: contextMenuPos.y + 'px' }"
         @click.stop
       >
+        <div data-testid="context-edit" class="context-menu-item" @click="handleEditNode">
+          编辑
+        </div>
         <div data-testid="context-path-trace" class="context-menu-item" @click="startPathTrace">
           路径追踪（从此节点出发）
         </div>
@@ -541,6 +637,25 @@ onBeforeUnmount(() => {
         </div>
       </div>
     </teleport>
+
+    <ApplicationEditorDialog
+      v-model="applicationEditorVisible"
+      mode="edit"
+      :initial-draft="applicationEditorDraft"
+      @saved="handleNodeEditorSaved"
+    />
+    <MiddlewareEditorDialog
+      v-model="middlewareEditorVisible"
+      mode="edit"
+      :initial-draft="middlewareEditorDraft"
+      @saved="handleNodeEditorSaved"
+    />
+    <NginxConfigEditorDialog
+      v-model="nginxEditorVisible"
+      mode="edit"
+      :initial-draft="nginxEditorDraft"
+      @saved="handleNodeEditorSaved"
+    />
   </div>
 </template>
 

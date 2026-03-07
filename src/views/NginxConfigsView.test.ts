@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { defineComponent, h, inject, provide } from "vue";
 import { flushPromises, mount } from "@vue/test-utils";
-import MiddlewaresView from "@/views/MiddlewaresView.vue";
-import { listMiddlewares } from "@/api/middlewares";
+import NginxConfigsView from "@/views/NginxConfigsView.vue";
+import { listNginxConfigs } from "@/api/nginx-configs";
 
 const editorState = vi.hoisted(() => ({
   visible: false,
@@ -10,16 +10,15 @@ const editorState = vi.hoisted(() => ({
   initialDraft: {} as Record<string, unknown>,
 }));
 
-vi.mock("@/api/middlewares", () => ({
-  listMiddlewares: vi.fn(async () => ({
+vi.mock("@/api/nginx-configs", () => ({
+  listNginxConfigs: vi.fn(async () => ({
     data: [{
-      id: "mw-1",
-      name: "redis-main",
-      category: "cache",
-      type: "Redis",
-      address: "10.0.0.8",
-      port: 6379,
+      id: "ng-1",
+      name: "网关入口",
+      endpoints: [{ host: "10.0.0.8", port: 80 }],
+      strategy: "roundrobin",
       env: "prod",
+      status: "running",
       created_at: "",
       updated_at: "",
     }],
@@ -27,7 +26,7 @@ vi.mock("@/api/middlewares", () => ({
     page: 1,
     page_size: 20,
   })),
-  deleteMiddleware: vi.fn(async () => undefined),
+  deleteNginxConfig: vi.fn(async () => undefined),
 }));
 
 const tableDataKey = Symbol("tableDataKey");
@@ -82,8 +81,8 @@ const ElTableColumnStub = defineComponent({
   },
 });
 
-const MiddlewareEditorDialogStub = defineComponent({
-  name: "MiddlewareEditorDialog",
+const NginxConfigEditorDialogStub = defineComponent({
+  name: "NginxConfigEditorDialog",
   props: {
     modelValue: {
       type: Boolean,
@@ -104,10 +103,10 @@ const MiddlewareEditorDialogStub = defineComponent({
       editorState.visible = props.modelValue;
       editorState.mode = props.mode;
       editorState.initialDraft = props.initialDraft as Record<string, unknown>;
-      return h("div", { "data-testid": "middleware-editor-dialog" }, [
+      return h("div", { "data-testid": "nginx-editor-dialog" }, [
         h("button", {
           "data-testid": "emit-editor-saved",
-          onClick: () => emit("saved", { id: "mw-1", mode: props.mode }),
+          onClick: () => emit("saved", { id: "ng-1", mode: props.mode }),
         }, "emit-editor-saved"),
       ]);
     };
@@ -119,7 +118,7 @@ const PassThroughStub = defineComponent({
 });
 
 function mountView() {
-  return mount(MiddlewaresView, {
+  return mount(NginxConfigsView, {
     global: {
       stubs: {
         SearchToolbar: SearchToolbarStub,
@@ -128,7 +127,7 @@ function mountView() {
         ElTableColumn: ElTableColumnStub,
         ElTag: PassThroughStub,
         ElPagination: PassThroughStub,
-        MiddlewareEditorDialog: MiddlewareEditorDialogStub,
+        NginxConfigEditorDialog: NginxConfigEditorDialogStub,
       },
       directives: {
         loading: () => undefined,
@@ -141,7 +140,7 @@ function findButtonByText(wrapper: ReturnType<typeof mount>, text: string) {
   return wrapper.findAll("button").find((item) => item.text().trim() === text);
 }
 
-describe("MiddlewaresView", () => {
+describe("NginxConfigsView", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     editorState.visible = false;
@@ -153,13 +152,13 @@ describe("MiddlewaresView", () => {
     const wrapper = mountView();
     await flushPromises();
 
-    const addButton = findButtonByText(wrapper, "新增中间件");
+    const addButton = findButtonByText(wrapper, "新增配置");
     expect(addButton).toBeDefined();
     await addButton!.trigger("click");
 
     expect(editorState.visible).toBe(true);
     expect(editorState.mode).toBe("create");
-    expect(String(editorState.initialDraft.id || "")).toMatch(/^mw-/);
+    expect(editorState.initialDraft.status).toBe("running");
   });
 
   it("opens edit editor when clicking edit button", async () => {
@@ -172,10 +171,10 @@ describe("MiddlewaresView", () => {
 
     expect(editorState.visible).toBe(true);
     expect(editorState.mode).toBe("edit");
-    expect(editorState.initialDraft.id).toBe("mw-1");
+    expect(editorState.initialDraft.id).toBe("ng-1");
   });
 
-  it("opens copy editor with a new id when clicking copy button", async () => {
+  it("opens copy editor with copied draft when clicking copy button", async () => {
     const wrapper = mountView();
     await flushPromises();
 
@@ -185,21 +184,21 @@ describe("MiddlewaresView", () => {
 
     expect(editorState.visible).toBe(true);
     expect(editorState.mode).toBe("copy");
-    expect(editorState.initialDraft.id).not.toBe("mw-1");
+    expect(editorState.initialDraft.id).toBeUndefined();
     expect(String(editorState.initialDraft.name || "")).toContain("副本-");
   });
 
   it("refreshes list after editor emits saved", async () => {
     const wrapper = mountView();
     await flushPromises();
-    expect(vi.mocked(listMiddlewares)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(listNginxConfigs)).toHaveBeenCalledTimes(1);
 
-    const addButton = findButtonByText(wrapper, "新增中间件");
+    const addButton = findButtonByText(wrapper, "新增配置");
     expect(addButton).toBeDefined();
     await addButton!.trigger("click");
     await wrapper.get('[data-testid="emit-editor-saved"]').trigger("click");
     await flushPromises();
 
-    expect(vi.mocked(listMiddlewares)).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(listNginxConfigs)).toHaveBeenCalledTimes(2);
   });
 });

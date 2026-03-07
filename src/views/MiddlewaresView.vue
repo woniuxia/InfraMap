@@ -1,23 +1,19 @@
 <script setup lang="ts">
-import { computed, ref, onMounted, watch } from "vue";
-import { ElMessage } from "element-plus";
+import { ref, onMounted } from "vue";
 import type { Middleware } from "@/types";
 import type { SearchFieldConfig, SearchToolbarQueryPayload } from "@/types/searchToolbar";
-import { listMiddlewares, saveMiddleware, deleteMiddleware } from "@/api/middlewares";
-import { replaceResourceCallRelations } from "@/api/call-relations";
-import { saveDeployment } from "@/api/deployments";
+import { listMiddlewares, deleteMiddleware } from "@/api/middlewares";
 import { useResourceList } from "@/composables/useResourceList";
 import {
   MIDDLEWARE_CATEGORY_OPTIONS,
   getMiddlewareCategoryLabel,
-  getMiddlewareDefaultPort,
   getMiddlewareIconByType,
-  getMiddlewareTypeOptionsWithIcon,
 } from "@/utils/middlewareCatalog";
 import { buildMiddlewareCopyDraft } from "@/utils/resourceCopy";
 import SearchToolbar from "@/components/filters/SearchToolbar.vue";
-import CallRelationsEditor from "@/components/CallRelationsEditor.vue";
-import DeploymentPanel from "@/components/DeploymentPanel.vue";
+import MiddlewareEditorDialog from "@/components/resource-editors/MiddlewareEditorDialog.vue";
+
+type MiddlewareEditorMode = "create" | "edit" | "copy";
 
 const {
   loading,
@@ -36,20 +32,9 @@ const {
 });
 
 const searchText = ref("");
-const drawerVisible = ref(false);
-const editingMw = ref<Partial<Middleware>>({});
-const isEditing = ref(false);
-const saveLoading = ref(false);
-const autoFilledPort = ref<number | undefined>(undefined);
-const callRelationsEditorRef = ref<InstanceType<typeof CallRelationsEditor> | null>(null);
-interface DraftDeploymentItem {
-  host_id: string;
-  port?: number;
-}
-interface DeploymentPanelExposed {
-  getDraftDeployments: () => DraftDeploymentItem[];
-}
-const deploymentPanelRef = ref<DeploymentPanelExposed | null>(null);
+const editorVisible = ref(false);
+const editorMode = ref<MiddlewareEditorMode>("create");
+const editorInitialDraft = ref<Partial<Middleware>>({});
 
 interface MiddlewareListFilters {
   category: string[];
@@ -65,10 +50,6 @@ function createDefaultFilters(): MiddlewareListFilters {
 
 const listFilters = ref<MiddlewareListFilters>(createDefaultFilters());
 const categoryOptions = MIDDLEWARE_CATEGORY_OPTIONS;
-
-const middlewareTypeOptionsWithIcon = computed(() =>
-  getMiddlewareTypeOptionsWithIcon(editingMw.value.category, editingMw.value.type)
-);
 
 const envOptions = [
   { label: "生产", value: "prod" },
@@ -107,86 +88,34 @@ function generateDraftMiddlewareId() {
 }
 
 function openAdd() {
-  autoFilledPort.value = undefined;
-  editingMw.value = {
+  editorInitialDraft.value = {
     id: generateDraftMiddlewareId(),
     env: "prod",
     category: "database",
     created_at: "",
     updated_at: "",
   };
-  isEditing.value = false;
-  drawerVisible.value = true;
+  editorMode.value = "create";
+  editorVisible.value = true;
 }
 
 function openEdit(row: Middleware) {
-  autoFilledPort.value = undefined;
-  editingMw.value = { ...row };
-  isEditing.value = true;
-  drawerVisible.value = true;
+  editorInitialDraft.value = { ...row };
+  editorMode.value = "edit";
+  editorVisible.value = true;
 }
 
 function openCopy(row: Middleware) {
-  autoFilledPort.value = undefined;
-  editingMw.value = {
+  editorInitialDraft.value = {
     ...buildMiddlewareCopyDraft(row),
     id: generateDraftMiddlewareId(),
   };
-  isEditing.value = false;
-  drawerVisible.value = true;
+  editorMode.value = "copy";
+  editorVisible.value = true;
 }
 
-async function handleSave() {
-  const draftItems = callRelationsEditorRef.value?.getDraftItems();
-  if (draftItems === null) {
-    return;
-  }
-
-  const wasEditing = isEditing.value;
-  const draftDeployments = !wasEditing ? deploymentPanelRef.value?.getDraftDeployments?.() ?? [] : [];
-  const payload: Partial<Middleware> = {
-    id: "",
-    created_at: "",
-    updated_at: "",
-    ...editingMw.value,
-  };
-  saveLoading.value = true;
-  try {
-    const middlewareId = await saveMiddleware(payload);
-    try {
-      await replaceResourceCallRelations({
-        resource_id: middlewareId,
-        resource_type: "middleware",
-        items: draftItems ?? [],
-      });
-    } catch {
-      ElMessage.warning("中间件已保存，调用关系保存失败，请重新编辑后重试。");
-    }
-    if (!wasEditing && draftDeployments.length > 0) {
-      try {
-        await Promise.all(
-          draftDeployments.map((item) =>
-            saveDeployment({
-              id: "",
-              resource_id: middlewareId,
-              resource_type: "middleware",
-              host_id: item.host_id,
-              port: item.port,
-            })
-          )
-        );
-      } catch {
-        ElMessage.warning("中间件已保存，部署关系保存失败，请在部署关系中重试。");
-      }
-    }
-    ElMessage.success(wasEditing ? "更新成功" : "创建成功");
-    drawerVisible.value = false;
-    fetchData();
-  } catch {
-    // error shown by tauriInvoke
-  } finally {
-    saveLoading.value = false;
-  }
+function handleEditorSaved() {
+  fetchData();
 }
 
 function categoryLabel(category: string) {
@@ -206,25 +135,6 @@ function middlewareTypeIconAlt(row: Pick<Middleware, "category" | "type">): stri
   return getMiddlewareIconByType(row.type, row.category).alt;
 }
 
-function middlewareTypeSlotValue(value: unknown): string {
-  if (typeof value === "string") return value;
-  if (typeof value === "number") return String(value);
-  return "";
-}
-
-function middlewareTypeLabelBySlot(label: unknown, value: unknown): string {
-  if (typeof label === "string" && label.trim().length > 0) return label;
-  return middlewareTypeLabel(middlewareTypeSlotValue(value));
-}
-
-function middlewareTypeIconSrcBySlot(value: unknown): string {
-  return getMiddlewareIconByType(middlewareTypeSlotValue(value), editingMw.value.category).src;
-}
-
-function middlewareTypeIconAltBySlot(value: unknown): string {
-  return getMiddlewareIconByType(middlewareTypeSlotValue(value), editingMw.value.category).alt;
-}
-
 function envLabel(env: string) {
   return ({ prod: "生产", dev: "开发", test: "测试" } as Record<string, string>)[env] || env;
 }
@@ -239,19 +149,6 @@ function envTagType(env: string): "primary" | "success" | "warning" | "info" | "
 }
 
 onMounted(() => fetchData());
-
-watch(
-  () => editingMw.value.type,
-  (newType) => {
-    const defaultPort = getMiddlewareDefaultPort(newType);
-    if (!defaultPort) return;
-    const currentPort = editingMw.value.port;
-    if (currentPort == null || currentPort === autoFilledPort.value) {
-      editingMw.value.port = defaultPort;
-      autoFilledPort.value = defaultPort;
-    }
-  }
-);
 </script>
 
 <template>
@@ -315,108 +212,12 @@ watch(
       />
     </div>
 
-    <el-dialog
-      v-model="drawerVisible"
-      :title="isEditing ? '编辑中间件' : '新增中间件'"
-      width="700px"
-      align-center
-      destroy-on-close
-    >
-      <el-form :model="editingMw" label-width="96px">
-        <el-divider content-position="left">基础信息</el-divider>
-        <el-form-item label="实例名称" required>
-          <el-input v-model="editingMw.name" placeholder="请输入实例名称" />
-        </el-form-item>
-        <el-form-item label="分类" required>
-          <el-select v-model="editingMw.category" class="w-full">
-            <el-option
-              v-for="option in categoryOptions"
-              :key="option.value"
-              :label="option.label"
-              :value="option.value"
-            />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="类型" required>
-          <el-select
-            v-model="editingMw.type"
-            class="w-full"
-            filterable
-            allow-create
-            default-first-option
-            clearable
-            placeholder="可选择常用类型或手动输入"
-          >
-            <template #label="{ label, value }">
-              <div class="middleware-type-option middleware-type-selected">
-                <img
-                  :src="middlewareTypeIconSrcBySlot(value)"
-                  :alt="middlewareTypeIconAltBySlot(value)"
-                  class="middleware-type-option-icon"
-                />
-                <span>{{ middlewareTypeLabelBySlot(label, value) }}</span>
-              </div>
-            </template>
-            <el-option
-              v-for="option in middlewareTypeOptionsWithIcon"
-              :key="option.value"
-              :label="option.label"
-              :value="option.value"
-            >
-              <div class="middleware-type-option">
-                <img :src="option.icon.src" :alt="option.icon.alt" class="middleware-type-option-icon" />
-                <span>{{ option.label }}</span>
-              </div>
-            </el-option>
-          </el-select>
-        </el-form-item>
-        <el-form-item label="连接地址" required>
-          <el-input v-model="editingMw.address" placeholder="如 192.168.1.100" />
-        </el-form-item>
-        <el-form-item label="端口">
-          <el-input-number v-model="editingMw.port" :min="1" :max="65535" class="w-full" />
-        </el-form-item>
-
-        <el-divider content-position="left">实例信息</el-divider>
-        <el-form-item label="版本">
-          <el-input v-model="editingMw.version" placeholder="如 8.0.33" />
-        </el-form-item>
-        <el-form-item label="环境" required>
-          <el-select v-model="editingMw.env" class="w-full">
-            <el-option label="生产" value="prod" />
-            <el-option label="开发" value="dev" />
-            <el-option label="测试" value="test" />
-          </el-select>
-        </el-form-item>
-
-        <el-divider content-position="left">运维信息</el-divider>
-        <el-form-item label="描述">
-          <el-input v-model="editingMw.description" type="textarea" :rows="3" maxlength="300" show-word-limit />
-        </el-form-item>
-      </el-form>
-
-      <CallRelationsEditor
-        ref="callRelationsEditorRef"
-        :resource-id="isEditing ? editingMw.id : undefined"
-        resource-type="middleware"
-      />
-
-      <DeploymentPanel
-        v-if="Boolean(editingMw.id)"
-        ref="deploymentPanelRef"
-        :resource-id="editingMw.id!"
-        resource-type="middleware"
-        :resource-persisted="isEditing"
-        :resource-address="editingMw.address"
-        :resource-env="editingMw.env"
-        :default-port="editingMw.port"
-      />
-
-      <template #footer>
-        <el-button @click="drawerVisible = false">取消</el-button>
-        <el-button type="primary" :loading="saveLoading" @click="handleSave">保存</el-button>
-      </template>
-    </el-dialog>
+    <MiddlewareEditorDialog
+      v-model="editorVisible"
+      :mode="editorMode"
+      :initial-draft="editorInitialDraft"
+      @saved="handleEditorSaved"
+    />
   </div>
 </template>
 
@@ -553,4 +354,3 @@ watch(
   border-radius: 4px;
 }
 </style>
-

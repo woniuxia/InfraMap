@@ -12,6 +12,9 @@ const {
   getTopologyPathsV3Mock,
   getTopologyImpactV3Mock,
   getTopologyEvidenceV3Mock,
+  getApplicationMock,
+  getMiddlewareMock,
+  getNginxConfigMock,
   highlightSearchMock,
   clearHighlightMock,
   highlightPathsMock,
@@ -37,6 +40,34 @@ const {
   getTopologyEvidenceV3Mock: vi.fn(async () => ({
     items: [],
     total: 0,
+  })),
+  getApplicationMock: vi.fn(async () => ({
+    id: "node-1",
+    name: "订单服务",
+    type: "backend",
+    env: "prod",
+    status: "running",
+    created_at: "",
+    updated_at: "",
+  })),
+  getMiddlewareMock: vi.fn(async () => ({
+    id: "mw-1",
+    name: "redis-main",
+    category: "cache",
+    type: "redis",
+    address: "10.0.0.1",
+    env: "prod",
+    created_at: "",
+    updated_at: "",
+  })),
+  getNginxConfigMock: vi.fn(async () => ({
+    id: "ng-1",
+    name: "nginx-main",
+    endpoints: [{ host: "10.0.0.2", port: 80 }],
+    env: "prod",
+    status: "running",
+    created_at: "",
+    updated_at: "",
   })),
   highlightSearchMock: vi.fn(),
   clearHighlightMock: vi.fn(),
@@ -115,6 +146,18 @@ vi.mock("@/api/topologyV3", () => ({
   getTopologyPathsV3: getTopologyPathsV3Mock,
   getTopologyImpactV3: getTopologyImpactV3Mock,
   getTopologyEvidenceV3: getTopologyEvidenceV3Mock,
+}));
+
+vi.mock("@/api/applications", () => ({
+  getApplication: getApplicationMock,
+}));
+
+vi.mock("@/api/middlewares", () => ({
+  getMiddleware: getMiddlewareMock,
+}));
+
+vi.mock("@/api/nginx-configs", () => ({
+  getNginxConfig: getNginxConfigMock,
 }));
 
 const TopologyControlBarStub = defineComponent({
@@ -216,6 +259,34 @@ const TopologyDetailPanelStub = defineComponent({
   template: `<div data-testid="detail-panel" />`,
 });
 
+const ApplicationEditorDialogStub = defineComponent({
+  name: "ApplicationEditorDialog",
+  props: {
+    modelValue: {
+      type: Boolean,
+      default: false,
+    },
+  },
+  emits: ["saved", "update:modelValue"],
+  template: `
+    <div v-if="modelValue" data-testid="application-editor-dialog">
+      <button data-testid="emit-application-editor-saved" @click="$emit('saved', { id: 'node-1', mode: 'edit' })">
+        emit-application-editor-saved
+      </button>
+    </div>
+  `,
+});
+
+const MiddlewareEditorDialogStub = defineComponent({
+  name: "MiddlewareEditorDialog",
+  template: `<div data-testid="middleware-editor-dialog" />`,
+});
+
+const NginxConfigEditorDialogStub = defineComponent({
+  name: "NginxConfigEditorDialog",
+  template: `<div data-testid="nginx-editor-dialog" />`,
+});
+
 function mountView(options?: {
   taskInsights?: Array<{ kind: string; title: string; severity?: "info" | "warning" | "critical"; nodeIds?: string[] }>;
 }) {
@@ -229,6 +300,9 @@ function mountView(options?: {
   getTopologyPathsV3Mock.mockClear();
   getTopologyImpactV3Mock.mockClear();
   getTopologyEvidenceV3Mock.mockClear();
+  getApplicationMock.mockClear();
+  getMiddlewareMock.mockClear();
+  getNginxConfigMock.mockClear();
   highlightSearchMock.mockClear();
   clearHighlightMock.mockClear();
   highlightPathsMock.mockClear();
@@ -242,6 +316,9 @@ function mountView(options?: {
         TopologyLegend: TopologyLegendStub,
         TopologyCanvas: TopologyCanvasStub,
         TopologyDetailPanel: TopologyDetailPanelStub,
+        ApplicationEditorDialog: ApplicationEditorDialogStub,
+        MiddlewareEditorDialog: MiddlewareEditorDialogStub,
+        NginxConfigEditorDialog: NginxConfigEditorDialogStub,
         ElButton: true,
         ElEmpty: true,
         Teleport: true,
@@ -362,6 +439,25 @@ describe("TopologyView", () => {
       total_count: 0,
       max_depth: 0,
     });
+  });
+
+  it("opens editor from context menu and refreshes topology after save", async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(fetchGraphMock).toHaveBeenCalledTimes(1);
+
+    await wrapper.get('[data-testid="emit-node-contextmenu"]').trigger("click");
+    await wrapper.get('[data-testid="context-edit"]').trigger("click");
+    await flushPromises();
+
+    expect(getApplicationMock).toHaveBeenCalledWith("node-1");
+    expect(wrapper.find('[data-testid="application-editor-dialog"]').exists()).toBe(true);
+
+    await wrapper.get('[data-testid="emit-application-editor-saved"]').trigger("click");
+    await flushPromises();
+
+    expect(fetchGraphMock).toHaveBeenCalledTimes(2);
   });
 
   it("highlights related nodes when task insight chip is clicked", async () => {

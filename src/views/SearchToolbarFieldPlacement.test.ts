@@ -81,14 +81,15 @@ describe("search toolbar field placement", () => {
           ElDivider: PassThroughStub,
           ElInput: PassThroughStub,
           ElInputNumber: PassThroughStub,
-          ElSelect: PassThroughStub,
-          ElOption: PassThroughStub,
-          CallRelationsEditor: PassThroughStub,
-          DeploymentPanel: PassThroughStub,
-        },
-        directives: {
-          loading: () => undefined,
-        },
+        ElSelect: PassThroughStub,
+        ElOption: PassThroughStub,
+        CallRelationsEditor: PassThroughStub,
+        DeploymentPanel: PassThroughStub,
+        ApplicationEditorDialog: PassThroughStub,
+      },
+      directives: {
+        loading: () => undefined,
+      },
       },
     });
 
@@ -114,14 +115,15 @@ describe("search toolbar field placement", () => {
           ElDivider: PassThroughStub,
           ElInput: PassThroughStub,
           ElInputNumber: PassThroughStub,
-          ElSelect: PassThroughStub,
-          ElOption: PassThroughStub,
-          CallRelationsEditor: PassThroughStub,
-          DeploymentPanel: PassThroughStub,
-        },
-        directives: {
-          loading: () => undefined,
-        },
+        ElSelect: PassThroughStub,
+        ElOption: PassThroughStub,
+        CallRelationsEditor: PassThroughStub,
+        DeploymentPanel: PassThroughStub,
+        NginxConfigEditorDialog: PassThroughStub,
+      },
+      directives: {
+        loading: () => undefined,
+      },
       },
     });
 
@@ -131,4 +133,3 @@ describe("search toolbar field placement", () => {
     expect(strategyField?.section ?? "basic").toBe("basic");
   });
 });
-
