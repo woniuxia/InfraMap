@@ -1496,6 +1496,32 @@ pub fn get_topology_evidence_v3(
         .map_err(|e| AppError::from_db_error(command, "collect topology evidence v3", e))
 }
 
+#[tauri::command]
+pub fn get_topology_drilldown_v3(
+    pool: State<DbPool>,
+    query: TopologyDrilldownQuery,
+) -> AppResult<TopologyDrilldown> {
+    let command = "get_topology_drilldown_v3";
+    let conn = pool
+        .get()
+        .map_err(|e| AppError::db_unavailable(command, format!("Pool error: {e}")))?;
+    get_topology_drilldown_v3_inner(&conn, &query)
+        .map_err(|e| AppError::from_db_error(command, "build topology drilldown v3", e))
+}
+
+#[tauri::command]
+pub fn get_topology_troubleshoot_report_v3(
+    pool: State<DbPool>,
+    query: TopologyTroubleshootReportV3Query,
+) -> AppResult<TopologyTroubleshootReportV3> {
+    let command = "get_topology_troubleshoot_report_v3";
+    let conn = pool
+        .get()
+        .map_err(|e| AppError::db_unavailable(command, format!("Pool error: {e}")))?;
+    get_topology_troubleshoot_report_v3_inner(&conn, &query)
+        .map_err(|e| AppError::from_db_error(command, "build topology troubleshoot report v3", e))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -11,18 +11,22 @@ vi.mock("element-plus", () => ({
 }));
 
 import {
-  getTopologySnapshot,
-  getTopologyTaskView,
-  getTopologyPaths,
-  getTopologyImpact,
-  getTopologyEvidence,
-} from "@/api/topology";
+  getTopologySnapshotV3,
+  getTopologyDrilldownV3,
+  getTopologyTaskViewV3,
+  getTopologyPathsV3,
+  getTopologyImpactV3,
+  getTopologyEvidenceV3,
+  getTopologyTroubleshootReportV3,
+} from "@/api/topologyV3";
 import type {
-  TopologyEvidenceQuery,
-  TopologyImpactQuery,
-  TopologyPathsQuery,
-  TopologySnapshotQuery,
-  TopologyTaskViewQuery,
+  TopologyV3DrilldownQuery,
+  TopologyV3EvidenceQuery,
+  TopologyV3ImpactQuery,
+  TopologyV3PathsQuery,
+  TopologyV3SnapshotQuery,
+  TopologyV3TaskViewQuery,
+  TopologyV3TroubleshootReportQuery,
 } from "@/types";
 
 describe("topology API", () => {
@@ -171,7 +175,36 @@ describe("topology API", () => {
       return mockResult;
     });
 
-    const result = await getTopologyEvidence(query);
+    const result = await getTopologyEvidenceV3(query);
+    expect(result).toEqual(mockResult);
+  });
+
+  it("getTopologyTroubleshootReportV3 should invoke get_topology_troubleshoot_report_v3", async () => {
+    const query: TopologyV3TroubleshootReportQuery = {
+      nodeId: "node-1",
+      taskView: "troubleshoot",
+      evidenceLimit: 10,
+    };
+    const mockResult = {
+      node: { id: "node-1", name: "订单服务", env: "prod" },
+      summary: {
+        inboundEdgeCount: 2,
+        outboundEdgeCount: 1,
+        deploymentCount: 1,
+        recentAuditCount: 1,
+        statusSeverity: "warning",
+      },
+      upstream: [],
+      downstream: [],
+      evidence: { items: [], total: 0 },
+      insights: [],
+    };
+    __setMockHandler("get_topology_troubleshoot_report_v3", (_cmd, args) => {
+      expect(args).toEqual({ query });
+      return mockResult;
+    });
+
+    const result = await getTopologyTroubleshootReportV3(query);
     expect(result).toEqual(mockResult);
   });
 });

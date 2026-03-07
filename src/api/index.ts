@@ -10,6 +10,7 @@ export * from "./call-relations";
 export * from "./dashboard";
 export * from "./audit-logs";
 export * from "./topology";
+export * from "./topologyV3";
 export * from "./settings";
 export * from "./taxonomy";
 export * from "./import-jobs";
