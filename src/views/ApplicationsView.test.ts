@@ -105,10 +105,14 @@ const ApplicationEditorDialogStub = defineComponent({
       editorState.mode = props.mode;
       editorState.initialDraft = props.initialDraft as Record<string, unknown>;
       return h("div", { "data-testid": "application-editor-dialog" }, [
-        h("button", {
-          "data-testid": "emit-editor-saved",
-          onClick: () => emit("saved", { id: "app-1", mode: props.mode }),
-        }, "emit-editor-saved"),
+        h(
+          "button",
+          {
+            "data-testid": "emit-editor-saved",
+            onClick: () => emit("saved", { id: "app-1", mode: props.mode }),
+          },
+          "emit-editor-saved"
+        ),
       ]);
     };
   },
@@ -176,6 +180,56 @@ describe("ApplicationsView", () => {
     expect(editorState.initialDraft.id).toBe("app-1");
   });
 
+  it("does not render owner tags when owners are missing", async () => {
+    vi.mocked(listApplications).mockResolvedValueOnce({
+      data: [{
+        id: "app-empty-owners",
+        name: "empty-owners-app",
+        type: "backend",
+        env: "prod",
+        status: "running",
+        created_at: "",
+        updated_at: "",
+      }],
+      total: 1,
+      page: 1,
+      page_size: 20,
+    });
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(wrapper.text()).not.toContain("alice");
+  });
+
+  it("opens edit editor with owners preserved", async () => {
+    vi.mocked(listApplications).mockResolvedValueOnce({
+      data: [{
+        id: "app-edit-owners",
+        name: "edit-owners-app",
+        type: "backend",
+        env: "prod",
+        status: "running",
+        owners: ["alice", "bob"],
+        created_at: "",
+        updated_at: "",
+      }],
+      total: 1,
+      page: 1,
+      page_size: 20,
+    });
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    const editButton = findButtonByText(wrapper, "编辑");
+    expect(editButton).toBeDefined();
+    await editButton!.trigger("click");
+
+    expect(editorState.mode).toBe("edit");
+    expect(editorState.initialDraft.owners).toEqual(["alice", "bob"]);
+  });
+
   it("opens copy editor with a new id when clicking copy button", async () => {
     const wrapper = mountView();
     await flushPromises();
@@ -187,7 +241,7 @@ describe("ApplicationsView", () => {
     expect(editorState.visible).toBe(true);
     expect(editorState.mode).toBe("copy");
     expect(editorState.initialDraft.id).not.toBe("app-1");
-    expect(String(editorState.initialDraft.name || "")).toContain("副本-");
+    expect(String(editorState.initialDraft.name || "")).toContain("副本 ");
   });
 
   it("refreshes list after editor emits saved", async () => {

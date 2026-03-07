@@ -495,7 +495,6 @@ mod tests {
             deploy_mode: None,
             env: "prod".into(),
             git_repo: None,
-            owner: None,
             owners: None,
             business_application_id: None,
             business_application_name: None,

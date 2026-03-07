@@ -1,6 +1,11 @@
+use std::collections::{HashMap, HashSet};
 use tauri::State;
 
 use crate::backup;
+use crate::commands::taxonomy::{
+    parse_tech_stack_terms, rebuild_taxonomy_term_stats, save_resource_terms, FIELD_OWNER,
+    FIELD_TECH_STACK,
+};
 use crate::db::DbPool;
 use crate::error::{AppError, AppResult};
 use crate::models::settings::{
@@ -13,14 +18,14 @@ pub fn create_backup(pool: State<DbPool>, storage_paths: State<StoragePaths>) ->
     let command = "create_backup";
 
     let backup_dir = backup::get_backup_dir(&storage_paths.active_root_path)
-        .map_err(|e| AppError::from_backup_error(command, "创建备份目录", e))?;
+        .map_err(|e| AppError::from_backup_error(command, "create backup directory", e))?;
 
     let now = chrono::Utc::now().format("%Y%m%d_%H%M%S");
     let filename = format!("backup_manual_{}.db", now);
     let dest = backup_dir.join(&filename);
 
     backup::perform_backup(&pool, &dest)
-        .map_err(|e| AppError::from_backup_error(command, "执行备份", e))?;
+        .map_err(|e| AppError::from_backup_error(command, "perform backup", e))?;
 
     let now_rfc = chrono::Utc::now().to_rfc3339();
     let conn = pool
@@ -31,12 +36,12 @@ pub fn create_backup(pool: State<DbPool>, storage_paths: State<StoragePaths>) ->
         "UPDATE system_settings SET last_backup_time = ?1, updated_at = ?2 WHERE id = 'default'",
         rusqlite::params![now_rfc, now_rfc],
     )
-    .map_err(|e| AppError::from_db_error(command, "更新最后备份时间", e))?;
+    .map_err(|e| AppError::from_db_error(command, "update last backup time", e))?;
 
     let (_, _, max_backups, _) = backup::read_backup_settings(&pool)
-        .map_err(|e| AppError::from_backup_error(command, "读取备份策略", e))?;
+        .map_err(|e| AppError::from_backup_error(command, "read backup settings", e))?;
     backup::enforce_max_backups(&backup_dir, max_backups as usize)
-        .map_err(|e| AppError::from_backup_error(command, "清理过期备份", e))?;
+        .map_err(|e| AppError::from_backup_error(command, "cleanup expired backups", e))?;
 
     Ok(filename)
 }
@@ -46,10 +51,10 @@ pub fn list_backups(storage_paths: State<StoragePaths>) -> AppResult<Vec<BackupE
     let command = "list_backups";
 
     let backup_dir = backup::get_backup_dir(&storage_paths.active_root_path)
-        .map_err(|e| AppError::from_backup_error(command, "读取备份目录", e))?;
+        .map_err(|e| AppError::from_backup_error(command, "read backup directory", e))?;
 
     let mut entries: Vec<BackupEntry> = std::fs::read_dir(&backup_dir)
-        .map_err(|e| AppError::from_io_error(command, "读取备份目录", e))?
+        .map_err(|e| AppError::from_io_error(command, "read backup directory", e))?
         .filter_map(|e| e.ok())
         .filter(|e| {
             let name = e.file_name().to_string_lossy().to_string();
@@ -80,18 +85,19 @@ pub fn delete_backup(storage_paths: State<StoragePaths>, filename: String) -> Ap
     validate_filename(&filename).map_err(|e| AppError::validation(command, e))?;
 
     let backup_dir = backup::get_backup_dir(&storage_paths.active_root_path)
-        .map_err(|e| AppError::from_backup_error(command, "读取备份目录", e))?;
+        .map_err(|e| AppError::from_backup_error(command, "read backup directory", e))?;
     let path = backup_dir.join(&filename);
 
     if !path.exists() {
         return Err(AppError::not_found(
             command,
-            "备份文件不存在。",
+            "backup file does not exist",
             Some(filename),
         ));
     }
 
-    std::fs::remove_file(&path).map_err(|e| AppError::from_io_error(command, "删除备份文件", e))?;
+    std::fs::remove_file(&path)
+        .map_err(|e| AppError::from_io_error(command, "delete backup file", e))?;
     Ok(())
 }
 
@@ -105,20 +111,20 @@ pub fn preview_restore(
     validate_filename(&filename).map_err(|e| AppError::validation(command, e))?;
 
     let backup_dir = backup::get_backup_dir(&storage_paths.active_root_path)
-        .map_err(|e| AppError::from_backup_error(command, "读取备份目录", e))?;
+        .map_err(|e| AppError::from_backup_error(command, "read backup directory", e))?;
     let path = backup_dir.join(&filename);
 
     if !path.exists() {
         return Err(AppError::not_found(
             command,
-            "备份文件不存在。",
+            "backup file does not exist",
             Some(filename),
         ));
     }
 
     let conn =
         rusqlite::Connection::open_with_flags(&path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
-            .map_err(|e| AppError::from_backup_error(command, "打开备份文件", e))?;
+            .map_err(|e| AppError::from_backup_error(command, "open backup file", e))?;
 
     let count = |table: &str| -> u64 {
         conn.query_row(
@@ -165,13 +171,13 @@ pub fn restore_backup(
     validate_filename(&filename).map_err(|e| AppError::validation(command, e))?;
 
     let backup_dir = backup::get_backup_dir(&storage_paths.active_root_path)
-        .map_err(|e| AppError::from_backup_error(command, "读取备份目录", e))?;
+        .map_err(|e| AppError::from_backup_error(command, "read backup directory", e))?;
     let source_path = backup_dir.join(&filename);
 
     if !source_path.exists() {
         return Err(AppError::not_found(
             command,
-            "备份文件不存在。",
+            "backup file does not exist",
             Some(filename),
         ));
     }
@@ -180,24 +186,24 @@ pub fn restore_backup(
     let safety_filename = format!("backup_pre_restore_{}.db", now);
     let safety_path = backup_dir.join(&safety_filename);
     backup::perform_backup(&pool, &safety_path)
-        .map_err(|e| AppError::from_backup_error(command, "创建恢复前备份", e))?;
+        .map_err(|e| AppError::from_backup_error(command, "create pre-restore backup", e))?;
 
     let db_path = storage_paths.db_path.clone();
     let src_conn = rusqlite::Connection::open_with_flags(
         &source_path,
         rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
     )
-    .map_err(|e| AppError::from_backup_error(command, "打开备份源数据库", e))?;
+    .map_err(|e| AppError::from_backup_error(command, "open backup source database", e))?;
 
     let mut dst_conn = rusqlite::Connection::open(&db_path)
-        .map_err(|e| AppError::from_backup_error(command, "打开当前数据库", e))?;
+        .map_err(|e| AppError::from_backup_error(command, "open current database", e))?;
 
     let restore = rusqlite::backup::Backup::new(&src_conn, &mut dst_conn)
-        .map_err(|e| AppError::from_backup_error(command, "初始化恢复流程", e))?;
+        .map_err(|e| AppError::from_backup_error(command, "initialize restore flow", e))?;
 
     restore
         .run_to_completion(100, std::time::Duration::from_millis(50), None)
-        .map_err(|e| AppError::from_backup_error(command, "恢复数据库", e))?;
+        .map_err(|e| AppError::from_backup_error(command, "restore database", e))?;
 
     Ok(())
 }
@@ -216,12 +222,11 @@ pub fn export_json(pool: State<DbPool>, filepath: String) -> AppResult<()> {
             [],
             |row| row.get(0),
         )
-        .map_err(|e| AppError::from_db_error(command, "读取 schema 版本", e))?;
+        .map_err(|e| AppError::from_db_error(command, "read schema version", e))?;
 
     let tables = [
         "hosts",
         "applications",
-        "application_owners",
         "middlewares",
         "nginx_configs",
         "deployments",
@@ -231,9 +236,15 @@ pub fn export_json(pool: State<DbPool>, filepath: String) -> AppResult<()> {
 
     for table in &tables {
         let rows = read_table_rows(&conn, table)
-            .map_err(|e| AppError::from_backup_error(command, "读取导出数据", e))?;
+            .map_err(|e| AppError::from_backup_error(command, "read export rows", e))?;
         table_data.push(rows);
     }
+
+    let hosts = table_data.remove(0);
+    let mut applications = table_data.remove(0);
+    let owner_map = load_application_owner_map(&conn)
+        .map_err(|e| AppError::from_backup_error(command, "load application owner terms", e))?;
+    attach_application_owners(&mut applications, &owner_map);
 
     let export = ExportData {
         metadata: ExportMetadata {
@@ -242,9 +253,8 @@ pub fn export_json(pool: State<DbPool>, filepath: String) -> AppResult<()> {
             schema_version,
         },
         data: ExportPayload {
-            hosts: table_data.remove(0),
-            applications: table_data.remove(0),
-            application_owners: table_data.remove(0),
+            hosts,
+            applications,
             middlewares: table_data.remove(0),
             nginx_configs: table_data.remove(0),
             deployments: table_data.remove(0),
@@ -253,9 +263,9 @@ pub fn export_json(pool: State<DbPool>, filepath: String) -> AppResult<()> {
     };
 
     let json = serde_json::to_string_pretty(&export)
-        .map_err(|e| AppError::from_backup_error(command, "序列化导出数据", e))?;
+        .map_err(|e| AppError::from_backup_error(command, "serialize export payload", e))?;
     std::fs::write(&filepath, json)
-        .map_err(|e| AppError::from_io_error(command, "写入导出文件", e))?;
+        .map_err(|e| AppError::from_io_error(command, "write export file", e))?;
 
     Ok(())
 }
@@ -269,16 +279,16 @@ pub fn import_json(
     let command = "import_json";
 
     let backup_dir = backup::get_backup_dir(&storage_paths.active_root_path)
-        .map_err(|e| AppError::from_backup_error(command, "读取备份目录", e))?;
+        .map_err(|e| AppError::from_backup_error(command, "read backup directory", e))?;
 
     let now = chrono::Utc::now().format("%Y%m%d_%H%M%S");
     let safety_filename = format!("backup_pre_import_{}.db", now);
     let safety_path = backup_dir.join(&safety_filename);
     backup::perform_backup(&pool, &safety_path)
-        .map_err(|e| AppError::from_backup_error(command, "创建导入前备份", e))?;
+        .map_err(|e| AppError::from_backup_error(command, "create pre-import backup", e))?;
 
     let content = std::fs::read_to_string(&filepath)
-        .map_err(|e| AppError::from_io_error(command, "读取导入文件", e))?;
+        .map_err(|e| AppError::from_io_error(command, "read import file", e))?;
 
     let export: ExportData = serde_json::from_str(&content)
         .map_err(|e| AppError::validation(command, format!("invalid import json: {}", e)))?;
@@ -288,7 +298,7 @@ pub fn import_json(
         .map_err(|e| AppError::db_unavailable(command, format!("Pool error: {}", e)))?;
 
     conn.execute_batch("BEGIN TRANSACTION;")
-        .map_err(|e| AppError::from_db_error(command, "开启事务", e))?;
+        .map_err(|e| AppError::from_db_error(command, "begin transaction", e))?;
 
     let result: AppResult<ImportResult> = (|| {
         let clear_tables = [
@@ -296,7 +306,6 @@ pub fn import_json(
             "deployments",
             "nginx_configs",
             "middlewares",
-            "application_owners",
             "applications",
             "hosts",
             "audit_logs",
@@ -304,29 +313,35 @@ pub fn import_json(
 
         for table in &clear_tables {
             conn.execute(&format!("DELETE FROM {}", table), [])
-                .map_err(|e| AppError::from_db_error(command, "清空现有数据", e))?;
+                .map_err(|e| AppError::from_db_error(command, "clear existing data", e))?;
         }
 
         let hosts_count = import_table_rows(&conn, "hosts", &export.data.hosts)
-            .map_err(|e| AppError::from_backup_error(command, "导入 hosts", e))?;
-        let apps_count = import_table_rows(&conn, "applications", &export.data.applications)
-            .map_err(|e| AppError::from_backup_error(command, "导入 applications", e))?;
-        let app_owners_count =
-            import_table_rows(&conn, "application_owners", &export.data.application_owners)
-                .map_err(|e| AppError::from_backup_error(command, "导入 application_owners", e))?;
+            .map_err(|e| AppError::from_backup_error(command, "import hosts", e))?;
+        conn.execute("DELETE FROM taxonomy_bindings WHERE resource_type = 'application'", [])
+            .map_err(|e| AppError::from_db_error(command, "clear application taxonomy bindings", e))?;
+        let (application_rows, application_terms) =
+            split_application_rows_for_import(&export.data.applications)
+                .map_err(|e| AppError::from_backup_error(command, "parse applications import payload", e))?;
+        let apps_count = import_table_rows(&conn, "applications", &application_rows)
+            .map_err(|e| AppError::from_backup_error(command, "import applications", e))?;
+        sync_imported_application_terms(&conn, &application_terms)
+            .map_err(|e| AppError::from_backup_error(command, "sync application taxonomy terms", e))?;
         let mw_count = import_table_rows(&conn, "middlewares", &export.data.middlewares)
-            .map_err(|e| AppError::from_backup_error(command, "导入 middlewares", e))?;
+            .map_err(|e| AppError::from_backup_error(command, "import middlewares", e))?;
         let nginx_count = import_table_rows(&conn, "nginx_configs", &export.data.nginx_configs)
-            .map_err(|e| AppError::from_backup_error(command, "导入 nginx_configs", e))?;
+            .map_err(|e| AppError::from_backup_error(command, "import nginx_configs", e))?;
         let dep_count = import_table_rows(&conn, "deployments", &export.data.deployments)
-            .map_err(|e| AppError::from_backup_error(command, "导入 deployments", e))?;
+            .map_err(|e| AppError::from_backup_error(command, "import deployments", e))?;
         let deps_count = import_table_rows(&conn, "call_relations", &export.data.call_relations)
-            .map_err(|e| AppError::from_backup_error(command, "导入 call_relations", e))?;
+            .map_err(|e| AppError::from_backup_error(command, "import call_relations", e))?;
+        let now = chrono::Utc::now().to_rfc3339();
+        rebuild_taxonomy_term_stats(&conn, &now)
+            .map_err(|e| AppError::from_db_error(command, "rebuild taxonomy stats", e))?;
 
         Ok(ImportResult {
             hosts_imported: hosts_count,
             applications_imported: apps_count,
-            application_owners_imported: app_owners_count,
             middlewares_imported: mw_count,
             nginx_configs_imported: nginx_count,
             deployments_imported: dep_count,
@@ -337,7 +352,7 @@ pub fn import_json(
     match result {
         Ok(result) => {
             conn.execute_batch("COMMIT;")
-                .map_err(|e| AppError::from_db_error(command, "提交事务", e))?;
+                .map_err(|e| AppError::from_db_error(command, "commit transaction", e))?;
             Ok(result)
         }
         Err(error) => {
@@ -427,6 +442,141 @@ fn read_table_rows(
         result.push(row.map_err(|e| format!("Row read error in {}: {}", table, e))?);
     }
     Ok(result)
+}
+
+fn load_application_owner_map(
+    conn: &rusqlite::Connection,
+) -> Result<HashMap<String, Vec<String>>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT tb.resource_id, tt.display_name
+             FROM taxonomy_bindings tb
+             JOIN taxonomy_terms tt ON tt.id = tb.term_id
+             WHERE tb.is_deleted = 0
+               AND tt.is_deleted = 0
+               AND tb.resource_type = 'application'
+               AND tt.field_key = 'owner'
+             ORDER BY tb.resource_id ASC, tt.display_name ASC",
+        )
+        .map_err(|e| format!("Prepare failed for application owners: {}", e))?;
+
+    let rows = stmt
+        .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+        .map_err(|e| format!("Query failed for application owners: {}", e))?;
+
+    let mut owner_map: HashMap<String, Vec<String>> = HashMap::new();
+    for row in rows {
+        let (application_id, owner_name) =
+            row.map_err(|e| format!("Row read error in application owners: {}", e))?;
+        owner_map.entry(application_id).or_default().push(owner_name);
+    }
+    Ok(owner_map)
+}
+
+fn attach_application_owners(
+    rows: &mut [serde_json::Value],
+    owner_map: &HashMap<String, Vec<String>>,
+) {
+    for row in rows {
+        let Some(object) = row.as_object_mut() else {
+            continue;
+        };
+        let Some(application_id) = object.get("id").and_then(|value| value.as_str()) else {
+            continue;
+        };
+        let owners = owner_map
+            .get(application_id)
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .map(serde_json::Value::String)
+            .collect::<Vec<_>>();
+        object.insert("owners".to_string(), serde_json::Value::Array(owners));
+    }
+}
+
+#[derive(Debug, Default)]
+struct ImportedApplicationTermSync {
+    id: String,
+    owners: Vec<String>,
+    tech_stack_terms: Vec<String>,
+}
+
+fn split_application_rows_for_import(
+    rows: &[serde_json::Value],
+) -> Result<(Vec<serde_json::Value>, Vec<ImportedApplicationTermSync>), String> {
+    let mut stripped_rows = Vec::with_capacity(rows.len());
+    let mut term_sync = Vec::with_capacity(rows.len());
+
+    for row in rows {
+        let object = row
+            .as_object()
+            .cloned()
+            .ok_or_else(|| "Invalid row data in applications".to_string())?;
+        let application_id = object
+            .get("id")
+            .and_then(|value| value.as_str())
+            .ok_or_else(|| "Missing id in applications import row".to_string())?
+            .to_string();
+        let owners = normalize_owner_names(object.get("owners").cloned());
+        let tech_stack_terms = object
+            .get("tech_stack")
+            .and_then(|value| value.as_str())
+            .map(|value| parse_tech_stack_terms(Some(value)))
+            .unwrap_or_default();
+
+        stripped_rows.push(serde_json::Value::Object(object));
+        term_sync.push(ImportedApplicationTermSync {
+            id: application_id,
+            owners,
+            tech_stack_terms,
+        });
+    }
+
+    Ok((stripped_rows, term_sync))
+}
+
+fn normalize_owner_names(value: Option<serde_json::Value>) -> Vec<String> {
+    let Some(serde_json::Value::Array(items)) = value else {
+        return Vec::new();
+    };
+
+    let mut owners = Vec::new();
+    let mut seen = HashSet::new();
+    for item in items {
+        let Some(owner) = item.as_str() else {
+            continue;
+        };
+        let trimmed = owner.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if seen.insert(trimmed.to_string()) {
+            owners.push(trimmed.to_string());
+        }
+    }
+    owners
+}
+
+fn sync_imported_application_terms(
+    conn: &rusqlite::Connection,
+    items: &[ImportedApplicationTermSync],
+) -> Result<(), String> {
+    let now = chrono::Utc::now().to_rfc3339();
+    for item in items {
+        save_resource_terms(conn, "application", &item.id, FIELD_OWNER, &item.owners, &now)
+            .map_err(|e| format!("Sync application owners failed: {}", e))?;
+        save_resource_terms(
+            conn,
+            "application",
+            &item.id,
+            FIELD_TECH_STACK,
+            &item.tech_stack_terms,
+            &now,
+        )
+        .map_err(|e| format!("Sync application tech stacks failed: {}", e))?;
+    }
+    Ok(())
 }
 
 fn import_table_rows(

@@ -57,7 +57,6 @@ export interface Application {
   deploy_mode?: string;
   env: "prod" | "dev" | "test";
   git_repo?: string;
-  owner?: string;
   owners?: string[];
   business_application_id?: string;
   business_application_name?: string;
@@ -230,19 +229,6 @@ export interface DbInfo {
   index_count: number;
 }
 
-export interface DashboardStats {
-  host_total: number;
-  host_abnormal: number;
-  application_total: number;
-  application_abnormal: number;
-  middleware_total: number;
-  nginx_total: number;
-  nginx_abnormal: number;
-  deployment_total: number;
-  dependency_total: number;
-  env_distribution: { env: string; count: number }[];
-}
-
 export interface DashboardTotals {
   host_total: number;
   host_abnormal: number;
@@ -408,22 +394,11 @@ export interface ImpactResult {
 // Topology V3 types
 export type TopologyTaskViewMode = "explore" | "troubleshoot" | "impact" | "change";
 
-export type TopologyDrilldownDirection = "upstream" | "downstream" | "both";
-
 export interface TopologyV3SnapshotQuery {
   env?: TopologyEnv;
   taskView?: TopologyTaskViewMode;
   maxDepth?: number;
   focusNodeId?: string;
-  includeEvidence?: boolean;
-}
-
-export interface TopologyV3DrilldownQuery {
-  nodeId: string;
-  taskView?: TopologyTaskViewMode;
-  env?: TopologyEnv;
-  maxDepth?: number;
-  direction?: TopologyDrilldownDirection;
 }
 
 export interface TopologyV3TaskViewQuery {
@@ -457,26 +432,27 @@ export interface TopologyV3EvidenceQuery {
   maxItems?: number;
 }
 
+export interface TopologyV3Lane {
+  id: TopologyEnv;
+  label: string;
+  order: number;
+  nodeCount: number;
+  appCount: number;
+}
+
 export interface TopologyV3Node {
   id: string;
   name: string;
-  nodeType?: TopologyNodeType;
-  node_type?: TopologyNodeType;
-  groupKind?: TopologyGroupKind;
-  group_kind?: TopologyGroupKind;
+  nodeType: TopologyNodeType;
+  groupKind: TopologyGroupKind;
   env: TopologyEnv;
   hostId?: string;
-  host_id?: string;
   hostName?: string;
-  host_name?: string;
   hostIpDisplay?: string;
-  host_ip_display?: string;
   status?: string;
   importance?: number;
   isExternal?: boolean;
-  is_external?: boolean;
   externalRefId?: string;
-  external_ref_id?: string;
   tags?: string[];
   extra?: Record<string, unknown>;
   meta?: Record<string, unknown>;
@@ -486,14 +462,39 @@ export interface TopologyV3Edge {
   id: string;
   source: string;
   target: string;
-  edgeType?: TopologyEdge["edge_type"];
-  edge_type?: TopologyEdge["edge_type"];
+  edgeType: TopologyEdge["edge_type"];
   label?: string;
   strength?: number;
   crossEnv?: boolean;
-  cross_env?: boolean;
   extra?: Record<string, unknown>;
   meta?: Record<string, unknown>;
+}
+
+export interface TopologyV3EnvCount {
+  env: TopologyEnv;
+  count: number;
+  appCount: number;
+}
+
+export interface TopologyV3KindCount {
+  kind: string;
+  count: number;
+}
+
+export interface TopologyV3LegendStats {
+  envCounts: TopologyV3EnvCount[];
+  nodeTypeCounts: TopologyV3KindCount[];
+  edgeTypeCounts: TopologyV3KindCount[];
+  applicationServiceCount: number;
+  currentEnv?: TopologyEnv;
+  externalNodeCount?: number;
+  crossEnvEdgeCount?: number;
+}
+
+export interface TopologyV3LayoutHints {
+  laneOrder: TopologyEnv[];
+  defaultCollapsedGroups: string[];
+  highDensityMode: boolean;
 }
 
 export interface TopologyV3Meta {
@@ -512,19 +513,14 @@ export interface TopologyV3Meta {
 
 export interface TopologyV3SnapshotResponse {
   meta: TopologyV3Meta;
-  lanes?: TopologyLane[];
+  lanes: TopologyV3Lane[];
   nodes: TopologyV3Node[];
   edges: TopologyV3Edge[];
-  legendStats?: TopologyLegendStats;
-  legend_stats?: TopologyLegendStats;
-  layoutHints?: TopologyLayoutHints;
-  layout_hints?: TopologyLayoutHints;
-}
-
-export interface TopologyV3DrilldownResponse extends TopologyV3SnapshotResponse {
-  centerNodeId?: string;
-  center_node_id?: string;
-  depth?: number;
+  legendStats: TopologyV3LegendStats;
+  layoutHints: TopologyV3LayoutHints;
+  focusNode?: TopologyV3Node;
+  nodeCount?: number;
+  edgeCount?: number;
 }
 
 export interface TopologyV3TaskInsight {
@@ -533,9 +529,7 @@ export interface TopologyV3TaskInsight {
   description?: string;
   severity?: "info" | "warning" | "critical";
   nodeIds?: string[];
-  node_ids?: string[];
   edgeIds?: string[];
-  edge_ids?: string[];
 }
 
 export interface TopologyV3TaskViewResponse {
@@ -548,47 +542,40 @@ export interface TopologyV3TaskViewResponse {
 }
 
 export interface TopologyV3Path {
-  nodeIds?: string[];
-  node_ids?: string[];
+  nodeIds: string[];
   edgeIds?: string[];
-  edge_ids?: string[];
   score?: number;
 }
 
 export interface TopologyV3PathsResponse {
   paths: TopologyV3Path[];
   truncated: boolean;
-  totalCount?: number;
-  total_count?: number;
+  totalCount: number;
   meta?: TopologyV3Meta;
 }
 
 export interface TopologyV3ImpactNode {
   id: string;
   name: string;
-  nodeType?: string;
-  node_type?: string;
+  nodeType: string;
   depth: number;
   reason?: string;
 }
 
 export interface TopologyV3ImpactResponse {
-  affectedNodes?: TopologyV3ImpactNode[];
-  affected_nodes?: TopologyV3ImpactNode[];
-  totalCount?: number;
-  total_count?: number;
-  maxDepth?: number;
-  max_depth?: number;
+  affectedNodes: TopologyV3ImpactNode[];
+  totalCount: number;
+  maxDepth: number;
+  severity: "info" | "warning" | "critical";
   truncated?: boolean;
   meta?: TopologyV3Meta;
 }
 
-export type TopologyV3EvidenceType = "call_relation" | "deployment" | "metric" | "alert" | "change" | "annotation";
+export type TopologyV3EvidenceType = "profile" | "dependency_summary" | "deployment" | "audit";
 
 export interface TopologyV3EvidenceItem {
   id: string;
-  evidenceType?: TopologyV3EvidenceType;
-  evidence_type?: TopologyV3EvidenceType;
+  evidenceType: TopologyV3EvidenceType;
   title: string;
   description?: string;
   severity?: "info" | "warning" | "critical";
@@ -659,7 +646,6 @@ export interface DbPreviewSummary {
 export interface ImportResult {
   hosts_imported: number;
   applications_imported: number;
-  application_owners_imported?: number;
   middlewares_imported: number;
   nginx_configs_imported: number;
   deployments_imported: number;

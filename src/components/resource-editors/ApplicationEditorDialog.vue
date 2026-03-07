@@ -64,7 +64,7 @@ const techStackSuggestions = computed(() =>
     techStackList.value
   )
 );
-const ownerSuggestions = computed(() => normalizeOwners([...ownerOptions.value, ...ownerList.value], ""));
+const ownerSuggestions = computed(() => normalizeOwners([...ownerOptions.value, ...ownerList.value]));
 const selectedBusinessApplicationId = computed(() =>
   normalizeBusinessApplicationId(editingApp.value.business_application_id)
 );
@@ -122,8 +122,8 @@ function cloneDraft(draft: Partial<Application>): Partial<Application> {
   };
 }
 
-function normalizeOwners(owners?: string[], owner?: string) {
-  const values = [...(owners ?? []), owner ?? ""]
+function normalizeOwners(owners?: string[]) {
+  const values = [...(owners ?? [])]
     .map((item) => item.trim())
     .filter((item) => item.length > 0);
   return Array.from(new Set(values));
@@ -220,7 +220,7 @@ async function fetchBusinessApplicationOptions() {
 function hydrateFromDraft() {
   editingApp.value = cloneDraft(props.initialDraft || {});
   techStackList.value = parseTechStack(editingApp.value.tech_stack);
-  ownerList.value = normalizeOwners(editingApp.value.owners, editingApp.value.owner);
+  ownerList.value = normalizeOwners(editingApp.value.owners);
   void fetchTopTechStackOptions(editingApp.value.type);
   void fetchOwnerOptions();
   void fetchBusinessApplicationOptions();
@@ -249,7 +249,6 @@ async function handleSave() {
     ...editingApp.value,
     business_application_id: businessApplicationId || undefined,
     business_application_name: undefined,
-    owner: owners[0],
     owners,
     tech_stack: techStackToText(techStackList.value),
   };

@@ -16,6 +16,9 @@ import type {
   TopologyNodeType,
   TopologyTaskViewMode,
   TopologyV3Edge,
+  TopologyV3Lane,
+  TopologyV3LayoutHints,
+  TopologyV3LegendStats,
   TopologyV3Node,
   TopologyV3SnapshotResponse,
   TopologyV3TaskInsight,
@@ -55,10 +58,10 @@ function resolveGroupKind(nodeType: TopologyNodeType, raw?: string): TopologyGro
 }
 
 function normalizeNode(node: TopologyV3Node): TopologyNode {
-  const nodeType: TopologyNodeType = node.nodeType || node.node_type || 'application'
-  const groupKind = resolveGroupKind(nodeType, node.groupKind || node.group_kind)
+  const nodeType: TopologyNodeType = node.nodeType || 'application'
+  const groupKind = resolveGroupKind(nodeType, node.groupKind)
   const importance = Number.isFinite(node.importance) ? Number(node.importance) : 1
-  const isExternal = node.isExternal === true || node.is_external === true
+  const isExternal = node.isExternal === true
   const env = node.env || 'prod'
   const extra = {
     ...(node.extra || {}),
@@ -71,19 +74,19 @@ function normalizeNode(node: TopologyV3Node): TopologyNode {
     node_type: nodeType,
     env,
     group_kind: groupKind,
-    host_id: node.hostId || node.host_id,
-    host_name: node.hostName || node.host_name,
-    host_ip_display: node.hostIpDisplay || node.host_ip_display,
+    host_id: node.hostId,
+    host_name: node.hostName,
+    host_ip_display: node.hostIpDisplay,
     status: node.status,
     importance,
     extra,
     is_external: isExternal || undefined,
-    external_ref_id: node.externalRefId || node.external_ref_id,
+    external_ref_id: node.externalRefId,
   }
 }
 
 function normalizeEdge(edge: TopologyV3Edge): TopologyEdge {
-  const edgeType: TopologyEdge['edge_type'] = edge.edgeType || edge.edge_type || 'http_call'
+  const edgeType: TopologyEdge['edge_type'] = edge.edgeType || 'http_call'
   const strength = Number.isFinite(edge.strength) ? Number(edge.strength) : 1
 
   return {
@@ -93,24 +96,67 @@ function normalizeEdge(edge: TopologyV3Edge): TopologyEdge {
     edge_type: edgeType,
     label: edge.label,
     strength,
-    cross_env: edge.crossEnv === true || edge.cross_env === true,
+    cross_env: edge.crossEnv === true,
   }
 }
 
-function buildLanes(nodes: TopologyNode[], sourceLanes: TopologyLane[] = []): TopologyLane[] {
+function normalizeLanes(nodes: TopologyNode[], sourceLanes: TopologyV3Lane[] = []): TopologyLane[] {
   const laneMap = new Map(sourceLanes.map((lane) => [lane.id, lane]))
   return TOPOLOGY_ENV_ORDER.map((env, index) => {
-    const inEnv = nodes.filter((node) => node.env === env)
     const lane = laneMap.get(env)
-
+    const inEnv = nodes.filter((node) => node.env === env)
     return {
       id: env,
       label: lane?.label || TOPOLOGY_ENV_LABELS[env],
       order: lane?.order ?? index,
-      node_count: inEnv.length,
-      app_count: inEnv.filter((node) => node.group_kind === 'application_service').length,
+      node_count: lane?.nodeCount ?? inEnv.length,
+      app_count: lane?.appCount ?? inEnv.filter((node) => node.group_kind === 'application_service').length,
     }
   })
+}
+
+function normalizeLegendStats(
+  legendStats: TopologyV3LegendStats | undefined,
+  nodes: TopologyNode[],
+  edges: TopologyEdge[],
+  env?: TopologyEnv,
+): TopologyLegendStats {
+  if (!legendStats) {
+    return buildLegendStats(nodes, edges, env)
+  }
+
+  return {
+    env_counts: legendStats.envCounts.map((item) => ({
+      env: item.env,
+      count: item.count,
+      app_count: item.appCount,
+    })),
+    node_type_counts: legendStats.nodeTypeCounts.map((item) => ({ kind: item.kind, count: item.count })),
+    edge_type_counts: legendStats.edgeTypeCounts.map((item) => ({ kind: item.kind, count: item.count })),
+    application_service_count: legendStats.applicationServiceCount,
+    current_env: legendStats.currentEnv,
+    external_node_count: legendStats.externalNodeCount,
+    cross_env_edge_count: legendStats.crossEnvEdgeCount,
+  }
+}
+
+function normalizeLayoutHints(
+  layoutHints: TopologyV3LayoutHints | undefined,
+  edges: TopologyEdge[],
+): TopologyGraph['layout_hints'] {
+  if (!layoutHints) {
+    return {
+      lane_order: TOPOLOGY_ENV_ORDER,
+      default_collapsed_groups: [],
+      high_density_mode: edges.length > 260,
+    }
+  }
+
+  return {
+    lane_order: layoutHints.laneOrder,
+    default_collapsed_groups: layoutHints.defaultCollapsedGroups,
+    high_density_mode: layoutHints.highDensityMode,
+  }
 }
 
 function buildLegendStats(nodes: TopologyNode[], edges: TopologyEdge[], env?: TopologyEnv): TopologyLegendStats {
@@ -135,15 +181,11 @@ function buildLegendStats(nodes: TopologyNode[], edges: TopologyEdge[], env?: To
 function normalizeSnapshot(snapshot: TopologyV3SnapshotResponse): TopologyGraph {
   const nodes = (snapshot.nodes || []).map(normalizeNode)
   const edges = (snapshot.edges || []).map(normalizeEdge)
-  const legendStats = snapshot.legendStats || snapshot.legend_stats || buildLegendStats(nodes, edges, snapshot.meta?.env)
-  const layoutHints = snapshot.layoutHints || snapshot.layout_hints || {
-    lane_order: TOPOLOGY_ENV_ORDER,
-    default_collapsed_groups: [],
-    high_density_mode: edges.length > 260,
-  }
+  const legendStats = normalizeLegendStats(snapshot.legendStats, nodes, edges, snapshot.meta?.env)
+  const layoutHints = normalizeLayoutHints(snapshot.layoutHints, edges)
 
   return {
-    lanes: buildLanes(nodes, snapshot.lanes),
+    lanes: normalizeLanes(nodes, snapshot.lanes),
     nodes,
     edges,
     legend_stats: legendStats,
@@ -154,8 +196,8 @@ function normalizeSnapshot(snapshot: TopologyV3SnapshotResponse): TopologyGraph 
 function normalizeTaskInsight(insight: TopologyV3TaskInsight): TopologyV3TaskInsight {
   return {
     ...insight,
-    nodeIds: insight.nodeIds || insight.node_ids || [],
-    edgeIds: insight.edgeIds || insight.edge_ids || [],
+    nodeIds: insight.nodeIds || [],
+    edgeIds: insight.edgeIds || [],
   }
 }
 
@@ -198,9 +240,7 @@ export const useTopologyStore = defineStore('topology', () => {
 
     const response = await getTopologyTaskViewV3(query)
     taskInsights.value = (response.insights || []).map(normalizeTaskInsight)
-    if (response.snapshot) return response.snapshot
-    taskInsights.value = []
-    return getTopologySnapshotV3(query)
+    return response.snapshot
   }
 
   async function fetchGraph(forceRefresh = false): Promise<TopologyGraph | null> {

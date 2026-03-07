@@ -1,7 +1,5 @@
 import { tauriInvoke } from '@/utils/invoke'
 import type {
-  TopologyV3DrilldownQuery,
-  TopologyV3DrilldownResponse,
   TopologyV3EvidenceQuery,
   TopologyV3EvidenceResponse,
   TopologyV3ImpactQuery,
@@ -16,10 +14,6 @@ import type {
 
 export function getTopologySnapshotV3(query: TopologyV3SnapshotQuery = {}): Promise<TopologyV3SnapshotResponse> {
   return tauriInvoke<TopologyV3SnapshotResponse>('get_topology_snapshot_v3', { query })
-}
-
-export function getTopologyDrilldownV3(query: TopologyV3DrilldownQuery): Promise<TopologyV3DrilldownResponse> {
-  return tauriInvoke<TopologyV3DrilldownResponse>('get_topology_drilldown_v3', { query })
 }
 
 export function getTopologyTaskViewV3(query: TopologyV3TaskViewQuery): Promise<TopologyV3TaskViewResponse> {

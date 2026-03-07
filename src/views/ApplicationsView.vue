@@ -118,15 +118,15 @@ function handleToolbarQuery(payload: SearchToolbarQueryPayload) {
   handleQuery(payload);
 }
 
-function normalizeOwners(owners?: string[], owner?: string) {
-  const values = [...(owners ?? []), owner ?? ""]
+function normalizeOwners(owners?: string[]) {
+  const values = [...(owners ?? [])]
     .map((item) => item.trim())
     .filter((item) => item.length > 0);
   return Array.from(new Set(values));
 }
 
 function ownersForRow(row: Application) {
-  return normalizeOwners(row.owners, row.owner);
+  return normalizeOwners(row.owners);
 }
 
 function generateDraftApplicationId() {

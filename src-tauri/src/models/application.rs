@@ -13,7 +13,6 @@ pub struct Application {
     pub deploy_mode: Option<String>,
     pub env: String,
     pub git_repo: Option<String>,
-    pub owner: Option<String>,
     #[serde(default)]
     pub owners: Option<Vec<String>>,
     pub business_application_id: Option<String>,

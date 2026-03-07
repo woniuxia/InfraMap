@@ -18,7 +18,7 @@ export function formatCopyTimestamp(date: Date = new Date()): string {
 
 export function buildCopyName(base: string, date: Date = new Date()): string {
   const normalized = base.trim() || COPY_DEFAULT_NAME;
-  return `${normalized}（副本-${formatCopyTimestamp(date)}）`;
+  return `${normalized}（副本 ${formatCopyTimestamp(date)}）`;
 }
 
 export function stripSystemFields<T extends object>(row: T): Partial<T> {

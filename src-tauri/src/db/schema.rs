@@ -599,6 +599,56 @@ pub const MIGRATIONS: &[(i32, &str)] = &[
         ALTER TABLE nginx_configs DROP COLUMN upstream_servers;
     "#,
     ),
+    (
+        21,
+        r#"
+        INSERT OR IGNORE INTO taxonomy_terms (id, field_key, normalized_value, display_name, is_deleted, deleted_at, created_at, updated_at)
+        SELECT lower(hex(randomblob(16))), 'owner', lower(trim(owner)), trim(owner), 0, NULL, COALESCE(updated_at, datetime('now')), COALESCE(updated_at, datetime('now'))
+        FROM applications
+        WHERE is_deleted = 0
+          AND TRIM(COALESCE(owner, '')) <> '';
+
+        INSERT OR IGNORE INTO taxonomy_terms (id, field_key, normalized_value, display_name, is_deleted, deleted_at, created_at, updated_at)
+        SELECT lower(hex(randomblob(16))), 'owner', lower(trim(owner_name)), trim(owner_name), 0, NULL, COALESCE(updated_at, datetime('now')), COALESCE(updated_at, datetime('now'))
+        FROM application_owners
+        WHERE is_deleted = 0
+          AND TRIM(COALESCE(owner_name, '')) <> '';
+
+        INSERT OR IGNORE INTO taxonomy_bindings (id, term_id, resource_type, resource_id, is_deleted, deleted_at, created_at, updated_at)
+        SELECT lower(hex(randomblob(16))), tt.id, 'application', a.id, 0, NULL, COALESCE(a.updated_at, datetime('now')), COALESCE(a.updated_at, datetime('now'))
+        FROM applications a
+        JOIN taxonomy_terms tt
+          ON tt.field_key = 'owner'
+         AND tt.normalized_value = lower(trim(a.owner))
+         AND tt.is_deleted = 0
+        WHERE a.is_deleted = 0
+          AND TRIM(COALESCE(a.owner, '')) <> '';
+
+        INSERT OR IGNORE INTO taxonomy_bindings (id, term_id, resource_type, resource_id, is_deleted, deleted_at, created_at, updated_at)
+        SELECT lower(hex(randomblob(16))), tt.id, 'application', ao.application_id, 0, NULL, COALESCE(ao.updated_at, datetime('now')), COALESCE(ao.updated_at, datetime('now'))
+        FROM application_owners ao
+        JOIN applications a ON a.id = ao.application_id AND a.is_deleted = 0
+        JOIN taxonomy_terms tt
+          ON tt.field_key = 'owner'
+         AND tt.normalized_value = lower(trim(ao.owner_name))
+         AND tt.is_deleted = 0
+        WHERE ao.is_deleted = 0
+          AND TRIM(COALESCE(ao.owner_name, '')) <> '';
+
+        DELETE FROM taxonomy_term_stats;
+        INSERT INTO taxonomy_term_stats (term_id, resource_type, usage_count, last_used_at, updated_at)
+        SELECT tb.term_id, tb.resource_type, COUNT(*) AS usage_count, MAX(tb.updated_at) AS last_used_at, datetime('now')
+        FROM taxonomy_bindings tb
+        JOIN taxonomy_terms tt ON tt.id = tb.term_id
+        WHERE tb.is_deleted = 0
+          AND tt.is_deleted = 0
+        GROUP BY tb.term_id, tb.resource_type;
+
+        DROP INDEX IF EXISTS idx_applications_owner;
+        DROP TABLE IF EXISTS application_owners;
+        ALTER TABLE applications DROP COLUMN owner;
+    "#,
+    ),
 ];
 
 const TAXONOMY_TERMS_REQUIRED_COLUMNS: [&str; 8] = [
@@ -1102,7 +1152,7 @@ mod tests {
     }
 
     #[test]
-    fn application_owners_table_should_exist_after_migrations() {
+    fn application_owners_table_should_not_exist_after_migrations() {
         let conn = Connection::open_in_memory().expect("open in-memory db");
         apply_all_migrations(&conn);
 
@@ -1114,7 +1164,42 @@ mod tests {
             )
             .expect("query sqlite_master");
 
-        assert_eq!(exists, 1, "application_owners table should exist");
+        assert_eq!(exists, 0, "application_owners table should be removed");
+    }
+
+    #[test]
+    fn applications_table_should_not_have_legacy_owner_column_after_migrations() {
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        apply_all_migrations(&conn);
+
+        let mut stmt = conn
+            .prepare("PRAGMA table_info(applications)")
+            .expect("prepare table info query");
+        let rows = stmt
+            .query_map([], |row| row.get::<_, String>(1))
+            .expect("query table info");
+        let columns: Vec<String> = rows.filter_map(|r| r.ok()).collect();
+
+        assert!(
+            !columns.iter().any(|col| col == "owner"),
+            "applications table should not contain legacy owner column"
+        );
+    }
+
+    #[test]
+    fn applications_owner_index_should_not_exist_after_migrations() {
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        apply_all_migrations(&conn);
+
+        let exists: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_applications_owner'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("query sqlite_master for owner index");
+
+        assert_eq!(exists, 0, "applications owner index should be removed");
     }
 
     #[test]
@@ -1355,6 +1440,61 @@ mod tests {
         assert_eq!(
             owner_binding_count, 1,
             "business application owner should be migrated into taxonomy"
+        );
+    }
+
+    #[test]
+    fn application_owner_sources_should_migrate_to_taxonomy_before_legacy_owner_cleanup() {
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        let mut seeded_before_cleanup = false;
+        for (version, sql) in MIGRATIONS.iter() {
+            if *version == 21 {
+                conn.execute(
+                    "INSERT INTO applications (id, name, type, address, port, tech_stack, deploy_mode, env, git_repo, owner, business_application_id, status, description, is_deleted, deleted_at, created_at, updated_at)
+                     VALUES ('app-mig-1', 'legacy-app', 'backend', NULL, NULL, NULL, NULL, 'prod', NULL, 'alice', NULL, 'running', NULL, 0, NULL, datetime('now'), datetime('now'))",
+                    [],
+                )
+                .expect("seed application owner before migration v21");
+                conn.execute(
+                    "INSERT INTO application_owners (id, application_id, owner_name, is_deleted, deleted_at, created_at, updated_at)
+                     VALUES ('ao-mig-1', 'app-mig-1', 'bob', 0, NULL, datetime('now'), datetime('now'))",
+                    [],
+                )
+                .expect("seed application_owners row before migration v21");
+                seeded_before_cleanup = true;
+            }
+
+            conn.execute_batch(sql)
+                .unwrap_or_else(|e| panic!("Migration v{} failed: {}", version, e));
+            if *version == 12 {
+                migrate_taxonomy_v2(&conn)
+                    .unwrap_or_else(|e| panic!("Post-migration hook v{} failed: {}", version, e));
+            }
+        }
+
+        assert!(
+            seeded_before_cleanup,
+            "migration v21 should exist so application owner cleanup can be verified"
+        );
+
+        let owner_binding_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(DISTINCT tt.display_name)
+                 FROM taxonomy_bindings tb
+                 JOIN taxonomy_terms tt ON tt.id = tb.term_id
+                 WHERE tb.resource_type = 'application'
+                   AND tb.resource_id = 'app-mig-1'
+                   AND tb.is_deleted = 0
+                   AND tt.is_deleted = 0
+                   AND tt.field_key = 'owner'
+                   AND tt.display_name IN ('alice', 'bob')",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count migrated application owner bindings");
+        assert_eq!(
+            owner_binding_count, 2,
+            "application owner column and table rows should both migrate into taxonomy"
         );
     }
 

@@ -55,14 +55,13 @@ fn row_to_application_with_business(row: &rusqlite::Row) -> rusqlite::Result<App
         deploy_mode: row.get(6)?,
         env: row.get(7)?,
         git_repo: row.get(8)?,
-        owner: row.get(9)?,
         owners: Some(Vec::new()),
-        business_application_id: row.get(10)?,
-        business_application_name: row.get(11)?,
-        status: row.get(12)?,
-        description: row.get(13)?,
-        created_at: row.get(14)?,
-        updated_at: row.get(15)?,
+        business_application_id: row.get(9)?,
+        business_application_name: row.get(10)?,
+        status: row.get(11)?,
+        description: row.get(12)?,
+        created_at: row.get(13)?,
+        updated_at: row.get(14)?,
     })
 }
 
@@ -70,7 +69,7 @@ const SELECT_BUSINESS_APPLICATION_COLUMNS: &str =
     "id, name, code, description, env, status, created_at, updated_at";
 const SELECT_APPLICATION_COLUMNS: &str = "applications.id, applications.name, applications.type, applications.address, \
      applications.port, applications.tech_stack, applications.deploy_mode, applications.env, applications.git_repo, \
-     applications.owner, applications.business_application_id, \
+     applications.business_application_id, \
      (SELECT ba.name FROM business_applications ba WHERE ba.id = applications.business_application_id AND ba.is_deleted = 0) AS business_application_name, \
      applications.status, applications.description, applications.created_at, applications.updated_at";
 
@@ -95,11 +94,10 @@ fn build_unassigned_applications_where_clause(
             "(applications.name LIKE ? \
                 OR applications.address LIKE ? \
                 OR applications.tech_stack LIKE ? \
-                OR applications.git_repo LIKE ? \
-                OR applications.owner LIKE ?)"
+                OR applications.git_repo LIKE ?)"
                 .to_string(),
         );
-        for _ in 0..5 {
+        for _ in 0..4 {
             sql_params.push(Box::new(like_value.clone()));
         }
     }

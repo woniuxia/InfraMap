@@ -5,7 +5,7 @@ use crate::db::DbPool;
 use crate::error::{AppError, AppResult};
 use crate::models::dashboard::{
     DashboardCoverage, DashboardHealth, DashboardOverview, DashboardRecentChange,
-    DashboardRiskItem, DashboardStats, DashboardTotals, EnvCount,
+    DashboardRiskItem, DashboardTotals, EnvCount,
 };
 
 fn count_active(conn: &rusqlite::Connection, table: &str) -> Result<u64, rusqlite::Error> {
@@ -354,28 +354,6 @@ pub fn get_dashboard_overview(pool: State<DbPool>) -> AppResult<DashboardOvervie
         .get()
         .map_err(|e| AppError::db_unavailable(command, format!("Pool error: {}", e)))?;
     get_dashboard_overview_inner(command, &conn)
-}
-
-#[tauri::command]
-pub fn get_dashboard_stats(pool: State<DbPool>) -> AppResult<DashboardStats> {
-    let command = "get_dashboard_stats";
-    let conn = pool
-        .get()
-        .map_err(|e| AppError::db_unavailable(command, format!("Pool error: {}", e)))?;
-
-    let overview = get_dashboard_overview_inner(command, &conn)?;
-    Ok(DashboardStats {
-        host_total: overview.totals.host_total,
-        host_abnormal: overview.totals.host_abnormal,
-        application_total: overview.totals.application_total,
-        application_abnormal: overview.totals.application_abnormal,
-        middleware_total: overview.totals.middleware_total,
-        nginx_total: overview.totals.nginx_total,
-        nginx_abnormal: overview.totals.nginx_abnormal,
-        deployment_total: overview.totals.deployment_total,
-        dependency_total: overview.totals.dependency_total,
-        env_distribution: overview.env_distribution,
-    })
 }
 
 #[cfg(test)]

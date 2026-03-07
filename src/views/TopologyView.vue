@@ -118,7 +118,7 @@ function resetEvidenceState() {
 }
 
 function resolveInsightNodeIds(insight: TopologyV3TaskInsight): string[] {
-  return Array.from(new Set((insight.nodeIds || insight.node_ids || []).filter(Boolean)));
+  return Array.from(new Set((insight.nodeIds || []).filter(Boolean)));
 }
 
 function insightSeverityLabel(insight: TopologyV3TaskInsight): string {
@@ -374,7 +374,7 @@ async function handleFindPaths(sourceId: string, targetId: string) {
     });
 
     const paths = result.paths
-      .map((path) => (Array.isArray(path) ? path : path.nodeIds || path.node_ids || []))
+      .map((path) => path.nodeIds)
       .filter((path) => path.length > 0);
 
     pathResult.value = {
@@ -409,17 +409,17 @@ async function handleAnalyzeImpact() {
       maxDepth: topologyStore.maxDepth,
     });
 
-    const affectedNodes = (result.affectedNodes || result.affected_nodes || []).map((item) => ({
+    const affectedNodes = result.affectedNodes.map((item) => ({
       id: item.id,
       name: item.name,
-      node_type: item.nodeType || item.node_type || "application",
+      node_type: item.nodeType || "application",
       depth: item.depth,
     }));
 
     impactResult.value = {
       affected_nodes: affectedNodes,
-      total_count: result.totalCount ?? result.total_count ?? affectedNodes.length,
-      max_depth: result.maxDepth ?? result.max_depth ?? 0,
+      total_count: result.totalCount,
+      max_depth: result.maxDepth,
     };
 
     selectedNode.value = node;

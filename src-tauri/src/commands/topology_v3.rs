@@ -1,15 +1,21 @@
 use crate::commands::topology::{analyze_impact_inner, find_paths_inner, get_topology_graph_inner};
 use crate::db::DbPool;
 use crate::error::{AppError, AppResult};
-use crate::models::topology::{TopologyKindCount, TopologyNodeV2};
+use crate::models::topology::{
+    AffectedNode, TopologyEdgeV2, TopologyEnvCount, TopologyKindCount, TopologyLane,
+    TopologyLayoutHints, TopologyLegendStats, TopologyNodeV2,
+};
 use crate::models::topology_v3::{
-    TopologyDrilldownV3, TopologyDrilldownV3Query, TopologyEvidenceItemV3, TopologyEvidenceV3,
-    TopologyEvidenceV3Query, TopologyImpactV3, TopologyImpactV3Query, TopologyNeighborV3,
+    TopologyAffectedNodeV3, TopologyDrilldownV3, TopologyDrilldownV3Query,
+    TopologyEdgeV3, TopologyEvidenceItemV3, TopologyEvidenceV3, TopologyEvidenceV3Query,
+    TopologyImpactV3, TopologyImpactV3Query, TopologyKindCountV3, TopologyLaneV3,
+    TopologyLayoutHintsV3, TopologyLegendStatsV3, TopologyNeighborV3, TopologyNodeV3,
     TopologyPathItemV3, TopologyPathsV3, TopologyPathsV3Query, TopologySnapshotMetaV3,
     TopologySnapshotV3, TopologySnapshotV3Query, TopologyTaskInsightV3, TopologyTaskViewV3,
-    TopologyTaskViewV3Query,
+    TopologyTaskViewV3Query, TopologyTroubleshootReportSummaryV3, TopologyTroubleshootReportV3,
+    TopologyTroubleshootReportV3Query, TopologyEnvCountV3,
 };
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 use std::collections::{HashMap, HashSet};
 use tauri::State;
 
@@ -101,11 +107,16 @@ pub fn get_topology_snapshot_v3_inner(
             .nodes
             .iter()
             .find(|node| &node.id == focus_id)
-            .cloned()
+            .map(to_node_v3)
     });
     let node_count = graph.nodes.len() as u32;
     let edge_count = graph.edges.len() as u32;
     let task_view = normalize_task_view(query.task_view.as_deref());
+    let legend_stats = to_legend_stats_v3(&graph.legend_stats, &graph.edges, query.env.clone());
+    let layout_hints = to_layout_hints_v3(&graph.layout_hints);
+    let lanes = graph.lanes.iter().map(to_lane_v3).collect();
+    let nodes = graph.nodes.iter().map(to_node_v3).collect();
+    let edges = graph.edges.iter().map(to_edge_v3).collect();
     let meta = TopologySnapshotMetaV3 {
         version: "3.0".to_string(),
         task_view,
@@ -118,11 +129,11 @@ pub fn get_topology_snapshot_v3_inner(
 
     Ok(TopologySnapshotV3 {
         meta,
-        lanes: graph.lanes,
-        nodes: graph.nodes,
-        edges: graph.edges,
-        legend_stats: graph.legend_stats,
-        layout_hints: graph.layout_hints,
+        lanes,
+        nodes,
+        edges,
+        legend_stats,
+        layout_hints,
         focus_node,
         node_count,
         edge_count,
@@ -174,7 +185,7 @@ pub fn get_topology_drilldown_v3_inner(
     downstream.sort_by(|left, right| left.id.cmp(&right.id));
 
     Ok(TopologyDrilldownV3 {
-        node,
+        node: to_node_v3(&node),
         upstream,
         downstream,
         inbound_edge_count,
@@ -194,7 +205,6 @@ pub fn get_topology_task_view_v3_inner(
             task_view: Some(task_view.clone()),
             max_depth: query.max_depth,
             focus_node_id: query.focus_node_id.clone().or_else(|| query.node_id.clone()),
-            include_evidence: None,
         },
     )?;
 
@@ -274,6 +284,159 @@ pub fn get_topology_task_view_v3_inner(
     })
 }
 
+pub fn get_topology_troubleshoot_report_v3_inner(
+    conn: &Connection,
+    query: &TopologyTroubleshootReportV3Query,
+) -> Result<TopologyTroubleshootReportV3, String> {
+    let task_view = match normalize_task_view(query.task_view.as_deref()).as_str() {
+        "troubleshoot" => "troubleshoot".to_string(),
+        _ => "troubleshoot".to_string(),
+    };
+    let profile = load_node_profile(conn, &query.node_id)?;
+
+    if let Some(env) = query
+        .env
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        if profile.env != env {
+            return Err(format!(
+                "Record not found: node_id={}, env={}",
+                query.node_id, env
+            ));
+        }
+    }
+
+    let drilldown = get_topology_drilldown_v3_inner(
+        conn,
+        &TopologyDrilldownV3Query {
+            node_id: query.node_id.clone(),
+            task_view: Some(task_view.clone()),
+            env: query.env.clone(),
+            max_depth: None,
+            direction: None,
+        },
+    )?;
+    let max_items = query.max_items.unwrap_or(10).clamp(1, 20);
+
+    let deployment_count: u32 = conn
+        .query_row(
+            "SELECT COUNT(*)
+             FROM deployments
+             WHERE is_deleted = 0
+               AND resource_id = ?1
+               AND resource_type = ?2",
+            rusqlite::params![query.node_id, profile.node_type],
+            |row| row.get::<_, i64>(0),
+        )
+        .map(|count| count.max(0) as u32)
+        .map_err(|err| err.to_string())?;
+
+    let recent_audit_change_count: u32 = conn
+        .query_row(
+            "SELECT COUNT(*)
+             FROM audit_logs
+             WHERE resource_id = ?1
+               AND resource_type = ?2",
+            rusqlite::params![query.node_id, profile.node_type],
+            |row| row.get::<_, i64>(0),
+        )
+        .map(|count| count.max(0) as u32)
+        .map_err(|err| err.to_string())?;
+
+    let latest_audit = conn
+        .query_row(
+            "SELECT action, created_at
+             FROM audit_logs
+             WHERE resource_id = ?1
+               AND resource_type = ?2
+             ORDER BY created_at DESC
+             LIMIT 1",
+            rusqlite::params![query.node_id, profile.node_type],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        )
+        .optional()
+        .map_err(|err| err.to_string())?;
+
+    let abnormal_status_count = if profile.status.as_deref() == Some("running") {
+        0
+    } else {
+        1
+    };
+    let summary = TopologyTroubleshootReportSummaryV3 {
+        abnormal_status_count,
+        deployment_count,
+        recent_audit_change_count,
+        inbound_dependency_count: drilldown.inbound_edge_count,
+        outbound_dependency_count: drilldown.outbound_edge_count,
+    };
+
+    let mut insights = vec![TopologyTaskInsightV3 {
+        kind: "status".to_string(),
+        title: "节点状态".to_string(),
+        description: profile.status.clone().unwrap_or_else(|| "unknown".to_string()),
+        severity: if abnormal_status_count > 0 {
+            "critical".to_string()
+        } else {
+            "info".to_string()
+        },
+        node_ids: vec![query.node_id.clone()],
+        edge_ids: Vec::new(),
+    }];
+
+    insights.push(TopologyTaskInsightV3 {
+        kind: "deployment".to_string(),
+        title: "部署摘要".to_string(),
+        description: format!("deployment_count={}", deployment_count),
+        severity: if deployment_count == 0 {
+            "warning".to_string()
+        } else {
+            "info".to_string()
+        },
+        node_ids: vec![query.node_id.clone()],
+        edge_ids: Vec::new(),
+    });
+
+    if let Some((action, created_at)) = latest_audit {
+        insights.push(TopologyTaskInsightV3 {
+            kind: "audit".to_string(),
+            title: "最近审计变更".to_string(),
+            description: format!("{} @ {}", action, created_at),
+            severity: "info".to_string(),
+            node_ids: vec![query.node_id.clone()],
+            edge_ids: Vec::new(),
+        });
+    }
+
+    insights.push(TopologyTaskInsightV3 {
+        kind: "dependency".to_string(),
+        title: "依赖摘要".to_string(),
+        description: format!(
+            "inbound={}, outbound={}",
+            summary.inbound_dependency_count, summary.outbound_dependency_count
+        ),
+        severity: if summary.inbound_dependency_count + summary.outbound_dependency_count >= 3 {
+            "warning".to_string()
+        } else {
+            "info".to_string()
+        },
+        node_ids: vec![query.node_id.clone()],
+        edge_ids: Vec::new(),
+    });
+
+    if insights.len() > max_items {
+        insights.truncate(max_items);
+    }
+
+    Ok(TopologyTroubleshootReportV3 {
+        node_id: query.node_id.clone(),
+        task_view,
+        summary,
+        insights,
+    })
+}
+
 pub fn get_topology_paths_v3_inner(
     conn: &Connection,
     query: &TopologyPathsV3Query,
@@ -301,15 +464,15 @@ pub fn get_topology_impact_v3_inner(
 ) -> Result<TopologyImpactV3, String> {
     let result = analyze_impact_inner(conn, &query.node_id)?;
     let severity = if result.total_count >= 8 || result.max_depth >= 4 {
-        "high"
+        "critical"
     } else if result.total_count >= 2 || result.max_depth >= 2 {
-        "medium"
+        "warning"
     } else {
-        "low"
+        "info"
     };
 
     Ok(TopologyImpactV3 {
-        affected_nodes: result.affected_nodes,
+        affected_nodes: result.affected_nodes.iter().map(to_affected_node_v3).collect(),
         total_count: result.total_count,
         max_depth: result.max_depth,
         severity: severity.to_string(),
@@ -478,6 +641,92 @@ fn map_kind_counts(map: HashMap<String, u32>) -> Vec<TopologyKindCount> {
     items
 }
 
+fn to_lane_v3(lane: &TopologyLane) -> TopologyLaneV3 {
+    TopologyLaneV3 {
+        id: lane.id.clone(),
+        label: lane.label.clone(),
+        order: lane.order,
+        node_count: lane.node_count,
+        app_count: lane.app_count,
+    }
+}
+
+fn to_node_v3(node: &TopologyNodeV2) -> TopologyNodeV3 {
+    TopologyNodeV3 {
+        id: node.id.clone(),
+        name: node.name.clone(),
+        node_type: node.node_type.clone(),
+        env: node.env.clone(),
+        group_kind: node.group_kind.clone(),
+        host_id: node.host_id.clone(),
+        host_name: node.host_name.clone(),
+        host_ip_display: node.host_ip_display.clone(),
+        status: node.status.clone(),
+        importance: node.importance,
+        extra: node.extra.clone(),
+    }
+}
+
+fn to_edge_v3(edge: &TopologyEdgeV2) -> TopologyEdgeV3 {
+    TopologyEdgeV3 {
+        id: edge.id.clone(),
+        source: edge.source.clone(),
+        target: edge.target.clone(),
+        edge_type: edge.edge_type.clone(),
+        label: edge.label.clone(),
+        strength: edge.strength,
+        cross_env: edge.cross_env,
+    }
+}
+
+fn to_env_count_v3(env_count: &TopologyEnvCount) -> TopologyEnvCountV3 {
+    TopologyEnvCountV3 {
+        env: env_count.env.clone(),
+        count: env_count.count,
+        app_count: env_count.app_count,
+    }
+}
+
+fn to_kind_count_v3(kind_count: &TopologyKindCount) -> TopologyKindCountV3 {
+    TopologyKindCountV3 {
+        kind: kind_count.kind.clone(),
+        count: kind_count.count,
+    }
+}
+
+fn to_legend_stats_v3(
+    stats: &TopologyLegendStats,
+    edges: &[TopologyEdgeV2],
+    current_env: Option<String>,
+) -> TopologyLegendStatsV3 {
+    TopologyLegendStatsV3 {
+        env_counts: stats.env_counts.iter().map(to_env_count_v3).collect(),
+        node_type_counts: stats.node_type_counts.iter().map(to_kind_count_v3).collect(),
+        edge_type_counts: stats.edge_type_counts.iter().map(to_kind_count_v3).collect(),
+        application_service_count: stats.application_service_count,
+        current_env,
+        external_node_count: None,
+        cross_env_edge_count: Some(edges.iter().filter(|edge| edge.cross_env).count() as u32),
+    }
+}
+
+fn to_layout_hints_v3(layout_hints: &TopologyLayoutHints) -> TopologyLayoutHintsV3 {
+    TopologyLayoutHintsV3 {
+        lane_order: layout_hints.lane_order.clone(),
+        default_collapsed_groups: layout_hints.default_collapsed_groups.clone(),
+        high_density_mode: layout_hints.high_density_mode,
+    }
+}
+
+fn to_affected_node_v3(node: &AffectedNode) -> TopologyAffectedNodeV3 {
+    TopologyAffectedNodeV3 {
+        id: node.id.clone(),
+        name: node.name.clone(),
+        node_type: node.node_type.clone(),
+        depth: node.depth,
+    }
+}
+
 fn to_neighbor(node: &TopologyNodeV2) -> TopologyNeighborV3 {
     TopologyNeighborV3 {
         id: node.id.clone(),
@@ -557,19 +806,6 @@ pub fn get_topology_snapshot_v3(
 }
 
 #[tauri::command]
-pub fn get_topology_drilldown_v3(
-    pool: State<DbPool>,
-    query: TopologyDrilldownV3Query,
-) -> AppResult<TopologyDrilldownV3> {
-    let command = "get_topology_drilldown_v3";
-    let conn = pool
-        .get()
-        .map_err(|e| AppError::db_unavailable(command, format!("Pool error: {e}")))?;
-    get_topology_drilldown_v3_inner(&conn, &query)
-        .map_err(|e| AppError::from_db_error(command, "build topology drilldown v3", e))
-}
-
-#[tauri::command]
 pub fn get_topology_task_view_v3(
     pool: State<DbPool>,
     query: TopologyTaskViewV3Query,
@@ -624,6 +860,7 @@ pub fn get_topology_evidence_v3(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::audit::insert_audit_log;
     use crate::test_helpers::{
         insert_test_application, insert_test_dependency, insert_test_deployment, insert_test_host,
         setup_test_db,
@@ -675,6 +912,14 @@ mod tests {
         );
     }
 
+    fn update_application_status(conn: &Connection, id: &str, status: &str) {
+        conn.execute(
+            "UPDATE applications SET status = ?1 WHERE id = ?2",
+            rusqlite::params![status, id],
+        )
+        .expect("update application status");
+    }
+
     #[test]
     fn topology_v3_snapshot_should_filter_env_and_resolve_focus_node() {
         let conn = setup_test_db();
@@ -685,7 +930,6 @@ mod tests {
             task_view: Some("explore".to_string()),
             max_depth: Some(3),
             focus_node_id: Some("A".to_string()),
-            include_evidence: None,
         };
         let snapshot = get_topology_snapshot_v3_inner(&conn, &query).expect("snapshot query");
 
@@ -697,6 +941,63 @@ mod tests {
             Some("A")
         );
         assert_eq!(snapshot.meta.task_view, "explore");
+    }
+
+    #[test]
+    fn topology_v3_snapshot_should_serialize_nested_contract_in_camel_case() {
+        let conn = setup_test_db();
+        setup_graph(&conn);
+
+        let query = TopologySnapshotV3Query {
+            env: Some("prod".to_string()),
+            task_view: Some("explore".to_string()),
+            max_depth: Some(3),
+            focus_node_id: Some("A".to_string()),
+        };
+        let snapshot = get_topology_snapshot_v3_inner(&conn, &query).expect("snapshot query");
+        let value = serde_json::to_value(&snapshot).expect("serialize snapshot");
+
+        let lane = &value["lanes"][0];
+        assert!(lane.get("nodeCount").is_some());
+        assert!(lane.get("node_count").is_none());
+        assert!(lane.get("appCount").is_some());
+        assert!(lane.get("app_count").is_none());
+
+        let node = &value["nodes"][0];
+        assert!(node.get("nodeType").is_some());
+        assert!(node.get("node_type").is_none());
+        assert!(node.get("groupKind").is_some());
+        assert!(node.get("group_kind").is_none());
+
+        let edge = &value["edges"][0];
+        assert!(edge.get("edgeType").is_some());
+        assert!(edge.get("edge_type").is_none());
+        assert!(edge.get("crossEnv").is_some());
+        assert!(edge.get("cross_env").is_none());
+
+        let legend_stats = &value["legendStats"];
+        assert!(legend_stats.get("envCounts").is_some());
+        assert!(legend_stats.get("env_counts").is_none());
+        assert!(legend_stats.get("nodeTypeCounts").is_some());
+        assert!(legend_stats.get("node_type_counts").is_none());
+        assert!(legend_stats.get("applicationServiceCount").is_some());
+        assert!(legend_stats.get("application_service_count").is_none());
+
+        let env_count = &legend_stats["envCounts"][0];
+        assert!(env_count.get("appCount").is_some());
+        assert!(env_count.get("app_count").is_none());
+
+        let layout_hints = &value["layoutHints"];
+        assert!(layout_hints.get("laneOrder").is_some());
+        assert!(layout_hints.get("lane_order").is_none());
+        assert!(layout_hints.get("defaultCollapsedGroups").is_some());
+        assert!(layout_hints.get("default_collapsed_groups").is_none());
+        assert!(layout_hints.get("highDensityMode").is_some());
+        assert!(layout_hints.get("high_density_mode").is_none());
+
+        let focus_node = &value["focusNode"];
+        assert!(focus_node.get("nodeType").is_some());
+        assert!(focus_node.get("node_type").is_none());
     }
 
     #[test]
@@ -778,7 +1079,26 @@ mod tests {
 
         assert_eq!(result.total_count, 3);
         assert_eq!(result.max_depth, 2);
-        assert_eq!(result.severity, "medium");
+        assert_eq!(result.severity, "warning");
+    }
+
+    #[test]
+    fn topology_v3_impact_should_serialize_affected_nodes_in_camel_case() {
+        let conn = setup_test_db();
+        setup_graph(&conn);
+
+        let query = TopologyImpactV3Query {
+            node_id: "D".to_string(),
+            task_view: Some("impact".to_string()),
+            env: None,
+            max_depth: Some(3),
+        };
+        let result = get_topology_impact_v3_inner(&conn, &query).expect("impact query");
+        let value = serde_json::to_value(&result).expect("serialize impact");
+
+        let affected_node = &value["affectedNodes"][0];
+        assert!(affected_node.get("nodeType").is_some());
+        assert!(affected_node.get("node_type").is_none());
     }
 
     #[test]
@@ -803,5 +1123,98 @@ mod tests {
             .items
             .iter()
             .any(|item| item.evidence_type == "profile"));
+    }
+
+    #[test]
+    fn topology_v3_troubleshoot_report_should_flag_abnormal_status() {
+        let conn = setup_test_db();
+        setup_graph(&conn);
+        update_application_status(&conn, "A", "stopped");
+
+        let query = TopologyTroubleshootReportV3Query {
+            node_id: "A".to_string(),
+            task_view: None,
+            env: Some("prod".to_string()),
+            max_items: Some(10),
+        };
+        let result =
+            get_topology_troubleshoot_report_v3_inner(&conn, &query).expect("report query");
+
+        assert_eq!(result.task_view, "troubleshoot");
+        assert_eq!(result.summary.abnormal_status_count, 1);
+        assert!(result
+            .insights
+            .iter()
+            .any(|item| item.kind == "status" && item.severity == "critical"));
+    }
+
+    #[test]
+    fn topology_v3_troubleshoot_report_should_warn_when_no_deployments() {
+        let conn = setup_test_db();
+        setup_graph(&conn);
+
+        let query = TopologyTroubleshootReportV3Query {
+            node_id: "A".to_string(),
+            task_view: None,
+            env: Some("prod".to_string()),
+            max_items: Some(10),
+        };
+        let result =
+            get_topology_troubleshoot_report_v3_inner(&conn, &query).expect("report query");
+
+        assert_eq!(result.summary.deployment_count, 0);
+        assert!(result
+            .insights
+            .iter()
+            .any(|item| item.kind == "deployment" && item.severity == "warning"));
+    }
+
+    #[test]
+    fn topology_v3_troubleshoot_report_should_include_recent_audit_change() {
+        let conn = setup_test_db();
+        setup_graph(&conn);
+        insert_audit_log(
+            &conn,
+            "update_application",
+            "application",
+            "A",
+            Some("App-A"),
+            Some("{\"status\":\"running\"}"),
+        )
+        .expect("insert audit log");
+
+        let query = TopologyTroubleshootReportV3Query {
+            node_id: "A".to_string(),
+            task_view: None,
+            env: Some("prod".to_string()),
+            max_items: Some(10),
+        };
+        let result =
+            get_topology_troubleshoot_report_v3_inner(&conn, &query).expect("report query");
+
+        assert_eq!(result.summary.recent_audit_change_count, 1);
+        assert!(result.insights.iter().any(|item| item.kind == "audit"));
+    }
+
+    #[test]
+    fn topology_v3_troubleshoot_report_should_summarize_dependency_counts() {
+        let conn = setup_test_db();
+        setup_graph(&conn);
+
+        let query = TopologyTroubleshootReportV3Query {
+            node_id: "C".to_string(),
+            task_view: None,
+            env: Some("prod".to_string()),
+            max_items: Some(10),
+        };
+        let result =
+            get_topology_troubleshoot_report_v3_inner(&conn, &query).expect("report query");
+
+        assert_eq!(result.summary.inbound_dependency_count, 2);
+        assert_eq!(result.summary.outbound_dependency_count, 1);
+        assert!(result
+            .insights
+            .iter()
+            .any(|item| item.kind == "dependency" && item.description.contains("inbound=2")));
     }
 }

@@ -17,7 +17,7 @@ import {
 } from "@element-plus/icons-vue";
 
 const router = useRouter();
-const { overview, loading, usedFallback, loadDashboardOverview } = useDashboardOverview();
+const { overview, loading, loadDashboardOverview } = useDashboardOverview();
 
 interface KpiCard {
   key: string;
@@ -305,7 +305,6 @@ onMounted(loadDashboardOverview);
           <p class="hero-subtitle">优先进入常用页面，快速完成资产录入与维护</p>
         </div>
         <div class="hero-actions">
-          <el-tag v-if="usedFallback" type="warning" effect="plain">统计回退模式</el-tag>
           <el-button class="refresh-button" type="primary" @click="loadDashboardOverview">
             <el-icon><Refresh /></el-icon>
             刷新

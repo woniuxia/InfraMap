@@ -1,5 +1,3 @@
-use crate::db::DbPool;
-use crate::error::{AppError, AppResult};
 use crate::models::nginx_config::NginxEndpoint;
 use crate::models::topology::{
     AffectedNode, ImpactResult, PathResult, TopologyEdgeV2, TopologyEnvCount, TopologyGraphV2,
@@ -7,7 +5,6 @@ use crate::models::topology::{
 };
 use rusqlite::Connection;
 use std::collections::{HashMap, HashSet, VecDeque};
-use tauri::State;
 
 const ENV_ORDER: [&str; 3] = ["prod", "test", "dev"];
 
@@ -621,41 +618,6 @@ pub fn analyze_impact_inner(conn: &Connection, node_id: &str) -> Result<ImpactRe
         total_count,
         max_depth,
     })
-}
-
-#[tauri::command]
-pub fn get_topology_graph(pool: State<DbPool>) -> AppResult<TopologyGraphV2> {
-    let command = "get_topology_graph";
-    let conn = pool
-        .get()
-        .map_err(|e| AppError::db_unavailable(command, format!("Pool error: {}", e)))?;
-    get_topology_graph_inner(&conn)
-        .map_err(|e| AppError::from_db_error(command, "build topology graph", e))
-}
-
-#[tauri::command]
-pub fn find_paths(
-    pool: State<DbPool>,
-    source_id: String,
-    target_id: String,
-    max_results: Option<usize>,
-) -> AppResult<PathResult> {
-    let command = "find_paths";
-    let conn = pool
-        .get()
-        .map_err(|e| AppError::db_unavailable(command, format!("Pool error: {}", e)))?;
-    find_paths_inner(&conn, &source_id, &target_id, max_results.unwrap_or(10))
-        .map_err(|e| AppError::from_db_error(command, "find dependency paths", e))
-}
-
-#[tauri::command]
-pub fn analyze_impact(pool: State<DbPool>, node_id: String) -> AppResult<ImpactResult> {
-    let command = "analyze_impact";
-    let conn = pool
-        .get()
-        .map_err(|e| AppError::db_unavailable(command, format!("Pool error: {}", e)))?;
-    analyze_impact_inner(&conn, &node_id)
-        .map_err(|e| AppError::from_db_error(command, "analyze impact", e))
 }
 
 #[cfg(test)]

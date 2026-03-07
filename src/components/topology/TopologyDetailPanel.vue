@@ -90,7 +90,7 @@ function extraEntries(node: TopologyNode): { key: string; value: string }[] {
 }
 
 function evidenceTypeLabel(item: TopologyV3EvidenceItem): string {
-  const type = item.evidenceType || item.evidence_type || 'annotation'
+  const type = item.evidenceType
   return EVIDENCE_TYPE_LABELS[type] || type
 }
 

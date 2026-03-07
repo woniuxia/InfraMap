@@ -1,7 +1,3 @@
-use crate::models::topology::{
-    AffectedNode, TopologyEdgeV2, TopologyLane, TopologyLayoutHints, TopologyLegendStats,
-    TopologyNodeV2,
-};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -15,8 +11,6 @@ pub struct TopologySnapshotV3Query {
     pub max_depth: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub focus_node_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub include_evidence: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -35,15 +29,97 @@ pub struct TopologySnapshotMetaV3 {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct TopologyLaneV3 {
+    pub id: String,
+    pub label: String,
+    pub order: u8,
+    pub node_count: u32,
+    pub app_count: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TopologyNodeV3 {
+    pub id: String,
+    pub name: String,
+    pub node_type: String,
+    pub env: String,
+    pub group_kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub host_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub host_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub host_ip_display: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+    pub importance: f32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub extra: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TopologyEdgeV3 {
+    pub id: String,
+    pub source: String,
+    pub target: String,
+    pub edge_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    pub strength: u32,
+    pub cross_env: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TopologyEnvCountV3 {
+    pub env: String,
+    pub count: u32,
+    pub app_count: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TopologyKindCountV3 {
+    pub kind: String,
+    pub count: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TopologyLegendStatsV3 {
+    pub env_counts: Vec<TopologyEnvCountV3>,
+    pub node_type_counts: Vec<TopologyKindCountV3>,
+    pub edge_type_counts: Vec<TopologyKindCountV3>,
+    pub application_service_count: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub current_env: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub external_node_count: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cross_env_edge_count: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TopologyLayoutHintsV3 {
+    pub lane_order: Vec<String>,
+    pub default_collapsed_groups: Vec<String>,
+    pub high_density_mode: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TopologySnapshotV3 {
     pub meta: TopologySnapshotMetaV3,
-    pub lanes: Vec<TopologyLane>,
-    pub nodes: Vec<TopologyNodeV2>,
-    pub edges: Vec<TopologyEdgeV2>,
-    pub legend_stats: TopologyLegendStats,
-    pub layout_hints: TopologyLayoutHints,
+    pub lanes: Vec<TopologyLaneV3>,
+    pub nodes: Vec<TopologyNodeV3>,
+    pub edges: Vec<TopologyEdgeV3>,
+    pub legend_stats: TopologyLegendStatsV3,
+    pub layout_hints: TopologyLayoutHintsV3,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub focus_node: Option<TopologyNodeV2>,
+    pub focus_node: Option<TopologyNodeV3>,
     pub node_count: u32,
     pub edge_count: u32,
 }
@@ -74,7 +150,7 @@ pub struct TopologyNeighborV3 {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TopologyDrilldownV3 {
-    pub node: TopologyNodeV2,
+    pub node: TopologyNodeV3,
     pub upstream: Vec<TopologyNeighborV3>,
     pub downstream: Vec<TopologyNeighborV3>,
     pub inbound_edge_count: u32,
@@ -126,6 +202,38 @@ pub struct TopologyTaskViewV3 {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct TopologyTroubleshootReportV3Query {
+    pub node_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub task_view: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub env: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_items: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct TopologyTroubleshootReportSummaryV3 {
+    pub abnormal_status_count: u32,
+    pub deployment_count: u32,
+    pub recent_audit_change_count: u32,
+    pub inbound_dependency_count: u32,
+    pub outbound_dependency_count: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TopologyTroubleshootReportV3 {
+    pub node_id: String,
+    pub task_view: String,
+    pub summary: TopologyTroubleshootReportSummaryV3,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub insights: Vec<TopologyTaskInsightV3>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TopologyPathsV3Query {
     pub source_id: String,
     pub target_id: String,
@@ -170,10 +278,19 @@ pub struct TopologyImpactV3Query {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TopologyImpactV3 {
-    pub affected_nodes: Vec<AffectedNode>,
+    pub affected_nodes: Vec<TopologyAffectedNodeV3>,
     pub total_count: u32,
     pub max_depth: u32,
     pub severity: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TopologyAffectedNodeV3 {
+    pub id: String,
+    pub name: String,
+    pub node_type: String,
+    pub depth: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

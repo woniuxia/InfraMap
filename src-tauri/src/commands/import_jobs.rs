@@ -394,8 +394,8 @@ fn persist_application(
 
     let id = uuid::Uuid::new_v4().to_string();
     conn.execute(
-        "INSERT INTO applications (id, name, type, address, port, tech_stack, deploy_mode, env, git_repo, owner, business_application_id, status, description, is_deleted, deleted_at, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, NULL, NULL, ?6, NULL, NULL, NULL, ?7, ?8, 0, NULL, ?9, ?9)",
+        "INSERT INTO applications (id, name, type, address, port, tech_stack, deploy_mode, env, git_repo, business_application_id, status, description, is_deleted, deleted_at, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, NULL, NULL, ?6, NULL, NULL, ?7, ?8, 0, NULL, ?9, ?9)",
         rusqlite::params![
             id,
             row.name,

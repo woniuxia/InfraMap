@@ -49,7 +49,7 @@ async function loadStorageProfile() {
 async function handleSelectStoragePath() {
   try {
     const selected = await open({
-      title: "选择数据与配置保存路径",
+      title: "选择新的数据根目录",
       directory: true,
       multiple: false,
     });
@@ -63,18 +63,17 @@ async function handleSelectStoragePath() {
 async function handleSaveStoragePath() {
   const nextRoot = storageForm.value.root_path?.trim();
   if (!nextRoot) {
-    ElMessage.warning("请先选择保存路径");
+    ElMessage.warning("请先选择存储根目录");
     return;
   }
 
   try {
     await ElMessageBox.confirm(
-      "切换路径将自动迁移数据库和备份文件，完成后会自动重启应用。确定继续？",
-      "保存并重启",
+      "修改存储根目录后，应用会迁移数据库和备份目录。部分场景下需要重启应用才能生效，是否继续？",
+      "确认修改存储路径",
       { type: "warning" }
     );
   } catch {
-    // cancelled
     return;
   }
 
@@ -82,11 +81,12 @@ async function handleSaveStoragePath() {
   try {
     const result = await updateStoragePath({ root_path: nextRoot });
     if (!result.restart_required) {
-      ElMessage.success("保存路径未变化");
+      ElMessage.success("存储路径已更新");
       await loadStorageProfile();
       return;
     }
-    ElMessage.success("保存成功，应用即将重启");
+
+    ElMessage.success("存储路径已更新，应用即将重启");
     await restartApp();
   } catch {
     // error shown by tauriInvoke
@@ -126,7 +126,7 @@ async function handleSaveSettings() {
   settingsSaving.value = true;
   try {
     await updateSettings(settingsForm.value);
-    ElMessage.success("设置已保存");
+    ElMessage.success("备份设置已保存");
   } catch {
     // error shown by tauriInvoke
   } finally {
@@ -154,7 +154,7 @@ async function handleCreateBackup() {
   backupCreating.value = true;
   try {
     const filename = await createBackup();
-    ElMessage.success(`备份已创建: ${filename}`);
+    ElMessage.success(`备份已创建：${filename}`);
     loadBackups();
     loadSettings();
   } catch {
@@ -166,7 +166,7 @@ async function handleCreateBackup() {
 
 async function handleDeleteBackup(filename: string) {
   try {
-    await ElMessageBox.confirm(`确定要删除备份文件 ${filename} 吗？`, "删除确认", {
+    await ElMessageBox.confirm(`确认删除备份文件 ${filename} 吗？`, "删除备份", {
       type: "warning",
     });
     await deleteBackup(filename);
@@ -196,12 +196,12 @@ async function handlePreview(filename: string) {
 async function handleRestore(filename: string) {
   try {
     await ElMessageBox.confirm(
-      "恢复将用备份数据覆盖当前数据库，恢复前会自动创建安全备份。确定继续？",
-      "恢复确认",
+      "恢复备份会覆盖当前数据库内容。系统会先自动创建恢复前备份，确认继续吗？",
+      "确认恢复备份",
       { type: "warning" }
     );
     await restoreBackup(filename);
-    ElMessage.success("数据库已恢复，建议重启应用");
+    ElMessage.success("备份恢复完成");
     loadBackups();
   } catch {
     // cancelled or error shown by tauriInvoke
@@ -219,9 +219,10 @@ async function handleExport() {
       filters: [{ name: "JSON", extensions: ["json"] }],
     });
     if (!filepath) return;
+
     exportLoading.value = true;
     await exportJson(filepath);
-    ElMessage.success("数据已导出");
+    ElMessage.success("JSON 导出成功");
   } catch {
     // error shown by tauriInvoke
   } finally {
@@ -240,23 +241,19 @@ async function handleImport() {
       multiple: false,
       directory: false,
     });
-    if (!filepath) return;
+    if (!filepath || Array.isArray(filepath)) return;
 
     await ElMessageBox.confirm(
-      "导入将清除当前所有数据并替换为导入文件中的数据，导入前会自动创建安全备份。确定继续？",
-      "导入确认",
+      "导入 JSON 会先创建导入前备份，并用文件中的数据覆盖当前资源数据。确认继续吗？",
+      "确认导入 JSON",
       { type: "warning" }
     );
 
     importLoading.value = true;
     const result: ImportResult = await importJson(filepath);
-    ElMessage.success("数据导入成功");
-    const ownerLine =
-      typeof result.application_owners_imported === "number"
-        ? `\n- 应用负责人: ${result.application_owners_imported}`
-        : "";
+    ElMessage.success("JSON 导入成功");
     ElMessageBox.alert(
-      `导入完成：\n- 服务器: ${result.hosts_imported}\n- 应用: ${result.applications_imported}${ownerLine}\n- 中间件: ${result.middlewares_imported}\n- Nginx: ${result.nginx_configs_imported}\n- 部署: ${result.deployments_imported}\n- 调用关系: ${result.call_relations_imported}`,
+      `导入结果：\n- 主机：${result.hosts_imported}\n- 应用：${result.applications_imported}\n- 中间件：${result.middlewares_imported}\n- Nginx：${result.nginx_configs_imported}\n- 部署：${result.deployments_imported}\n- 调用关系：${result.call_relations_imported}`,
       "导入结果"
     );
   } catch {
@@ -299,20 +296,13 @@ onMounted(() => {
 
 <template>
   <div class="settings-view">
-    <!-- 存储路径 -->
     <el-card shadow="never" class="settings-card">
       <template #header>
-        <span class="card-title">数据与配置路径</span>
+        <span class="card-title">存储路径</span>
       </template>
-      <el-form
-        :model="storageForm"
-        label-width="140px"
-        v-loading="storageLoading"
-      >
+      <el-form :model="storageForm" label-width="140px" v-loading="storageLoading">
         <el-form-item label="当前根目录">
-          <span class="text-secondary">
-            {{ storageProfile?.active_root_path || "--" }}
-          </span>
+          <span class="text-secondary">{{ storageProfile?.active_root_path || "--" }}</span>
         </el-form-item>
         <el-form-item label="数据库文件">
           <span class="text-secondary">{{ storageProfile?.db_path || "--" }}</span>
@@ -320,44 +310,35 @@ onMounted(() => {
         <el-form-item label="备份目录">
           <span class="text-secondary">{{ storageProfile?.backup_dir || "--" }}</span>
         </el-form-item>
-        <el-form-item label="新根目录">
+        <el-form-item label="新的根目录">
           <div class="storage-path-row">
             <el-input
               v-model="storageForm.root_path"
               clearable
-              placeholder="请选择保存路径"
+              placeholder="请选择或输入新的数据根目录"
             />
             <el-button @click="handleSelectStoragePath">选择目录</el-button>
           </div>
         </el-form-item>
         <el-form-item>
-          <el-button
-            type="primary"
-            :loading="storageSaving"
-            @click="handleSaveStoragePath"
-          >
-            保存并重启
+          <el-button type="primary" :loading="storageSaving" @click="handleSaveStoragePath">
+            保存存储路径
           </el-button>
         </el-form-item>
         <el-form-item>
           <p class="path-tip">
-            保存后会自动迁移数据库与备份文件；若目标目录包含 inframap.db 或
-            backups 目录，将阻止覆盖并提示重新选择。
+            修改后，系统会在新的根目录下维护 `inframap.db` 和 `backups` 目录。
+            为避免数据丢失，请确保目标目录具备读写权限且空间充足。
           </p>
         </el-form-item>
       </el-form>
     </el-card>
 
-    <!-- 备份设置 -->
     <el-card shadow="never" class="settings-card">
       <template #header>
-        <span class="card-title">备份设置</span>
+        <span class="card-title">备份策略</span>
       </template>
-      <el-form
-        :model="settingsForm"
-        label-width="120px"
-        v-loading="settingsLoading"
-      >
+      <el-form :model="settingsForm" label-width="120px" v-loading="settingsLoading">
         <el-form-item label="自动备份">
           <el-switch v-model="settingsForm.auto_backup_enabled" />
         </el-form-item>
@@ -375,7 +356,7 @@ onMounted(() => {
             />
           </el-select>
         </el-form-item>
-        <el-form-item label="最大备份数">
+        <el-form-item label="最大保留数">
           <el-input-number
             v-model="settingsForm.max_backups"
             :min="1"
@@ -387,22 +368,17 @@ onMounted(() => {
           <span class="text-secondary">{{ formatTime(lastBackupTime) }}</span>
         </el-form-item>
         <el-form-item>
-          <el-button
-            type="primary"
-            :loading="settingsSaving"
-            @click="handleSaveSettings"
-          >
-            保存设置
+          <el-button type="primary" :loading="settingsSaving" @click="handleSaveSettings">
+            保存备份设置
           </el-button>
         </el-form-item>
       </el-form>
     </el-card>
 
-    <!-- 备份管理 -->
     <el-card shadow="never" class="settings-card">
       <template #header>
         <div class="card-header-row">
-          <span class="card-title">备份管理</span>
+          <span class="card-title">备份列表</span>
           <el-button
             type="primary"
             size="small"
@@ -419,7 +395,7 @@ onMounted(() => {
         border
         stripe
         class="w-full im-table-fixed-ops"
-        empty-text="暂无备份"
+        empty-text="暂无备份记录"
       >
         <el-table-column prop="filename" label="文件名" min-width="280" />
         <el-table-column label="大小" width="100" align="center">
@@ -427,7 +403,7 @@ onMounted(() => {
             {{ formatSize(row.file_size) }}
           </template>
         </el-table-column>
-        <el-table-column label="时间" width="180" align="center">
+        <el-table-column label="创建时间" width="180" align="center">
           <template #default="{ row }">
             {{ formatTime(row.created_at) }}
           </template>
@@ -455,16 +431,15 @@ onMounted(() => {
       </el-table>
     </el-card>
 
-    <!-- 数据导入导出 -->
     <el-card shadow="never" class="settings-card">
       <template #header>
-        <span class="card-title">数据导入导出</span>
+        <span class="card-title">导入 / 导出</span>
       </template>
       <div class="import-export-actions">
         <div class="action-item">
           <div class="action-desc">
             <strong>导出 JSON</strong>
-            <p>将所有有效数据导出为 JSON 文件，可用于数据迁移或外部备份。</p>
+            <p>将当前资源数据导出为 JSON 文件，便于迁移、备份或离线分析。</p>
           </div>
           <el-button type="primary" :loading="exportLoading" @click="handleExport">
             导出 JSON
@@ -474,7 +449,7 @@ onMounted(() => {
         <div class="action-item">
           <div class="action-desc">
             <strong>导入 JSON</strong>
-            <p>从 JSON 文件导入数据，将覆盖当前所有数据。导入前会自动创建安全备份。</p>
+            <p>从 JSON 文件恢复资源数据。导入前会自动创建备份，用于必要时回滚。</p>
           </div>
           <el-button type="warning" :loading="importLoading" @click="handleImport">
             导入 JSON
@@ -483,17 +458,18 @@ onMounted(() => {
       </div>
     </el-card>
 
-    <!-- 预览弹窗 -->
     <el-dialog v-model="previewVisible" :title="`备份预览 - ${previewFilename}`" width="500px">
       <template v-if="previewData">
         <el-descriptions :column="2" border>
-          <el-descriptions-item label="服务器">{{ previewData.hosts }}</el-descriptions-item>
+          <el-descriptions-item label="主机">{{ previewData.hosts }}</el-descriptions-item>
           <el-descriptions-item label="应用">{{ previewData.applications }}</el-descriptions-item>
           <el-descriptions-item label="中间件">{{ previewData.middlewares }}</el-descriptions-item>
-          <el-descriptions-item label="Nginx 配置">{{ previewData.nginx_configs }}</el-descriptions-item>
-          <el-descriptions-item label="部署关系">{{ previewData.deployments }}</el-descriptions-item>
+          <el-descriptions-item label="Nginx">{{ previewData.nginx_configs }}</el-descriptions-item>
+          <el-descriptions-item label="部署">{{ previewData.deployments }}</el-descriptions-item>
           <el-descriptions-item label="调用关系">{{ previewData.call_relations }}</el-descriptions-item>
-          <el-descriptions-item label="Schema 版本">{{ previewData.schema_version }}</el-descriptions-item>
+          <el-descriptions-item label="Schema 版本">
+            {{ previewData.schema_version }}
+          </el-descriptions-item>
           <el-descriptions-item label="兼容性">
             <el-tag :type="previewData.is_compatible ? 'success' : 'danger'" size="small">
               {{ previewData.is_compatible ? "兼容" : "不兼容" }}
@@ -501,7 +477,7 @@ onMounted(() => {
           </el-descriptions-item>
         </el-descriptions>
         <div v-if="!previewData.is_compatible" class="preview-warning">
-          该备份的 schema 版本高于当前应用版本，恢复可能导致数据异常。
+          当前备份的 schema 版本高于本地应用支持范围，直接恢复可能失败，请先升级应用版本。
         </div>
       </template>
     </el-dialog>

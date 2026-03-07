@@ -18,7 +18,7 @@ describe("resourceCopy", () => {
   });
 
   it("builds copy name with timestamp suffix", () => {
-    expect(buildCopyName("app-core", fixedDate)).toBe("app-core（副本-20260228090507）");
+    expect(buildCopyName("app-core", fixedDate)).toBe("app-core（副本 20260228090507）");
   });
 
   it("strips system fields while keeping business fields", () => {
@@ -53,7 +53,7 @@ describe("resourceCopy", () => {
 
     const draft = buildHostCopyDraft(host, fixedDate);
 
-    expect(draft.hostname).toBe("db-host（副本-20260228090507）");
+    expect(draft.hostname).toBe("db-host（副本 20260228090507）");
     expect(draft.ip_display).toBeUndefined();
     expect(draft.os_type).toBe("Ubuntu 22.04");
     expect(draft.tags).toBe("[\"db\"]");
@@ -69,14 +69,13 @@ describe("resourceCopy", () => {
       port: 8080,
       env: "prod",
       status: "running",
-      owner: "ops",
       owners: ["ops", "devops"],
       created_at: "2026-01-01T00:00:00Z",
       updated_at: "2026-01-01T00:00:00Z",
     };
 
     const draft = buildApplicationCopyDraft(app, fixedDate);
-    expect(draft.name).toBe("payment-api（副本-20260228090507）");
+    expect(draft.name).toBe("payment-api（副本 20260228090507）");
     expect(draft.address).toBe("10.0.1.10");
     expect(draft.owners).toEqual(["ops", "devops"]);
     expect(draft.id).toBeUndefined();
@@ -96,7 +95,7 @@ describe("resourceCopy", () => {
     };
 
     const draft = buildMiddlewareCopyDraft(middleware, fixedDate);
-    expect(draft.name).toBe("redis-cache（副本-20260228090507）");
+    expect(draft.name).toBe("redis-cache（副本 20260228090507）");
     expect(draft.category).toBe("cache");
     expect(draft.id).toBeUndefined();
   });
@@ -114,7 +113,7 @@ describe("resourceCopy", () => {
     };
 
     const draft = buildNginxCopyDraft(nginxConfig, fixedDate);
-    expect(draft.name).toBe("gateway-main（副本-20260228090507）");
+    expect(draft.name).toBe("gateway-main（副本 20260228090507）");
     expect(draft.endpoints).toEqual([{ host: "10.0.9.1", port: 80 }]);
     expect(draft.id).toBeUndefined();
   });

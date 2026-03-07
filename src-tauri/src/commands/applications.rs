@@ -25,19 +25,18 @@ fn row_to_application(row: &rusqlite::Row) -> rusqlite::Result<Application> {
         deploy_mode: row.get(6)?,
         env: row.get(7)?,
         git_repo: row.get(8)?,
-        owner: row.get(9)?,
         owners: Some(Vec::new()),
-        business_application_id: row.get(10)?,
-        business_application_name: row.get(11)?,
-        status: row.get(12)?,
-        description: row.get(13)?,
-        created_at: row.get(14)?,
-        updated_at: row.get(15)?,
+        business_application_id: row.get(9)?,
+        business_application_name: row.get(10)?,
+        status: row.get(11)?,
+        description: row.get(12)?,
+        created_at: row.get(13)?,
+        updated_at: row.get(14)?,
     })
 }
 
 const SELECT_COLUMNS: &str = "id, name, type, address, port, tech_stack, deploy_mode, \
-     env, git_repo, owner, business_application_id, \
+     env, git_repo, business_application_id, \
      (SELECT ba.name FROM business_applications ba WHERE ba.id = applications.business_application_id AND ba.is_deleted = 0) AS business_application_name, \
      status, description, created_at, updated_at";
 
@@ -141,18 +140,7 @@ fn load_owner_map(
 }
 
 fn merge_owner_fields(app: &mut Application, owner_map: &HashMap<String, Vec<String>>) {
-    if let Some(owners) = owner_map.get(&app.id) {
-        app.owners = Some(owners.clone());
-        app.owner = owners.first().cloned();
-        return;
-    }
-
-    let fallback = app.owner.as_deref().unwrap_or("").trim();
-    if fallback.is_empty() {
-        app.owners = Some(Vec::new());
-    } else {
-        app.owners = Some(vec![fallback.to_string()]);
-    }
+    app.owners = Some(owner_map.get(&app.id).cloned().unwrap_or_default());
 }
 
 fn build_applications_where_clause(
@@ -173,7 +161,6 @@ fn build_applications_where_clause(
               OR applications.address LIKE ? \
               OR applications.tech_stack LIKE ? \
               OR applications.git_repo LIKE ? \
-              OR applications.owner LIKE ? \
               OR EXISTS ( \
                     SELECT 1 \
                     FROM taxonomy_bindings tb \
@@ -187,7 +174,7 @@ fn build_applications_where_clause(
                  ))"
             .to_string(),
         );
-        for _ in 0..6 {
+        for _ in 0..5 {
             sql_params.push(Box::new(like_value.clone()));
         }
     }
@@ -324,16 +311,10 @@ fn save_application_inner(
     conn: &rusqlite::Connection,
     data: Application,
 ) -> AppResult<String> {
-    let owners_input = if data.owners.is_some() {
-        data.owners.clone()
-    } else {
-        data.owner.clone().map(|item| vec![item])
-    };
-    let normalized_owners = normalize_owner_names(owners_input);
+    let normalized_owners = normalize_owner_names(data.owners.clone());
 
     let mut normalized_data = data.clone();
     normalized_data.owners = Some(normalized_owners.clone());
-    normalized_data.owner = normalized_owners.first().cloned();
     let tech_stack_terms = parse_tech_stack_terms(normalized_data.tech_stack.as_deref());
     validate_application(&normalized_data).map_err(|e| AppError::validation(command, e))?;
     let now = chrono::Utc::now().to_rfc3339();
@@ -358,8 +339,8 @@ fn save_application_inner(
             };
             conn.execute(
                 "INSERT INTO applications (id, name, type, address, port, tech_stack, deploy_mode,
-                                           env, git_repo, owner, business_application_id, status, description, is_deleted, deleted_at, created_at, updated_at)
-                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,0,NULL,?14,?14)",
+                                           env, git_repo, business_application_id, status, description, is_deleted, deleted_at, created_at, updated_at)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,0,NULL,?13,?13)",
                 rusqlite::params![
                     persisted_id,
                     normalized_data.name,
@@ -370,7 +351,6 @@ fn save_application_inner(
                     normalized_data.deploy_mode,
                     normalized_data.env,
                     normalized_data.git_repo,
-                    normalized_data.owner,
                     normalized_data.business_application_id,
                     normalized_data.status,
                     normalized_data.description,
@@ -409,8 +389,8 @@ fn save_application_inner(
         } else {
             conn.execute(
                 "UPDATE applications SET name=?1, type=?2, address=?3, port=?4, tech_stack=?5, deploy_mode=?6,
-                                         env=?7, git_repo=?8, owner=?9, business_application_id=?10, status=?11, description=?12, updated_at=?13
-                 WHERE id=?14 AND is_deleted=0",
+                                         env=?7, git_repo=?8, business_application_id=?9, status=?10, description=?11, updated_at=?12
+                 WHERE id=?13 AND is_deleted=0",
                 rusqlite::params![
                     normalized_data.name,
                     normalized_data.app_type,
@@ -420,7 +400,6 @@ fn save_application_inner(
                     normalized_data.deploy_mode,
                     normalized_data.env,
                     normalized_data.git_repo,
-                    normalized_data.owner,
                     normalized_data.business_application_id,
                     normalized_data.status,
                     normalized_data.description,
@@ -500,13 +479,14 @@ pub fn delete_application(pool: State<DbPool>, id: String) -> AppResult<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_applications_where_clause, collect_top_tech_stacks, normalize_owner_names,
-        save_application_inner,
+        build_applications_where_clause, collect_top_tech_stacks, merge_owner_fields,
+        normalize_owner_names, row_to_application, save_application_inner, SELECT_COLUMNS,
     };
     use crate::error::AppErrorCode;
     use crate::models::application::Application;
     use crate::models::common::QueryParams;
     use crate::test_helpers::setup_test_db;
+    use serde_json::json;
     use std::collections::HashMap;
 
     #[test]
@@ -562,7 +542,92 @@ mod tests {
         assert!(where_clause.contains("EXISTS"));
         assert!(where_clause.contains("taxonomy_bindings"));
         assert!(!where_clause.contains("application_owners"));
+        assert!(!where_clause.contains("applications.owner"));
         assert!(sql_params.len() >= 6);
+    }
+
+    #[test]
+    fn merge_owner_fields_should_default_to_empty_owner_list_when_taxonomy_binding_missing() {
+        let conn = rusqlite::Connection::open_in_memory().expect("open in-memory db");
+        conn.execute_batch(
+            "CREATE TABLE applications (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                type TEXT NOT NULL,
+                address TEXT,
+                port INTEGER,
+                tech_stack TEXT,
+                deploy_mode TEXT,
+                env TEXT NOT NULL,
+                git_repo TEXT,
+                owner TEXT,
+                business_application_id TEXT,
+                status TEXT NOT NULL,
+                description TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE business_applications (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                is_deleted INTEGER NOT NULL DEFAULT 0
+            );",
+        )
+        .expect("create application tables with stale owner column");
+        conn.execute(
+            "INSERT INTO applications (
+                id, name, type, address, port, tech_stack, deploy_mode,
+                env, git_repo, owner, business_application_id, status, description, created_at, updated_at
+             ) VALUES (
+                'app-stale-owner', 'stale-owner-app', 'backend', NULL, NULL, NULL, NULL,
+                'prod', NULL, 'ignored-owner', NULL, 'running', NULL, datetime('now'), datetime('now')
+             )",
+            [],
+        )
+        .expect("insert application row with stale owner column");
+
+        let sql = format!(
+            "SELECT {} FROM applications WHERE id = 'app-stale-owner'",
+            SELECT_COLUMNS
+        );
+        let mut app = conn
+            .query_row(&sql, [], row_to_application)
+            .expect("query application row with stale owner column");
+
+        merge_owner_fields(&mut app, &HashMap::new());
+        assert_eq!(app.owners, Some(Vec::<String>::new()));
+    }
+
+    #[test]
+    fn save_application_inner_should_skip_owner_bindings_when_owners_missing() {
+        let conn = setup_test_db();
+        let app: Application = serde_json::from_value(json!({
+            "id": "",
+            "name": "owners-missing",
+            "type": "backend",
+            "env": "prod",
+            "status": "running"
+        }))
+        .expect("deserialize application without owners");
+
+        let created_id =
+            save_application_inner("test", &conn, app).expect("create application without owners");
+
+        let owner_binding_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*)
+                 FROM taxonomy_bindings tb
+                 JOIN taxonomy_terms tt ON tt.id = tb.term_id
+                 WHERE tb.resource_type = 'application'
+                   AND tb.resource_id = ?1
+                   AND tb.is_deleted = 0
+                   AND tt.is_deleted = 0
+                   AND tt.field_key = 'owner'",
+                rusqlite::params![created_id],
+                |row| row.get(0),
+            )
+            .expect("count owner taxonomy bindings");
+        assert_eq!(owner_binding_count, 0);
     }
 
     fn make_new_application(name: &str) -> Application {
@@ -576,7 +641,6 @@ mod tests {
             deploy_mode: Some("docker".into()),
             env: "prod".into(),
             git_repo: None,
-            owner: Some("alice".into()),
             owners: Some(vec!["alice".into()]),
             business_application_id: None,
             business_application_name: None,
