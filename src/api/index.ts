@@ -13,3 +13,6 @@ export * from "./topology";
 export * from "./settings";
 export * from "./taxonomy";
 export * from "./import-jobs";
+export * from "./system-jobs";
+export * from "./integrity";
+export * from "./snapshots";

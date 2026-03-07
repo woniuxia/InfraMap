@@ -14,6 +14,8 @@ const routes = [
       { path: "middlewares", name: "Middlewares", component: () => import("@/views/MiddlewaresView.vue"), meta: { title: "中间件" } },
       { path: "nginx-configs", name: "NginxConfigs", component: () => import("@/views/NginxConfigsView.vue"), meta: { title: "负载均衡" } },
       { path: "import-workbench", name: "ImportWorkbench", component: () => import("@/views/ImportWorkbenchView.vue"), meta: { title: "批量录入" } },
+      { path: "jobs", name: "Jobs", component: () => import("@/views/JobCenterView.vue"), meta: { title: "任务中心" } },
+      { path: "integrity-center", name: "IntegrityCenter", component: () => import("@/views/IntegrityCenterView.vue"), meta: { title: "数据健康" } },
       { path: "topology", name: "Topology", component: () => import("@/views/TopologyView.vue"), meta: { title: "拓扑图" } },
       { path: "settings", name: "Settings", component: () => import("@/views/SettingsView.vue"), meta: { title: "系统设置" } },
     ],

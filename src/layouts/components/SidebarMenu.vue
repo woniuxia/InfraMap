@@ -8,6 +8,7 @@ import {
   Collection,
   SetUp,
   DataAnalysis,
+  Files,
   Share,
   UploadFilled,
   Setting,
@@ -28,6 +29,8 @@ const menuItems: { path: string; name: string; icon: Component }[] = [
   { path: "/middlewares", name: "中间件", icon: markRaw(Connection) },
   { path: "/nginx-configs", name: "负载均衡", icon: markRaw(SetUp) },
   { path: "/import-workbench", name: "批量录入", icon: markRaw(UploadFilled) },
+  { path: "/jobs", name: "任务中心", icon: markRaw(Files) },
+  { path: "/integrity-center", name: "数据健康", icon: markRaw(DataAnalysis) },
   { path: "/topology", name: "拓扑图", icon: markRaw(Share) },
   { path: "/settings", name: "系统设置", icon: markRaw(Setting) },
 ];

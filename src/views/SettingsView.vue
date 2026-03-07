@@ -8,7 +8,6 @@ import type {
   UpdateSettingsInput,
   BackupEntry,
   DbPreviewSummary,
-  ImportResult,
 } from "@/types";
 import {
   getStorageProfile,
@@ -21,9 +20,8 @@ import {
   deleteBackup,
   previewRestore,
   restoreBackup,
-  exportJson,
-  importJson,
 } from "@/api/settings";
+import { exportSnapshotV2, importSnapshotV2, previewSnapshotV2 } from "@/api/snapshots";
 
 // --- Storage Path ---
 const storageLoading = ref(false);
@@ -214,15 +212,15 @@ const exportLoading = ref(false);
 async function handleExport() {
   try {
     const filepath = await save({
-      title: "导出 JSON 数据",
-      defaultPath: `inframap_export_${new Date().toISOString().slice(0, 10)}.json`,
-      filters: [{ name: "JSON", extensions: ["json"] }],
+      title: "导出 Snapshot v2 数据",
+      defaultPath: `inframap_snapshot_v2_${new Date().toISOString().slice(0, 10)}.json`,
+      filters: [{ name: "Snapshot v2", extensions: ["json"] }],
     });
     if (!filepath) return;
 
     exportLoading.value = true;
-    await exportJson(filepath);
-    ElMessage.success("JSON 导出成功");
+    const result = await exportSnapshotV2(filepath);
+    ElMessage.success(`Snapshot v2 已导出，共 ${result.total_rows} 行`);
   } catch {
     // error shown by tauriInvoke
   } finally {
@@ -236,24 +234,37 @@ const importLoading = ref(false);
 async function handleImport() {
   try {
     const filepath = await open({
-      title: "导入 JSON 数据",
-      filters: [{ name: "JSON", extensions: ["json"] }],
+      title: "导入 Snapshot v2 数据",
+      filters: [{ name: "Snapshot v2", extensions: ["json"] }],
       multiple: false,
       directory: false,
     });
     if (!filepath || Array.isArray(filepath)) return;
 
+    const preview = await previewSnapshotV2(filepath);
+    const previewLines = [
+      `格式版本：v${preview.manifest.format_version}`,
+      `Schema 版本：${preview.manifest.schema_version}`,
+      `总记录数：${preview.total_rows}`,
+      `兼容性：${preview.compatible ? "兼容" : "不兼容"}`,
+      `快照表统计：${preview.snapshot_counts.map((item) => `${item.table}=${item.count}`).join(" / ") || "无"}`,
+    ];
+
+    if (preview.warnings.length > 0) {
+      previewLines.push(`警告：${preview.warnings.join("；")}`);
+    }
+
     await ElMessageBox.confirm(
-      "导入 JSON 会先创建导入前备份，并用文件中的数据覆盖当前资源数据。确认继续吗？",
-      "确认导入 JSON",
+      `导入前预检完成：\n\n${previewLines.join("\n")}\n\n导入将覆盖当前数据，执行前会自动创建安全备份。确定继续？`,
+      "导入确认",
       { type: "warning" }
     );
 
     importLoading.value = true;
-    const result: ImportResult = await importJson(filepath);
-    ElMessage.success("JSON 导入成功");
+    const result = await importSnapshotV2(filepath);
+    ElMessage.success("Snapshot v2 导入成功");
     ElMessageBox.alert(
-      `导入结果：\n- 主机：${result.hosts_imported}\n- 应用：${result.applications_imported}\n- 中间件：${result.middlewares_imported}\n- Nginx：${result.nginx_configs_imported}\n- 部署：${result.deployments_imported}\n- 调用关系：${result.call_relations_imported}`,
+      `导入完成：\n- 自动备份：${result.backup_filename}\n- 总记录数：${result.total_rows}\n- 表统计：${result.table_counts.map((item) => `${item.table}=${item.count}`).join(" / ") || "无"}`,
       "导入结果"
     );
   } catch {
@@ -433,26 +444,26 @@ onMounted(() => {
 
     <el-card shadow="never" class="settings-card">
       <template #header>
-        <span class="card-title">导入 / 导出</span>
+        <span class="card-title">Snapshot v2 导入导出</span>
       </template>
       <div class="import-export-actions">
         <div class="action-item">
           <div class="action-desc">
-            <strong>导出 JSON</strong>
-            <p>将当前资源数据导出为 JSON 文件，便于迁移、备份或离线分析。</p>
+            <strong>导出 Snapshot v2</strong>
+            <p>将当前有效数据导出为 Snapshot v2 文件，用于迁移、备份与后续任务追踪。</p>
           </div>
           <el-button type="primary" :loading="exportLoading" @click="handleExport">
-            导出 JSON
+            导出 Snapshot v2
           </el-button>
         </div>
         <el-divider />
         <div class="action-item">
           <div class="action-desc">
-            <strong>导入 JSON</strong>
-            <p>从 JSON 文件恢复资源数据。导入前会自动创建备份，用于必要时回滚。</p>
+            <strong>导入 Snapshot v2</strong>
+            <p>导入前先执行预检，再由你确认后导入；导入前会自动创建安全备份。</p>
           </div>
           <el-button type="warning" :loading="importLoading" @click="handleImport">
-            导入 JSON
+            导入 Snapshot v2
           </el-button>
         </div>
       </div>

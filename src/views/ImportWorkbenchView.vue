@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
+import { useRouter } from "vue-router";
 import { ElMessage } from "element-plus";
 import type {
   ExecuteImportRowsInput,
@@ -17,6 +18,7 @@ import {
   previewImportRows,
 } from "@/api/import-jobs";
 
+const router = useRouter();
 const rows = ref<ImportDraftRow[]>([]);
 const preview = ref<ImportPreviewResult | null>(null);
 const executeResult = ref<ImportExecutionResult | null>(null);
@@ -176,13 +178,22 @@ async function handleExecute() {
   executeLoading.value = true;
   try {
     executeResult.value = await executeImportRows(payload);
-    ElMessage.success("批量录入已执行");
+    ElMessage.success("批量录入已执行，可继续查看任务中心或进入数据健康页处理后续动作");
     await loadJobs();
   } catch {
     // error already presented by tauriInvoke
   } finally {
     executeLoading.value = false;
   }
+}
+
+function goToJobs() {
+  loadJobs();
+  router.push({ name: "Jobs" });
+}
+
+function goToIntegrityCenter() {
+  router.push({ name: "IntegrityCenter" });
 }
 
 async function loadJobs() {
@@ -227,7 +238,10 @@ onMounted(() => {
       <template #header>
         <div class="card-header">
           <span class="title">批量录入工作台</span>
-          <span class="hint">当前版本支持 application 资源批量录入</span>
+          <div class="header-actions">
+            <span class="hint">当前版本支持 application 资源批量录入</span>
+            <el-button text type="primary" @click="goToJobs">去任务中心</el-button>
+          </div>
         </div>
       </template>
 
@@ -390,6 +404,11 @@ onMounted(() => {
         </template>
       </el-alert>
 
+      <div v-if="executeResult" class="result-actions">
+        <el-button type="primary" plain @click="goToJobs">继续去任务中心</el-button>
+        <el-button plain @click="goToIntegrityCenter">去数据健康页</el-button>
+      </div>
+
       <el-table :data="jobs" v-loading="jobsLoading" border size="small">
         <el-table-column prop="id" label="任务ID" min-width="250" show-overflow-tooltip />
         <el-table-column prop="status" label="状态" width="160" />
@@ -465,6 +484,12 @@ onMounted(() => {
   gap: 12px;
 }
 
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
 .title {
   font-size: 15px;
   font-weight: 600;
@@ -523,6 +548,13 @@ onMounted(() => {
 
 .result-alert {
   margin-bottom: 12px;
+}
+
+.result-actions {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
 }
 
 .detail-summary {

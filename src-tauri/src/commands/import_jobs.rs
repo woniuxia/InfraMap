@@ -4,6 +4,7 @@ use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
+use crate::commands::system_jobs::record_system_job;
 use crate::db::audit::insert_audit_log;
 use crate::db::DbPool;
 use crate::error::{AppError, AppResult};
@@ -483,6 +484,11 @@ fn execute_import_rows_inner(
 ) -> AppResult<ImportExecutionResult> {
     let strategy = ExecutionStrategy::parse(input.strategy.as_deref())
         .map_err(|err| AppError::validation(command, err))?;
+    let strategy_name = match strategy {
+        ExecutionStrategy::Skip => "skip",
+        ExecutionStrategy::Overwrite => "overwrite",
+        ExecutionStrategy::Block => "block",
+    };
     let preview = preview_import_rows_inner(
         command,
         conn,
@@ -498,11 +504,7 @@ fn execute_import_rows_inner(
          VALUES (?1, 'running', ?2, ?3, 0, 0, 0, 0, ?4, ?4)",
         rusqlite::params![
             job_id,
-            match strategy {
-                ExecutionStrategy::Skip => "skip",
-                ExecutionStrategy::Overwrite => "overwrite",
-                ExecutionStrategy::Block => "block",
-            },
+            strategy_name,
             preview.rows.len() as i64,
             now
         ],
@@ -627,15 +629,57 @@ fn execute_import_rows_inner(
     )
     .map_err(|err| AppError::from_db_error(command, "更新导入任务汇总", err))?;
 
-    Ok(ImportExecutionResult {
-        job_id,
+    let execution_result = ImportExecutionResult {
+        job_id: job_id.clone(),
         status: final_status.to_string(),
         total_rows: preview.rows.len() as u32,
         created_count,
         updated_count,
         skipped_count,
         failed_count,
-    })
+    };
+
+    let payload = serde_json::json!({
+        "strategy": strategy_name,
+        "rows": input.rows,
+    });
+    let result_json = serde_json::json!({
+        "job_id": execution_result.job_id,
+        "import_job_id": execution_result.job_id,
+        "status": execution_result.status,
+        "total_rows": execution_result.total_rows,
+        "created_count": execution_result.created_count,
+        "updated_count": execution_result.updated_count,
+        "skipped_count": execution_result.skipped_count,
+        "failed_count": execution_result.failed_count,
+        "preview_error_count": preview.error_count,
+        "preview_warning_count": preview.warning_count,
+        "preview_conflict_count": preview.conflict_count,
+        "preview_valid_count": preview.valid_count,
+    });
+    let summary = format!(
+        "共 {} 行，新增 {}，更新 {}，跳过 {}，失败 {}",
+        execution_result.total_rows,
+        execution_result.created_count,
+        execution_result.updated_count,
+        execution_result.skipped_count,
+        execution_result.failed_count,
+    );
+    record_system_job(
+        conn,
+        "import_rows",
+        "批量录入",
+        final_status,
+        Some(&summary),
+        Some(&payload),
+        Some(&result_json),
+        None,
+        true,
+        false,
+    )
+    .map_err(|err| AppError::from_db_error(command, "写入系统任务", err))?;
+
+    Ok(execution_result)
 }
 
 fn list_import_jobs_inner(
@@ -929,6 +973,47 @@ mod tests {
             )
             .expect("query inserted application");
         assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn execute_import_rows_should_record_system_job() {
+        let conn = setup_test_db();
+
+        let result = execute_import_rows_inner(
+            "test",
+            &conn,
+            ExecuteImportRowsInput {
+                rows: vec![make_app_row("catalog-api")],
+                strategy: Some("skip".to_string()),
+            },
+        )
+        .expect("execute should succeed");
+
+        let row = conn
+            .query_row(
+                "SELECT job_type, status, title, result_json
+                 FROM system_jobs
+                 WHERE result_json LIKE '%' || ?1 || '%'
+                 ORDER BY created_at DESC
+                 LIMIT 1",
+                rusqlite::params![result.job_id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                    ))
+                },
+            )
+            .expect("system job should be recorded");
+
+        let result_json = row.3.unwrap_or_default();
+
+        assert_eq!(row.0, "import_rows");
+        assert_eq!(row.1, "completed");
+        assert_eq!(row.2, "批量录入");
+        assert!(result_json.contains("catalog-api") || result_json.contains(&result.job_id));
     }
 
     #[test]
