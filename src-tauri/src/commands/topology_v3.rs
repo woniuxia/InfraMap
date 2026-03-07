@@ -7,7 +7,8 @@ use crate::models::topology_v3::{
     TopologyEvidenceV3Query, TopologyImpactV3, TopologyImpactV3Query, TopologyNeighborV3,
     TopologyPathItemV3, TopologyPathsV3, TopologyPathsV3Query, TopologySnapshotMetaV3,
     TopologySnapshotV3, TopologySnapshotV3Query, TopologyTaskInsightV3, TopologyTaskViewV3,
-    TopologyTaskViewV3Query,
+    TopologyTaskViewV3Query, TopologyTroubleshootReportSummaryV3,
+    TopologyTroubleshootReportV3, TopologyTroubleshootReportV3Query,
 };
 use rusqlite::Connection;
 use std::collections::{HashMap, HashSet};
@@ -469,6 +470,138 @@ pub fn get_topology_evidence_v3_inner(
     })
 }
 
+pub fn get_topology_troubleshoot_report_v3_inner(
+    conn: &Connection,
+    query: &TopologyTroubleshootReportV3Query,
+) -> Result<TopologyTroubleshootReportV3, String> {
+    let drilldown = get_topology_drilldown_v3_inner(
+        conn,
+        &TopologyDrilldownV3Query {
+            node_id: query.node_id.clone(),
+            task_view: query.task_view.clone(),
+            env: None,
+            max_depth: None,
+            direction: None,
+        },
+    )?;
+
+    let evidence = get_topology_evidence_v3_inner(
+        conn,
+        &TopologyEvidenceV3Query {
+            node_id: query.node_id.clone(),
+            edge_id: None,
+            related_node_id: None,
+            task_view: query.task_view.clone(),
+            max_items: query.evidence_limit,
+        },
+    )?;
+
+    let deployment_count = conn
+        .query_row(
+            "SELECT COUNT(*)
+             FROM deployments
+             WHERE is_deleted = 0
+               AND resource_id = ?1",
+            rusqlite::params![query.node_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .map(|count| count as u32)
+        .map_err(|err| err.to_string())?;
+
+    let recent_audit_count = conn
+        .query_row(
+            "SELECT COUNT(*)
+             FROM audit_logs
+             WHERE resource_id = ?1",
+            rusqlite::params![query.node_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .map(|count| count as u32)
+        .map_err(|err| err.to_string())?;
+
+    let status_severity = match drilldown.node.status.as_deref() {
+        Some("stopped") => "critical",
+        Some("maintenance") => "warning",
+        Some("running") => "info",
+        Some(_) => "warning",
+        None => "info",
+    }
+    .to_string();
+
+    let mut insights = Vec::new();
+
+    if drilldown.node.status.as_deref() != Some("running") {
+        insights.push(TopologyTaskInsightV3 {
+            kind: "status".to_string(),
+            title: "节点状态需要关注".to_string(),
+            description: format!(
+                "当前节点状态为 {}",
+                drilldown.node.status.as_deref().unwrap_or("unknown")
+            ),
+            severity: status_severity.clone(),
+            node_ids: vec![drilldown.node.id.clone()],
+            edge_ids: Vec::new(),
+        });
+    }
+
+    if deployment_count == 0 {
+        insights.push(TopologyTaskInsightV3 {
+            kind: "deployment".to_string(),
+            title: "缺少部署记录".to_string(),
+            description: "当前节点尚未关联部署记录，请先核对部署信息。".to_string(),
+            severity: "warning".to_string(),
+            node_ids: vec![drilldown.node.id.clone()],
+            edge_ids: Vec::new(),
+        });
+    }
+
+    if recent_audit_count > 0 {
+        insights.push(TopologyTaskInsightV3 {
+            kind: "audit".to_string(),
+            title: "存在最近变更线索".to_string(),
+            description: format!("已记录 {} 条审计事件，请优先核对最近变更。", recent_audit_count),
+            severity: if recent_audit_count >= 2 {
+                "warning".to_string()
+            } else {
+                "info".to_string()
+            },
+            node_ids: vec![drilldown.node.id.clone()],
+            edge_ids: Vec::new(),
+        });
+    }
+
+    insights.push(TopologyTaskInsightV3 {
+        kind: "dependency".to_string(),
+        title: "依赖关系摘要".to_string(),
+        description: format!(
+            "入边 {}，出边 {}。",
+            drilldown.inbound_edge_count, drilldown.outbound_edge_count
+        ),
+        severity: if drilldown.inbound_edge_count >= 2 || drilldown.outbound_edge_count >= 2 {
+            "warning".to_string()
+        } else {
+            "info".to_string()
+        },
+        node_ids: vec![drilldown.node.id.clone()],
+        edge_ids: Vec::new(),
+    });
+
+    Ok(TopologyTroubleshootReportV3 {
+        node: drilldown.node,
+        summary: TopologyTroubleshootReportSummaryV3 {
+            inbound_edge_count: drilldown.inbound_edge_count,
+            outbound_edge_count: drilldown.outbound_edge_count,
+            deployment_count,
+            recent_audit_count,
+            status_severity,
+        },
+        upstream: drilldown.upstream,
+        downstream: drilldown.downstream,
+        evidence,
+        insights,
+    })
+}
+
 fn map_kind_counts(map: HashMap<String, u32>) -> Vec<TopologyKindCount> {
     let mut items: Vec<TopologyKindCount> = map
         .into_iter()
@@ -621,6 +754,19 @@ pub fn get_topology_evidence_v3(
         .map_err(|e| AppError::from_db_error(command, "collect topology evidence v3", e))
 }
 
+#[tauri::command]
+pub fn get_topology_troubleshoot_report_v3(
+    pool: State<DbPool>,
+    query: TopologyTroubleshootReportV3Query,
+) -> AppResult<TopologyTroubleshootReportV3> {
+    let command = "get_topology_troubleshoot_report_v3";
+    let conn = pool
+        .get()
+        .map_err(|e| AppError::db_unavailable(command, format!("Pool error: {e}")))?;
+    get_topology_troubleshoot_report_v3_inner(&conn, &query)
+        .map_err(|e| AppError::from_db_error(command, "build topology troubleshoot report v3", e))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -628,6 +774,15 @@ mod tests {
         insert_test_application, insert_test_dependency, insert_test_deployment, insert_test_host,
         setup_test_db,
     };
+
+    fn insert_test_audit_log(conn: &Connection, id: &str, resource_id: &str, action: &str) {
+        conn.execute(
+            "INSERT INTO audit_logs (id, action, resource_type, resource_id, resource_name, changes, created_at)
+             VALUES (?1, ?2, 'application', ?3, 'App-A', NULL, ?4)",
+            rusqlite::params![id, action, resource_id, chrono::Utc::now().to_rfc3339()],
+        )
+        .expect("insert test audit log should succeed");
+    }
 
     fn setup_graph(conn: &Connection) {
         insert_test_application(conn, "A", "App-A", "prod");
@@ -803,5 +958,93 @@ mod tests {
             .items
             .iter()
             .any(|item| item.evidence_type == "profile"));
+    }
+
+    #[test]
+    fn topology_v3_troubleshoot_report_should_flag_abnormal_status() {
+        let conn = setup_test_db();
+        setup_graph(&conn);
+
+        conn.execute(
+            "UPDATE applications SET status = 'maintenance' WHERE id = 'A'",
+            [],
+        )
+        .expect("update status should succeed");
+
+        let result = get_topology_troubleshoot_report_v3_inner(
+            &conn,
+            &TopologyTroubleshootReportV3Query {
+                node_id: "A".to_string(),
+                task_view: Some("troubleshoot".to_string()),
+                evidence_limit: Some(10),
+            },
+        )
+        .expect("troubleshoot report query");
+
+        assert_eq!(result.summary.status_severity, "warning");
+        assert!(result.insights.iter().any(|item| item.kind == "status"));
+    }
+
+    #[test]
+    fn topology_v3_troubleshoot_report_should_flag_missing_deployment() {
+        let conn = setup_test_db();
+        setup_graph(&conn);
+
+        let result = get_topology_troubleshoot_report_v3_inner(
+            &conn,
+            &TopologyTroubleshootReportV3Query {
+                node_id: "A".to_string(),
+                task_view: Some("troubleshoot".to_string()),
+                evidence_limit: Some(10),
+            },
+        )
+        .expect("troubleshoot report query");
+
+        assert_eq!(result.summary.deployment_count, 0);
+        assert!(result.insights.iter().any(|item| item.kind == "deployment"));
+    }
+
+    #[test]
+    fn topology_v3_troubleshoot_report_should_count_recent_audit_changes() {
+        let conn = setup_test_db();
+        setup_graph(&conn);
+        insert_test_audit_log(&conn, "audit-1", "A", "update");
+        insert_test_audit_log(&conn, "audit-2", "A", "deploy");
+
+        let result = get_topology_troubleshoot_report_v3_inner(
+            &conn,
+            &TopologyTroubleshootReportV3Query {
+                node_id: "A".to_string(),
+                task_view: Some("troubleshoot".to_string()),
+                evidence_limit: Some(10),
+            },
+        )
+        .expect("troubleshoot report query");
+
+        assert_eq!(result.summary.recent_audit_count, 2);
+        assert!(result.insights.iter().any(|item| item.kind == "audit"));
+    }
+
+    #[test]
+    fn topology_v3_troubleshoot_report_should_include_dependency_summary_counts() {
+        let conn = setup_test_db();
+        setup_graph(&conn);
+        insert_test_host(&conn, "H1", "host-1", "10.0.0.1");
+        insert_test_deployment(&conn, "dep-1", "C", "application", "H1");
+
+        let result = get_topology_troubleshoot_report_v3_inner(
+            &conn,
+            &TopologyTroubleshootReportV3Query {
+                node_id: "C".to_string(),
+                task_view: Some("troubleshoot".to_string()),
+                evidence_limit: Some(10),
+            },
+        )
+        .expect("troubleshoot report query");
+
+        assert_eq!(result.summary.inbound_edge_count, 2);
+        assert_eq!(result.summary.outbound_edge_count, 1);
+        assert_eq!(result.summary.deployment_count, 1);
+        assert!(result.insights.iter().any(|item| item.kind == "dependency"));
     }
 }

@@ -431,6 +431,7 @@ export interface TopologyV3TaskViewQuery {
   env?: TopologyEnv;
   maxDepth?: number;
   focusNodeId?: string;
+  nodeId?: string;
 }
 
 export interface TopologyV3PathsQuery {
@@ -455,6 +456,12 @@ export interface TopologyV3EvidenceQuery {
   relatedNodeId?: string;
   taskView?: TopologyTaskViewMode;
   maxItems?: number;
+}
+
+export interface TopologyV3TroubleshootReportQuery {
+  nodeId: string;
+  taskView?: TopologyTaskViewMode;
+  evidenceLimit?: number;
 }
 
 export interface TopologyV3Node {
@@ -519,12 +526,30 @@ export interface TopologyV3SnapshotResponse {
   legend_stats?: TopologyLegendStats;
   layoutHints?: TopologyLayoutHints;
   layout_hints?: TopologyLayoutHints;
+  focusNode?: TopologyV3Node;
+  focus_node?: TopologyV3Node;
+  nodeCount?: number;
+  node_count?: number;
+  edgeCount?: number;
+  edge_count?: number;
 }
 
-export interface TopologyV3DrilldownResponse extends TopologyV3SnapshotResponse {
-  centerNodeId?: string;
-  center_node_id?: string;
-  depth?: number;
+export interface TopologyV3Neighbor {
+  id: string;
+  name: string;
+  nodeType?: TopologyNodeType;
+  node_type?: TopologyNodeType;
+  env: TopologyEnv;
+}
+
+export interface TopologyV3DrilldownResponse {
+  node: TopologyV3Node;
+  upstream: TopologyV3Neighbor[];
+  downstream: TopologyV3Neighbor[];
+  inboundEdgeCount?: number;
+  inbound_edge_count?: number;
+  outboundEdgeCount?: number;
+  outbound_edge_count?: number;
 }
 
 export interface TopologyV3TaskInsight {
@@ -583,7 +608,16 @@ export interface TopologyV3ImpactResponse {
   meta?: TopologyV3Meta;
 }
 
-export type TopologyV3EvidenceType = "call_relation" | "deployment" | "metric" | "alert" | "change" | "annotation";
+export type TopologyV3EvidenceType =
+  | "profile"
+  | "dependency_summary"
+  | "deployment"
+  | "audit"
+  | "call_relation"
+  | "metric"
+  | "alert"
+  | "change"
+  | "annotation";
 
 export interface TopologyV3EvidenceItem {
   id: string;
@@ -603,6 +637,23 @@ export interface TopologyV3EvidenceResponse {
   items: TopologyV3EvidenceItem[];
   total: number;
   meta?: TopologyV3Meta;
+}
+
+export interface TopologyV3TroubleshootSummary {
+  inboundEdgeCount: number;
+  outboundEdgeCount: number;
+  deploymentCount: number;
+  recentAuditCount: number;
+  statusSeverity: "info" | "warning" | "critical";
+}
+
+export interface TopologyV3TroubleshootReport {
+  node: TopologyV3Node;
+  summary: TopologyV3TroubleshootSummary;
+  upstream: TopologyV3Neighbor[];
+  downstream: TopologyV3Neighbor[];
+  evidence: TopologyV3EvidenceResponse;
+  insights: TopologyV3TaskInsight[];
 }
 
 // Settings & Backup types

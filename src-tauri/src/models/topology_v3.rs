@@ -213,3 +213,35 @@ pub struct TopologyEvidenceV3 {
     pub items: Vec<TopologyEvidenceItemV3>,
     pub total: u32,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TopologyTroubleshootReportV3Query {
+    pub node_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub task_view: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub evidence_limit: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TopologyTroubleshootReportSummaryV3 {
+    pub inbound_edge_count: u32,
+    pub outbound_edge_count: u32,
+    pub deployment_count: u32,
+    pub recent_audit_count: u32,
+    pub status_severity: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TopologyTroubleshootReportV3 {
+    pub node: TopologyNodeV2,
+    pub summary: TopologyTroubleshootReportSummaryV3,
+    pub upstream: Vec<TopologyNeighborV3>,
+    pub downstream: Vec<TopologyNeighborV3>,
+    pub evidence: TopologyEvidenceV3,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub insights: Vec<TopologyTaskInsightV3>,
+}

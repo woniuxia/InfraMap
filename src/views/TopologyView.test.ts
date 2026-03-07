@@ -2,7 +2,7 @@ import { defineComponent, h } from "vue";
 import { flushPromises, mount } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import TopologyView from "@/views/TopologyView.vue";
-import type { TopologyGraph } from "@/types";
+import type { TopologyGraph, TopologyV3TroubleshootReport } from "@/types";
 
 const {
   storeState,
@@ -11,7 +11,7 @@ const {
   setMaxDepthMock,
   getTopologyPathsV3Mock,
   getTopologyImpactV3Mock,
-  getTopologyEvidenceV3Mock,
+  getTopologyTroubleshootReportV3Mock,
   getApplicationMock,
   getMiddlewareMock,
   getNginxConfigMock,
@@ -37,9 +37,28 @@ const {
     totalCount: 0,
     maxDepth: 0,
   })),
-  getTopologyEvidenceV3Mock: vi.fn(async () => ({
-    items: [],
-    total: 0,
+  getTopologyTroubleshootReportV3Mock: vi.fn(async (): Promise<TopologyV3TroubleshootReport> => ({
+    node: {
+      id: "node-1",
+      name: "订单服务",
+      nodeType: "application",
+      env: "prod",
+      status: "running",
+    },
+    summary: {
+      inboundEdgeCount: 1,
+      outboundEdgeCount: 2,
+      deploymentCount: 1,
+      recentAuditCount: 0,
+      statusSeverity: "info",
+    },
+    upstream: [],
+    downstream: [],
+    evidence: {
+      items: [],
+      total: 0,
+    },
+    insights: [],
   })),
   getApplicationMock: vi.fn(async () => ({
     id: "node-1",
@@ -85,7 +104,7 @@ setMaxDepthMock.mockImplementation((maxDepth: number) => {
 
 const graphFixture: TopologyGraph = {
   lanes: [
-    { id: "prod", label: "生产", order: 0, node_count: 1, app_count: 1 },
+    { id: "prod", label: "生产", order: 0, node_count: 2, app_count: 2 },
     { id: "test", label: "测试", order: 1, node_count: 0, app_count: 0 },
     { id: "dev", label: "开发", order: 2, node_count: 0, app_count: 0 },
   ],
@@ -101,17 +120,28 @@ const graphFixture: TopologyGraph = {
         address: "10.0.0.11",
       },
     },
+    {
+      id: "node-2",
+      name: "inventory-service",
+      node_type: "application",
+      env: "prod",
+      group_kind: "application_service",
+      importance: 1,
+      extra: {
+        address: "10.0.0.12",
+      },
+    },
   ],
   edges: [],
   legend_stats: {
     env_counts: [
-      { env: "prod", count: 1, app_count: 1 },
+      { env: "prod", count: 2, app_count: 2 },
       { env: "test", count: 0, app_count: 0 },
       { env: "dev", count: 0, app_count: 0 },
     ],
-    node_type_counts: [{ kind: "application", count: 1 }],
+    node_type_counts: [{ kind: "application", count: 2 }],
     edge_type_counts: [],
-    application_service_count: 1,
+    application_service_count: 2,
     current_env: "prod",
     external_node_count: 0,
     cross_env_edge_count: 0,
@@ -122,6 +152,46 @@ const graphFixture: TopologyGraph = {
     high_density_mode: false,
   },
 };
+
+function createTroubleshootReport(
+  nodeId: string,
+  name: string,
+  inboundEdgeCount: number,
+): TopologyV3TroubleshootReport {
+  return {
+    node: {
+      id: nodeId,
+      name,
+      nodeType: "application",
+      env: "prod",
+      status: "running",
+    },
+    summary: {
+      inboundEdgeCount,
+      outboundEdgeCount: 2,
+      deploymentCount: 1,
+      recentAuditCount: 0,
+      statusSeverity: "info",
+    },
+    upstream: [],
+    downstream: [],
+    evidence: {
+      items: [],
+      total: 0,
+    },
+    insights: [],
+  };
+}
+
+function createDeferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((innerResolve, innerReject) => {
+    resolve = innerResolve;
+    reject = innerReject;
+  });
+  return { promise, resolve, reject };
+}
 
 vi.mock("@/stores/topology", () => ({
   useTopologyStore: () => ({
@@ -145,7 +215,7 @@ vi.mock("@/stores/topology", () => ({
 vi.mock("@/api/topologyV3", () => ({
   getTopologyPathsV3: getTopologyPathsV3Mock,
   getTopologyImpactV3: getTopologyImpactV3Mock,
-  getTopologyEvidenceV3: getTopologyEvidenceV3Mock,
+  getTopologyTroubleshootReportV3: getTopologyTroubleshootReportV3Mock,
 }));
 
 vi.mock("@/api/applications", () => ({
@@ -218,6 +288,7 @@ const TopologyCanvasStub = defineComponent({
   },
   setup(props, { expose, emit }) {
     const sampleNode = graphFixture.nodes[0];
+    const secondaryNode = graphFixture.nodes[1];
 
     expose({
       highlightSearch: highlightSearchMock,
@@ -245,6 +316,17 @@ const TopologyCanvasStub = defineComponent({
             },
           },
           "emit-node-click",
+        ),
+        h(
+          "button",
+          {
+            "data-testid": "emit-node-click-2",
+            onClick: (event: MouseEvent) => {
+              event.stopPropagation();
+              emit("node-click", secondaryNode);
+            },
+          },
+          "emit-node-click-2",
         ),
         h(
           "button",
@@ -289,7 +371,40 @@ const TopologyCanvasStub = defineComponent({
 
 const TopologyDetailPanelStub = defineComponent({
   name: "TopologyDetailPanel",
-  template: `<div data-testid="detail-panel" />`,
+  props: {
+    visible: {
+      type: Boolean,
+      default: false,
+    },
+    activeTab: {
+      type: String,
+      default: "overview",
+    },
+    troubleshootLoading: {
+      type: Boolean,
+      default: false,
+    },
+    troubleshootReport: {
+      type: Object,
+      default: null,
+    },
+    selectedNode: {
+      type: Object,
+      default: null,
+    },
+  },
+  template: `
+    <div data-testid="detail-panel" :data-visible="visible ? 'on' : 'off'" :data-tab="activeTab">
+      <span data-testid="panel-loading">{{ troubleshootLoading ? 'on' : 'off' }}</span>
+      <span data-testid="panel-node">{{ selectedNode?.name || '' }}</span>
+      <span data-testid="panel-summary-inbound">{{ troubleshootReport?.summary?.inboundEdgeCount ?? '' }}</span>
+      <button data-testid="panel-tab-evidence" @click="$emit('tab-change', 'evidence')">panel-tab-evidence</button>
+      <button data-testid="panel-tab-overview" @click="$emit('tab-change', 'overview')">panel-tab-overview</button>
+      <button data-testid="panel-path-action" @click="$emit('start-path-trace')">panel-path-action</button>
+      <button data-testid="panel-impact-action" @click="$emit('analyze-impact')">panel-impact-action</button>
+      <button data-testid="panel-edit-action" @click="$emit('edit-node')">panel-edit-action</button>
+    </div>
+  `,
 });
 
 const ApplicationEditorDialogStub = defineComponent({
@@ -332,7 +447,7 @@ function mountView(options?: {
   setMaxDepthMock.mockClear();
   getTopologyPathsV3Mock.mockClear();
   getTopologyImpactV3Mock.mockClear();
-  getTopologyEvidenceV3Mock.mockClear();
+  getTopologyTroubleshootReportV3Mock.mockClear();
   getApplicationMock.mockClear();
   getMiddlewareMock.mockClear();
   getNginxConfigMock.mockClear();
@@ -562,24 +677,134 @@ describe("TopologyView", () => {
 
     await wrapper.get('[data-testid="task-insight-0"]').trigger("click");
     expect(highlightSearchMock).toHaveBeenCalledWith(["node-1"], "node-1");
-    expect(getTopologyEvidenceV3Mock).toHaveBeenCalledWith({
+    expect(getTopologyTroubleshootReportV3Mock).toHaveBeenCalledWith({
       nodeId: "node-1",
       taskView: "explore",
-      maxItems: 20,
+      evidenceLimit: 20,
     });
+    expect(wrapper.get('[data-testid="detail-panel"]').attributes('data-tab')).toBe('evidence');
   });
 
-  it("requests V3 evidence when opening node detail panel", async () => {
+  it("requests troubleshoot report when opening node detail panel", async () => {
     const wrapper = mountView();
     await flushPromises();
 
     await wrapper.get('[data-testid="emit-node-click"]').trigger("click");
     await flushPromises();
 
-    expect(getTopologyEvidenceV3Mock).toHaveBeenCalledWith({
+    expect(getTopologyTroubleshootReportV3Mock).toHaveBeenCalledWith({
       nodeId: "node-1",
       taskView: "explore",
-      maxItems: 20,
+      evidenceLimit: 20,
     });
+    expect(wrapper.get('[data-testid="detail-panel"]').attributes('data-visible')).toBe('on');
+    expect(wrapper.get('[data-testid="detail-panel"]').attributes('data-tab')).toBe('overview');
+    expect(wrapper.get('[data-testid="panel-summary-inbound"]').text()).toBe('1');
+  });
+
+  it("ignores stale troubleshoot responses when switching nodes quickly", async () => {
+    const nodeOneRequest = createDeferred<TopologyV3TroubleshootReport>();
+    const nodeTwoRequest = createDeferred<TopologyV3TroubleshootReport>();
+    getTopologyTroubleshootReportV3Mock
+      .mockImplementationOnce(() => nodeOneRequest.promise)
+      .mockImplementationOnce(() => nodeTwoRequest.promise);
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.get('[data-testid="emit-node-click"]').trigger("click");
+    await flushPromises();
+
+    await wrapper.get('[data-testid="emit-node-click-2"]').trigger("click");
+    await flushPromises();
+
+    expect(wrapper.get('[data-testid="panel-node"]').text()).toBe("inventory-service");
+    expect(wrapper.get('[data-testid="panel-loading"]').text()).toBe("on");
+
+    nodeOneRequest.resolve(createTroubleshootReport("node-1", "order-service", 3));
+    await flushPromises();
+
+    expect(wrapper.get('[data-testid="panel-node"]').text()).toBe("inventory-service");
+    expect(wrapper.get('[data-testid="panel-loading"]').text()).toBe("on");
+    expect(wrapper.get('[data-testid="panel-summary-inbound"]').text()).toBe("");
+
+    nodeTwoRequest.resolve(createTroubleshootReport("node-2", "inventory-service", 9));
+    await flushPromises();
+
+    expect(wrapper.get('[data-testid="panel-node"]').text()).toBe("inventory-service");
+    expect(wrapper.get('[data-testid="panel-loading"]').text()).toBe("off");
+    expect(wrapper.get('[data-testid="panel-summary-inbound"]').text()).toBe("9");
+  });
+
+  it("refreshes troubleshoot report when task view changes with panel open", async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.get('[data-testid="emit-node-click"]').trigger("click");
+    await flushPromises();
+    getTopologyTroubleshootReportV3Mock.mockClear();
+
+    await wrapper.get('[data-testid="task-view-impact"]').trigger("click");
+    await flushPromises();
+
+    expect(getTopologyTroubleshootReportV3Mock).toHaveBeenCalledWith({
+      nodeId: 'node-1',
+      taskView: 'impact',
+      evidenceLimit: 20,
+    });
+  });
+
+
+  it("clears stale troubleshoot summary while a new node report is loading", async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.get('[data-testid="emit-node-click"]').trigger("click");
+    await flushPromises();
+
+    expect(wrapper.get('[data-testid="panel-summary-inbound"]').text()).toBe("1");
+
+    const pendingRequest = createDeferred<TopologyV3TroubleshootReport>();
+
+    getTopologyTroubleshootReportV3Mock.mockImplementationOnce(() => pendingRequest.promise);
+
+    const secondNode = {
+      ...graphFixture.nodes[0],
+      id: "node-2",
+      name: "service-2",
+    };
+    wrapper.findComponent({ name: "TopologyCanvas" }).vm.$emit("node-click", secondNode);
+    await flushPromises();
+
+    expect(wrapper.get('[data-testid="panel-node"]').text()).toBe("service-2");
+    expect(wrapper.get('[data-testid="panel-loading"]').text()).toBe("on");
+    expect(wrapper.get('[data-testid="panel-summary-inbound"]').text()).toBe("");
+
+    pendingRequest.resolve({
+      node: {
+        id: "node-2",
+        name: "service-2",
+        nodeType: "application",
+        env: "prod",
+        status: "running",
+      },
+      summary: {
+        inboundEdgeCount: 9,
+        outboundEdgeCount: 1,
+        deploymentCount: 1,
+        recentAuditCount: 0,
+        statusSeverity: "info",
+      },
+      upstream: [],
+      downstream: [],
+      evidence: {
+        items: [],
+        total: 0,
+      },
+      insights: [],
+    });
+    await flushPromises();
+
+    expect(wrapper.get('[data-testid="panel-summary-inbound"]').text()).toBe("9");
   });
 });

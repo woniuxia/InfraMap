@@ -99,6 +99,7 @@ pub fn run() {
             commands::topology_v3::get_topology_paths_v3,
             commands::topology_v3::get_topology_impact_v3,
             commands::topology_v3::get_topology_evidence_v3,
+            commands::topology_v3::get_topology_troubleshoot_report_v3,
             commands::settings::get_settings,
             commands::settings::update_settings,
             commands::settings::get_storage_profile,

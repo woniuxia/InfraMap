@@ -4,7 +4,7 @@ import { ElMessage } from "element-plus";
 import TopologyCanvas from "@/components/topology/TopologyCanvas.vue";
 import TopologyControlBar from "@/components/topology/TopologyControlBar.vue";
 import TopologyDetailPanel from "@/components/topology/TopologyDetailPanel.vue";
-import { getTopologyEvidenceV3, getTopologyImpactV3, getTopologyPathsV3 } from "@/api/topologyV3";
+import { getTopologyImpactV3, getTopologyPathsV3, getTopologyTroubleshootReportV3 } from "@/api/topologyV3";
 import { getApplication } from "@/api/applications";
 import { getMiddleware } from "@/api/middlewares";
 import { getNginxConfig } from "@/api/nginx-configs";
@@ -20,8 +20,8 @@ import type {
   PathResult,
   TopologyNode,
   TopologyTaskViewMode,
-  TopologyV3EvidenceItem,
   TopologyV3TaskInsight,
+  TopologyV3TroubleshootReport,
 } from "@/types";
 import {
   DEFAULT_TOPOLOGY_FILTER,
@@ -60,8 +60,13 @@ const canvasRef = ref<InstanceType<typeof TopologyCanvas>>();
 const selectedLayout = ref<"force" | "dagre">("force");
 const warnedLayoutFallbackReasons = new Set<string>();
 
-const panelMode = ref<"detail" | "path" | "impact" | null>(null);
+type TopologyWorkbenchTab = "overview" | "evidence" | "path" | "impact";
+
+const panelVisible = ref(false);
+const activePanelTab = ref<TopologyWorkbenchTab>("overview");
 const selectedNode = ref<TopologyNode | null>(null);
+const troubleshootReport = ref<TopologyV3TroubleshootReport | null>(null);
+const troubleshootLoading = ref(false);
 const pathResult = ref<PathResult | null>(null);
 const impactResult = ref<ImpactResult | null>(null);
 
@@ -82,11 +87,8 @@ const nginxEditorDraft = ref<Partial<NginxConfig>>({});
 const isFullscreen = ref(false);
 const focusNeighborhoodEnabled = ref(true);
 const containerRef = ref<HTMLDivElement>();
-const evidenceItems = ref<TopologyV3EvidenceItem[]>([]);
-const evidenceTotal = ref(0);
-const evidenceLoading = ref(false);
-const evidenceCache = new Map<string, { items: TopologyV3EvidenceItem[]; total: number; loadedAt: number }>();
-let evidenceRequestVersion = 0;
+const troubleshootCache = new Map<string, { report: TopologyV3TroubleshootReport; loadedAt: number }>();
+let troubleshootRequestVersion = 0;
 
 const nodeNameMap = computed(() => {
   const map: Record<string, string> = {};
@@ -106,15 +108,14 @@ function isExternalNode(node: TopologyNode | null): boolean {
   return isExternalTopologyNode(node);
 }
 
-function evidenceCacheKey(nodeId: string): string {
+function troubleshootCacheKey(nodeId: string): string {
   return `${topologyStore.taskView}:${topologyStore.maxDepth}:${nodeId}`;
 }
 
-function resetEvidenceState() {
-  evidenceRequestVersion += 1;
-  evidenceLoading.value = false;
-  evidenceItems.value = [];
-  evidenceTotal.value = 0;
+function resetTroubleshootState() {
+  troubleshootRequestVersion += 1;
+  troubleshootLoading.value = false;
+  troubleshootReport.value = null;
 }
 
 function resolveInsightNodeIds(insight: TopologyV3TaskInsight): string[] {
@@ -127,45 +128,40 @@ function insightSeverityLabel(insight: TopologyV3TaskInsight): string {
   return "提示";
 }
 
-async function loadEvidenceForNode(node: TopologyNode, forceRefresh = false) {
-  const currentVersion = ++evidenceRequestVersion;
-  const cacheKey = evidenceCacheKey(node.id);
+async function loadTroubleshootReport(node: TopologyNode, forceRefresh = false) {
+  const currentVersion = ++troubleshootRequestVersion;
+  const cacheKey = troubleshootCacheKey(node.id);
   if (!forceRefresh) {
-    const cached = evidenceCache.get(cacheKey);
+    const cached = troubleshootCache.get(cacheKey);
     if (cached) {
-      evidenceItems.value = cached.items;
-      evidenceTotal.value = cached.total;
-      evidenceLoading.value = false;
+      troubleshootReport.value = cached.report;
+      troubleshootLoading.value = false;
       return;
     }
   }
 
-  evidenceLoading.value = true;
+  troubleshootReport.value = null;
+  troubleshootLoading.value = true;
 
   try {
-    const response = await getTopologyEvidenceV3({
+    const response = await getTopologyTroubleshootReportV3({
       nodeId: node.id,
       taskView: topologyStore.taskView,
-      maxItems: 20,
+      evidenceLimit: 20,
     });
-    if (currentVersion !== evidenceRequestVersion) return;
+    if (currentVersion !== troubleshootRequestVersion) return;
 
-    const items = (response.items || []).slice(0, 20);
-    const total = response.total ?? items.length;
-    evidenceItems.value = items;
-    evidenceTotal.value = total;
-    evidenceCache.set(cacheKey, {
-      items,
-      total,
+    troubleshootReport.value = response;
+    troubleshootCache.set(cacheKey, {
+      report: response,
       loadedAt: Date.now(),
     });
   } catch {
-    if (currentVersion !== evidenceRequestVersion) return;
-    evidenceItems.value = [];
-    evidenceTotal.value = 0;
+    if (currentVersion !== troubleshootRequestVersion) return;
+    troubleshootReport.value = null;
   } finally {
-    if (currentVersion === evidenceRequestVersion) {
-      evidenceLoading.value = false;
+    if (currentVersion === troubleshootRequestVersion) {
+      troubleshootLoading.value = false;
     }
   }
 }
@@ -202,8 +198,8 @@ async function handleTaskViewChange(taskView: TopologyTaskViewMode) {
   if (topologyStore.taskView === taskView) return;
   topologyStore.setTaskView(taskView);
   await loadData();
-  if (panelMode.value === "detail" && selectedNode.value) {
-    await loadEvidenceForNode(selectedNode.value, true);
+  if (panelVisible.value && selectedNode.value) {
+    await loadTroubleshootReport(selectedNode.value, true);
   }
 }
 
@@ -214,9 +210,31 @@ async function handleMaxDepthChange(event: Event) {
   if (topologyStore.maxDepth === nextDepth) return;
   topologyStore.setMaxDepth(nextDepth);
   await loadData();
-  if (panelMode.value === "detail" && selectedNode.value) {
-    await loadEvidenceForNode(selectedNode.value, true);
+  if (panelVisible.value && selectedNode.value) {
+    await loadTroubleshootReport(selectedNode.value, true);
   }
+}
+
+function openWorkbenchForNode(node: TopologyNode, tab: TopologyWorkbenchTab = "overview") {
+  selectedNode.value = node;
+  panelVisible.value = true;
+  activePanelTab.value = tab;
+  pathResult.value = null;
+  impactResult.value = null;
+}
+
+function beginPathTrace(node: TopologyNode) {
+  if (isExternalNode(node)) {
+    ElMessage.info("外部节点不支持路径追踪");
+    return;
+  }
+
+  pathTraceMode.value = true;
+  pathSource.value = node.id;
+  pathTraceHint.value = `已选起点: ${node.name}，请点击终点`;
+  panelVisible.value = true;
+  activePanelTab.value = "path";
+  ElMessage.info(pathTraceHint.value);
 }
 
 function handleNodeClick(node: TopologyNode) {
@@ -239,9 +257,8 @@ function handleNodeClick(node: TopologyNode) {
     return;
   }
 
-  selectedNode.value = node;
-  panelMode.value = "detail";
-  void loadEvidenceForNode(node);
+  openWorkbenchForNode(node, "overview");
+  void loadTroubleshootReport(node);
 }
 
 function handleCanvasNodeClick(node: TopologyNode) {
@@ -249,10 +266,13 @@ function handleCanvasNodeClick(node: TopologyNode) {
 }
 
 function handleCanvasBlankClick() {
-  if (panelMode.value !== "detail" || !selectedNode.value) return;
-  panelMode.value = null;
+  if (!panelVisible.value || !selectedNode.value) return;
+  panelVisible.value = false;
   selectedNode.value = null;
-  resetEvidenceState();
+  activePanelTab.value = "overview";
+  pathResult.value = null;
+  impactResult.value = null;
+  resetTroubleshootState();
   canvasRef.value?.clearHighlight();
 }
 
@@ -268,6 +288,7 @@ function handleContextMenu(payload: { node: TopologyNode; x: number; y: number }
 
 function closeContextMenu() {
   contextMenuVisible.value = false;
+  contextMenuNode.value = null;
 }
 
 function closeNodeEditors() {
@@ -280,8 +301,10 @@ function resolveEnvLabel(env: string) {
   return ({ prod: "生产", dev: "开发", test: "测试" } as Record<string, string>)[env] || env;
 }
 
-async function handleEditNode() {
-  const node = contextMenuNode.value;
+async function handleEditNode(targetNode?: TopologyNode | Event | null) {
+  const node = targetNode && typeof targetNode === "object" && "id" in targetNode
+    ? targetNode as TopologyNode
+    : contextMenuNode.value;
   closeContextMenu();
   if (!node) return;
   if (isExternalNode(node)) {
@@ -342,26 +365,17 @@ async function handleNodeEditorSaved(payload: { id: string }) {
 
   if (selectedNode.value?.id === payload.id) {
     selectedNode.value = refreshedNode;
-    if (panelMode.value === "detail") {
-      void loadEvidenceForNode(refreshedNode, true);
+    if (panelVisible.value) {
+      void loadTroubleshootReport(refreshedNode, true);
     }
   }
 }
 
 function startPathTrace() {
-  if (isExternalNode(contextMenuNode.value)) {
-    closeContextMenu();
-    ElMessage.info("外部节点不支持路径追踪");
-    return;
-  }
-
+  const node = contextMenuNode.value;
   closeContextMenu();
-  pathTraceMode.value = true;
-  pathSource.value = contextMenuNode.value?.id || null;
-  if (pathSource.value) {
-    pathTraceHint.value = `已选起点: ${contextMenuNode.value?.name}，请点击终点`;
-    ElMessage.info(pathTraceHint.value);
-  }
+  if (!node) return;
+  beginPathTrace(node);
 }
 
 async function handleFindPaths(sourceId: string, targetId: string) {
@@ -382,10 +396,12 @@ async function handleFindPaths(sourceId: string, targetId: string) {
       truncated: result.truncated,
     };
 
-    panelMode.value = "path";
+    panelVisible.value = true;
+    activePanelTab.value = "path";
     if (pathResult.value.paths.length > 0) {
       canvasRef.value?.highlightPaths(pathResult.value.paths);
     } else {
+      canvasRef.value?.clearHighlight();
       ElMessage.warning("未找到连接路径");
     }
   } catch {
@@ -393,9 +409,7 @@ async function handleFindPaths(sourceId: string, targetId: string) {
   }
 }
 
-async function handleAnalyzeImpact() {
-  const node = contextMenuNode.value;
-  closeContextMenu();
+async function analyzeImpactForNode(node: TopologyNode | null) {
   if (!node) return;
   if (isExternalNode(node)) {
     ElMessage.info("外部节点不支持影响分析");
@@ -423,11 +437,18 @@ async function handleAnalyzeImpact() {
     };
 
     selectedNode.value = node;
-    panelMode.value = "impact";
+    panelVisible.value = true;
+    activePanelTab.value = "impact";
     canvasRef.value?.highlightImpact(node.id, impactResult.value);
   } catch {
     // error shown by tauriInvoke
   }
+}
+
+async function handleAnalyzeImpact() {
+  const node = contextMenuNode.value;
+  closeContextMenu();
+  await analyzeImpactForNode(node);
 }
 
 function handleSearch(payload: { matchIds: string[]; focusId?: string }) {
@@ -447,9 +468,8 @@ function handleInsightClick(insight: TopologyV3TaskInsight) {
   canvasRef.value?.highlightSearch(nodeIds, nodeIds[0]);
   const focusNode = rawGraphData.value?.nodes.find((node) => node.id === nodeIds[0]) || null;
   if (focusNode && !isExternalNode(focusNode)) {
-    selectedNode.value = focusNode;
-    panelMode.value = "detail";
-    void loadEvidenceForNode(focusNode);
+    openWorkbenchForNode(focusNode, "evidence");
+    void loadTroubleshootReport(focusNode);
   }
 }
 
@@ -501,12 +521,30 @@ async function handleExport(type: "png" | "svg") {
 }
 
 function handlePanelClose() {
-  panelMode.value = null;
+  panelVisible.value = false;
+  activePanelTab.value = "overview";
   selectedNode.value = null;
   pathResult.value = null;
   impactResult.value = null;
-  resetEvidenceState();
+  resetTroubleshootState();
   canvasRef.value?.clearHighlight();
+}
+
+function handlePanelTabChange(tab: TopologyWorkbenchTab) {
+  activePanelTab.value = tab;
+}
+
+function handlePanelStartPathTrace() {
+  if (!selectedNode.value) return;
+  beginPathTrace(selectedNode.value);
+}
+
+async function handlePanelAnalyzeImpact() {
+  await analyzeImpactForNode(selectedNode.value);
+}
+
+async function handlePanelEditNode() {
+  await handleEditNode(selectedNode.value);
 }
 
 function toggleFullscreen() {
@@ -595,6 +633,38 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
+    <div v-if="topologyStore.taskView === 'troubleshoot'" class="troubleshoot-bar">
+      <span class="troubleshoot-label">
+        当前节点：{{ selectedNode?.name || '未选择' }}
+      </span>
+      <div class="troubleshoot-actions">
+        <button
+          type="button"
+          class="troubleshoot-btn"
+          :disabled="!selectedNode"
+          @click="activePanelTab = 'evidence'; panelVisible = !!selectedNode"
+        >
+          查看证据
+        </button>
+        <button
+          type="button"
+          class="troubleshoot-btn"
+          :disabled="!selectedNode"
+          @click="handlePanelStartPathTrace"
+        >
+          路径追踪
+        </button>
+        <button
+          type="button"
+          class="troubleshoot-btn"
+          :disabled="!selectedNode"
+          @click="handlePanelAnalyzeImpact"
+        >
+          影响分析
+        </button>
+      </div>
+    </div>
+
     <div v-if="taskInsights.length > 0" class="task-insight-bar">
       <span class="task-insight-title">任务洞察</span>
       <button
@@ -651,15 +721,19 @@ onBeforeUnmount(() => {
 
       <!-- Detail panel -->
       <TopologyDetailPanel
-        :mode="panelMode"
+        :visible="panelVisible"
+        :active-tab="activePanelTab"
         :selected-node="selectedNode"
+        :troubleshoot-report="troubleshootReport"
+        :troubleshoot-loading="troubleshootLoading"
         :path-result="pathResult"
         :impact-result="impactResult"
-        :evidence-items="evidenceItems"
-        :evidence-total="evidenceTotal"
-        :evidence-loading="evidenceLoading"
         :node-name-map="nodeNameMap"
         @close="handlePanelClose"
+        @tab-change="handlePanelTabChange"
+        @start-path-trace="handlePanelStartPathTrace"
+        @analyze-impact="handlePanelAnalyzeImpact"
+        @edit-node="handlePanelEditNode"
       />
     </div>
 
@@ -722,6 +796,39 @@ onBeforeUnmount(() => {
   border-bottom: 1px solid var(--im-border-subtle);
   background: var(--im-surface-0);
   flex-shrink: 0;
+}
+.troubleshoot-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--im-border-subtle);
+  background: var(--im-surface-0);
+}
+.troubleshoot-label {
+  font-size: 12px;
+  color: var(--im-text-secondary);
+}
+.troubleshoot-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.troubleshoot-btn {
+  min-height: 32px;
+  padding: 0 12px;
+  border-radius: var(--im-radius-sm);
+  border: 1px solid var(--im-border-subtle);
+  background: var(--im-surface-1);
+  color: var(--im-text-primary);
+  cursor: pointer;
+}
+.troubleshoot-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 .task-view-switch {
   display: flex;

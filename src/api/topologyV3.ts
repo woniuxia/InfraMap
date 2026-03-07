@@ -12,6 +12,8 @@ import type {
   TopologyV3SnapshotResponse,
   TopologyV3TaskViewQuery,
   TopologyV3TaskViewResponse,
+  TopologyV3TroubleshootReport,
+  TopologyV3TroubleshootReportQuery,
 } from '@/types'
 
 export function getTopologySnapshotV3(query: TopologyV3SnapshotQuery = {}): Promise<TopologyV3SnapshotResponse> {
@@ -36,4 +38,10 @@ export function getTopologyImpactV3(query: TopologyV3ImpactQuery): Promise<Topol
 
 export function getTopologyEvidenceV3(query: TopologyV3EvidenceQuery): Promise<TopologyV3EvidenceResponse> {
   return tauriInvoke<TopologyV3EvidenceResponse>('get_topology_evidence_v3', { query })
+}
+
+export function getTopologyTroubleshootReportV3(
+  query: TopologyV3TroubleshootReportQuery,
+): Promise<TopologyV3TroubleshootReport> {
+  return tauriInvoke<TopologyV3TroubleshootReport>('get_topology_troubleshoot_report_v3', { query })
 }
