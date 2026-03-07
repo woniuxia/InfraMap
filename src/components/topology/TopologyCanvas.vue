@@ -7,7 +7,7 @@ import cytoscapeSvg from "cytoscape-svg";
 import type { TopologyGraph, TopologyNode } from "@/types";
 import { toExternalNodeId } from "@/components/topology/topologyGraph.utils";
 import { buildTopologyCyElements } from "@/components/topology/topologyCytoscape.utils";
-import { colorizeSvgDataUri } from "@/icons/iconColorize";
+import { buildNodeIconSpriteDataUri } from "@/icons/nodeIconSprite";
 import {
   DENSITY_OPTIONS,
   getDensityByZoom,
@@ -530,7 +530,7 @@ function buildStylesheet(
         "background-image": (ele: cytoscape.NodeSingular) => {
           const src = String(ele.data("icon_src") || "").trim();
           if (src.length === 0) return "none";
-          return colorizeSvgDataUri(src, resolveNodeBaseColor(ele.data(), theme));
+          return buildNodeIconSpriteDataUri(src, resolveNodeBaseColor(ele.data(), theme));
         },
         "background-fit": "contain",
         "background-repeat": "no-repeat",

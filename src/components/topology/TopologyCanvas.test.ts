@@ -305,7 +305,10 @@ describe("TopologyCanvas", () => {
     expect(nodeBlock.style["background-image"]).toBeTypeOf("function");
     expect(externalBlock.style["background-color"]).toBeUndefined();
     expect(parentBlock.style["background-color"]).toBeTruthy();
-    expect(decodeSvgDataUri(String(backgroundImage))).toContain('color="#5ca3ff"');
+    const spriteSvg = decodeSvgDataUri(String(backgroundImage));
+    expect(spriteSvg).toContain('color="#5ca3ff"');
+    expect(spriteSvg).toContain('viewBox="0 0 48 48"');
+    expect(spriteSvg).toContain('x="8" y="8" width="32" height="32"');
   });
 
   it("centers node icons and lets them fill the node without fixed scaling", async () => {
@@ -319,6 +322,13 @@ describe("TopologyCanvas", () => {
 
     const stylesheet = getLatestStylesheet();
     const nodeBlock = findStyleBlock(stylesheet, "node[shape][size][label_font_size]");
+    const backgroundImage = resolveStyleValue(nodeBlock.style["background-image"], {
+      node_type: "application",
+      app_type_key: "frontend",
+      is_external: false,
+      status: "running",
+      icon_src: "data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2024%2024%22%3E%3Cpath%20d%3D%22M0%200h24v24H0z%22/%3E%3C/svg%3E",
+    });
 
     expect(nodeBlock.style["background-fit"]).toBe("contain");
     expect(nodeBlock.style["background-position-x"]).toBe("50%");
@@ -327,6 +337,7 @@ describe("TopologyCanvas", () => {
     expect(nodeBlock.style["background-offset-y"]).toBe(0);
     expect(nodeBlock.style["background-width"]).toBeUndefined();
     expect(nodeBlock.style["background-height"]).toBeUndefined();
+    expect(decodeSvgDataUri(String(backgroundImage))).toContain('preserveAspectRatio="xMidYMid meet"');
   });
 
   it("performs a one-time refit after the first container resize during initialization", async () => {
