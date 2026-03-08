@@ -50,8 +50,13 @@ const ElSelectStub = defineComponent({
     },
   },
   emits: ["update:modelValue", "change"],
-  setup(_props, { slots }) {
-    return () => h("div", { class: "el-select-stub" }, slots.default?.());
+  setup(props, { slots }) {
+    return () =>
+      h(
+        "div",
+        { class: "el-select-stub", "data-model": String(props.modelValue ?? "") },
+        slots.default?.()
+      );
   },
 });
 
@@ -202,5 +207,44 @@ describe("CallRelationsEditor", () => {
     expect(renderedText).toContain("redis-main（Redis）");
     expect(renderedText).toContain("traffic-lb（负载均衡）");
     expect(renderedText).not.toContain("billing-ui（前端）");
+  });
+
+  it("uses downstream as the default direction for a newly added relation", async () => {
+    __setMockHandler("list_applications", () => ({
+      data: [{ id: "app-b", name: "order-api", type: "backend" }],
+      total: 1,
+      page: 1,
+      page_size: 999,
+    }));
+    __setMockHandler("list_middlewares", () => ({
+      data: [],
+      total: 0,
+      page: 1,
+      page_size: 999,
+    }));
+    __setMockHandler("list_nginx_configs", () => ({
+      data: [],
+      total: 0,
+      page: 1,
+      page_size: 999,
+    }));
+    __setMockHandler("list_call_relations", () => ({
+      data: [],
+      total: 0,
+      page: 1,
+      page_size: 500,
+    }));
+
+    const wrapper = mountEditor();
+    await flushPromises();
+
+    const addButton = wrapper.findAll("button").find((button) => button.text() === "添加关系");
+    expect(addButton).toBeDefined();
+    await addButton!.trigger("click");
+    await flushPromises();
+
+    const directionSelect = wrapper.find('[data-label="方向"] .el-select-stub');
+    expect(directionSelect.exists()).toBe(true);
+    expect(directionSelect.attributes("data-model")).toBe("downstream");
   });
 });

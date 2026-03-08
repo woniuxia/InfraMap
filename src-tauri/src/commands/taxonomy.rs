@@ -12,12 +12,13 @@ pub const FIELD_OS_TYPE: &str = "os_type";
 pub const FIELD_CPU_MODEL: &str = "cpu_model";
 pub const SORT_ALPHA: &str = "alpha";
 pub const SORT_RECENT: &str = "recent";
+pub const SORT_COUNT: &str = "count";
 pub const RECENCY_SCOPE_GLOBAL: &str = "global";
 pub const RECENCY_SCOPE_RESOURCE_TYPE: &str = "resource_type";
 
 const ALLOWED_RESOURCE_TYPES: [&str; 4] =
     ["host", "ip_address", "application", "business_application"];
-const ALLOWED_SORT_BY: [&str; 2] = [SORT_ALPHA, SORT_RECENT];
+const ALLOWED_SORT_BY: [&str; 3] = [SORT_ALPHA, SORT_RECENT, SORT_COUNT];
 const ALLOWED_RECENCY_SCOPE: [&str; 2] = [RECENCY_SCOPE_GLOBAL, RECENCY_SCOPE_RESOURCE_TYPE];
 const ALLOWED_APP_TYPES: [&str; 2] = ["frontend", "backend"];
 
@@ -504,6 +505,79 @@ fn list_terms_by_scope_recent(
     rows.collect()
 }
 
+fn list_terms_by_scope_count(
+    conn: &rusqlite::Connection,
+    resource_type: &str,
+    field_key: &str,
+    limit: usize,
+    recency_scope: &str,
+    app_type: Option<&str>,
+) -> Result<Vec<String>, rusqlite::Error> {
+    if let Some(side) = app_type {
+        let app_filter = if side == "frontend" {
+            "a.type = 'frontend'"
+        } else {
+            "a.type <> 'frontend'"
+        };
+        let sql = format!(
+            "SELECT tt.display_name
+             FROM taxonomy_bindings tb
+             INNER JOIN taxonomy_terms tt ON tt.id = tb.term_id
+             INNER JOIN applications a ON a.id = tb.resource_id
+             WHERE tb.is_deleted = 0
+               AND tt.is_deleted = 0
+               AND tb.resource_type = 'application'
+               AND tt.field_key = 'tech_stack'
+               AND a.is_deleted = 0
+               AND {}
+             GROUP BY tt.display_name
+             ORDER BY COUNT(*) DESC, MAX(tb.updated_at) DESC, tt.display_name ASC
+             LIMIT ?1",
+            app_filter
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(rusqlite::params![limit as i64], |row| {
+            row.get::<_, String>(0)
+        })?;
+        return rows.collect();
+    }
+
+    if recency_scope == RECENCY_SCOPE_GLOBAL {
+        let mut stmt = conn.prepare(
+            "SELECT tt.display_name
+             FROM taxonomy_term_stats ts
+             INNER JOIN taxonomy_terms tt ON tt.id = ts.term_id
+             WHERE tt.field_key = ?1
+               AND tt.is_deleted = 0
+               AND ts.usage_count > 0
+             GROUP BY tt.display_name
+             ORDER BY SUM(ts.usage_count) DESC, MAX(ts.last_used_at) DESC, tt.display_name ASC
+             LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(rusqlite::params![field_key, limit as i64], |row| {
+            row.get::<_, String>(0)
+        })?;
+        return rows.collect();
+    }
+
+    let mut stmt = conn.prepare(
+        "SELECT tt.display_name
+         FROM taxonomy_term_stats ts
+         INNER JOIN taxonomy_terms tt ON tt.id = ts.term_id
+         WHERE ts.resource_type = ?1
+           AND tt.field_key = ?2
+           AND tt.is_deleted = 0
+           AND ts.usage_count > 0
+         ORDER BY ts.usage_count DESC, ts.last_used_at DESC, tt.display_name ASC
+         LIMIT ?3",
+    )?;
+    let rows = stmt.query_map(
+        rusqlite::params![resource_type, field_key, limit as i64],
+        |row| row.get::<_, String>(0),
+    )?;
+    rows.collect()
+}
+
 #[cfg(test)]
 pub fn list_terms_by_scope(
     conn: &rusqlite::Connection,
@@ -525,6 +599,17 @@ pub fn list_terms_by_scope_with_options(
 ) -> Result<Vec<String>, rusqlite::Error> {
     if sort_by == SORT_RECENT {
         return list_terms_by_scope_recent(
+            conn,
+            resource_type,
+            field_key,
+            limit,
+            recency_scope,
+            app_type,
+        );
+    }
+
+    if sort_by == SORT_COUNT {
+        return list_terms_by_scope_count(
             conn,
             resource_type,
             field_key,
@@ -713,7 +798,8 @@ mod tests {
         list_terms_by_scope_with_options, list_terms_with_fallback, normalize_terms,
         parse_json_string_array, parse_tech_stack_terms, save_resource_terms,
         validate_resource_field, FIELD_CPU_MODEL, FIELD_OS_TYPE, FIELD_OWNER, FIELD_TAGS,
-        FIELD_TECH_STACK, RECENCY_SCOPE_GLOBAL, RECENCY_SCOPE_RESOURCE_TYPE, SORT_RECENT,
+        FIELD_TECH_STACK, RECENCY_SCOPE_GLOBAL, RECENCY_SCOPE_RESOURCE_TYPE, SORT_COUNT,
+        SORT_RECENT,
     };
     use crate::test_helpers::setup_test_db;
 
@@ -852,6 +938,186 @@ mod tests {
     }
 
     #[test]
+    fn list_terms_by_scope_with_options_should_order_count_first() {
+        let conn = setup_test_db();
+        save_resource_terms(
+            &conn,
+            "host",
+            "host-ubuntu-1",
+            FIELD_OS_TYPE,
+            &["Ubuntu 22.04".to_string()],
+            "2025-01-01T00:00:00Z",
+        )
+        .expect("save first ubuntu host");
+        save_resource_terms(
+            &conn,
+            "host",
+            "host-ubuntu-2",
+            FIELD_OS_TYPE,
+            &["Ubuntu 22.04".to_string()],
+            "2025-01-03T00:00:00Z",
+        )
+        .expect("save second ubuntu host");
+        save_resource_terms(
+            &conn,
+            "host",
+            "host-openeuler-1",
+            FIELD_OS_TYPE,
+            &["openEuler".to_string()],
+            "2025-01-02T00:00:00Z",
+        )
+        .expect("save first openEuler host");
+        save_resource_terms(
+            &conn,
+            "host",
+            "host-openeuler-2",
+            FIELD_OS_TYPE,
+            &["openEuler".to_string()],
+            "2025-01-04T00:00:00Z",
+        )
+        .expect("save second openEuler host");
+        save_resource_terms(
+            &conn,
+            "host",
+            "host-debian-1",
+            FIELD_OS_TYPE,
+            &["Debian 12".to_string()],
+            "2025-01-05T00:00:00Z",
+        )
+        .expect("save debian host");
+        save_resource_terms(
+            &conn,
+            "host",
+            "host-alma-1",
+            FIELD_OS_TYPE,
+            &["AlmaLinux 9".to_string()],
+            "2025-01-05T00:00:00Z",
+        )
+        .expect("save alma host");
+
+        let os_types = list_terms_by_scope_with_options(
+            &conn,
+            "host",
+            FIELD_OS_TYPE,
+            100,
+            "count",
+            RECENCY_SCOPE_RESOURCE_TYPE,
+            None,
+        )
+        .expect("list count ordered os types");
+
+        assert_eq!(
+            os_types,
+            vec![
+                "openEuler".to_string(),
+                "Ubuntu 22.04".to_string(),
+                "AlmaLinux 9".to_string(),
+                "Debian 12".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn list_terms_by_scope_with_options_should_order_count_first_for_host_os_type() {
+        let conn = setup_test_db();
+        save_resource_terms(
+            &conn,
+            "host",
+            "host-1",
+            FIELD_OS_TYPE,
+            &["Ubuntu 22.04".to_string()],
+            "2025-01-01T00:00:00Z",
+        )
+        .expect("save first ubuntu host");
+        save_resource_terms(
+            &conn,
+            "host",
+            "host-2",
+            FIELD_OS_TYPE,
+            &["CentOS 7".to_string()],
+            "2025-01-02T00:00:00Z",
+        )
+        .expect("save centos host");
+        save_resource_terms(
+            &conn,
+            "host",
+            "host-3",
+            FIELD_OS_TYPE,
+            &["Ubuntu 22.04".to_string()],
+            "2025-01-03T00:00:00Z",
+        )
+        .expect("save second ubuntu host");
+
+        let os_types = list_terms_by_scope_with_options(
+            &conn,
+            "host",
+            FIELD_OS_TYPE,
+            100,
+            SORT_COUNT,
+            RECENCY_SCOPE_RESOURCE_TYPE,
+            None,
+        )
+        .expect("list host os types by count");
+
+        assert_eq!(
+            os_types,
+            vec!["Ubuntu 22.04".to_string(), "CentOS 7".to_string()]
+        );
+    }
+
+    #[test]
+    fn list_terms_by_scope_with_options_should_stabilize_count_sort_by_recency_then_name() {
+        let conn = setup_test_db();
+        save_resource_terms(
+            &conn,
+            "host",
+            "host-1",
+            FIELD_OS_TYPE,
+            &["Debian 12".to_string()],
+            "2025-01-03T00:00:00Z",
+        )
+        .expect("save debian host");
+        save_resource_terms(
+            &conn,
+            "host",
+            "host-2",
+            FIELD_OS_TYPE,
+            &["openEuler".to_string()],
+            "2025-01-02T00:00:00Z",
+        )
+        .expect("save openEuler host");
+        save_resource_terms(
+            &conn,
+            "host",
+            "host-3",
+            FIELD_OS_TYPE,
+            &["Anolis OS".to_string()],
+            "2025-01-02T00:00:00Z",
+        )
+        .expect("save anolis host");
+
+        let os_types = list_terms_by_scope_with_options(
+            &conn,
+            "host",
+            FIELD_OS_TYPE,
+            100,
+            SORT_COUNT,
+            RECENCY_SCOPE_RESOURCE_TYPE,
+            None,
+        )
+        .expect("list host os types by stable count sort");
+
+        assert_eq!(
+            os_types,
+            vec![
+                "Debian 12".to_string(),
+                "Anolis OS".to_string(),
+                "openEuler".to_string(),
+            ]
+        );
+    }
+
+    #[test]
     fn list_terms_by_scope_with_options_should_support_recency_scope() {
         let conn = setup_test_db();
         save_resource_terms(
@@ -962,6 +1228,97 @@ mod tests {
         )
         .expect("list backend stacks");
         assert_eq!(backend_terms, vec!["Rust".to_string()]);
+    }
+
+    #[test]
+    fn list_terms_by_scope_with_options_should_filter_tech_stack_by_app_type_when_sorting_count() {
+        let conn = setup_test_db();
+        let now = chrono::Utc::now().to_rfc3339();
+        conn.execute(
+            "INSERT INTO applications (id, name, type, env, status, is_deleted, created_at, updated_at)
+             VALUES ('app-fe-1', 'frontend-app-1', 'frontend', 'prod', 'running', 0, ?1, ?1)",
+            rusqlite::params![now],
+        )
+        .expect("insert frontend app 1");
+        conn.execute(
+            "INSERT INTO applications (id, name, type, env, status, is_deleted, created_at, updated_at)
+             VALUES ('app-fe-2', 'frontend-app-2', 'frontend', 'prod', 'running', 0, ?1, ?1)",
+            rusqlite::params![now],
+        )
+        .expect("insert frontend app 2");
+        conn.execute(
+            "INSERT INTO applications (id, name, type, env, status, is_deleted, created_at, updated_at)
+             VALUES ('app-be-1', 'backend-app-1', 'backend', 'prod', 'running', 0, ?1, ?1)",
+            rusqlite::params![now],
+        )
+        .expect("insert backend app 1");
+        conn.execute(
+            "INSERT INTO applications (id, name, type, env, status, is_deleted, created_at, updated_at)
+             VALUES ('app-be-2', 'backend-app-2', 'backend', 'prod', 'running', 0, ?1, ?1)",
+            rusqlite::params![now],
+        )
+        .expect("insert backend app 2");
+
+        save_resource_terms(
+            &conn,
+            "application",
+            "app-fe-1",
+            FIELD_TECH_STACK,
+            &["Vue".to_string()],
+            "2025-01-01T00:00:00Z",
+        )
+        .expect("save first frontend stack");
+        save_resource_terms(
+            &conn,
+            "application",
+            "app-fe-2",
+            FIELD_TECH_STACK,
+            &["Vue".to_string(), "React".to_string()],
+            "2025-01-03T00:00:00Z",
+        )
+        .expect("save second frontend stacks");
+        save_resource_terms(
+            &conn,
+            "application",
+            "app-be-1",
+            FIELD_TECH_STACK,
+            &["Rust".to_string()],
+            "2025-01-02T00:00:00Z",
+        )
+        .expect("save first backend stack");
+        save_resource_terms(
+            &conn,
+            "application",
+            "app-be-2",
+            FIELD_TECH_STACK,
+            &["Rust".to_string(), "Go".to_string()],
+            "2025-01-04T00:00:00Z",
+        )
+        .expect("save second backend stacks");
+
+        let frontend_terms = list_terms_by_scope_with_options(
+            &conn,
+            "application",
+            FIELD_TECH_STACK,
+            100,
+            "count",
+            RECENCY_SCOPE_RESOURCE_TYPE,
+            Some("frontend"),
+        )
+        .expect("list frontend stacks by count");
+        assert_eq!(frontend_terms, vec!["Vue".to_string(), "React".to_string()]);
+
+        let backend_terms = list_terms_by_scope_with_options(
+            &conn,
+            "application",
+            FIELD_TECH_STACK,
+            100,
+            "count",
+            RECENCY_SCOPE_RESOURCE_TYPE,
+            Some("backend"),
+        )
+        .expect("list backend stacks by count");
+        assert_eq!(backend_terms, vec!["Rust".to_string(), "Go".to_string()]);
     }
 
     #[test]

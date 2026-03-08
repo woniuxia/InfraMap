@@ -6,6 +6,7 @@ import {
   listBusinessApplicationOwnerTerms,
   listHostCpuModelTerms,
   listHostOsTypeTerms,
+  listHostOsTypeTermsByCount,
   listHostTagTerms,
   listIpTagTerms,
   listResourceTerms,
@@ -104,6 +105,23 @@ describe("taxonomy API", () => {
 
     const result = await listHostOsTypeTerms();
     expect(result).toEqual(["openEuler", "Ubuntu 22.04"]);
+  });
+
+  it("listHostOsTypeTermsByCount should use host os_type count sort", async () => {
+    __setMockHandler("list_taxonomy_terms", (_cmd, args) => {
+      expect(args).toEqual({
+        resourceType: "host",
+        fieldKey: "os_type",
+        limit: 200,
+        sortBy: "count",
+        recencyScope: "resource_type",
+        appType: undefined,
+      });
+      return ["Ubuntu 22.04", "openEuler"];
+    });
+
+    const result = await listHostOsTypeTermsByCount();
+    expect(result).toEqual(["Ubuntu 22.04", "openEuler"]);
   });
 
   it("listHostCpuModelTerms should use host cpu_model with resource_type scope", async () => {

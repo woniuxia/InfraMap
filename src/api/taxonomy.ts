@@ -6,7 +6,7 @@ export type TaxonomyResourceType =
   | "application"
   | "business_application";
 export type TaxonomyFieldKey = "tags" | "owner" | "tech_stack" | "os_type" | "cpu_model";
-export type TaxonomySortBy = "alpha" | "recent";
+export type TaxonomySortBy = "alpha" | "recent" | "count";
 export type TaxonomyRecencyScope = "global" | "resource_type";
 export type TaxonomyAppType = "frontend" | "backend";
 
@@ -60,6 +60,16 @@ export function listHostOsTypeTerms(limit = 200): Promise<string[]> {
     field_key: "os_type",
     limit,
     sort_by: "recent",
+    recency_scope: "resource_type",
+  });
+}
+
+export function listHostOsTypeTermsByCount(limit = 200): Promise<string[]> {
+  return listTaxonomyTerms({
+    resource_type: "host",
+    field_key: "os_type",
+    limit,
+    sort_by: "count",
     recency_scope: "resource_type",
   });
 }

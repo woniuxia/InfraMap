@@ -84,7 +84,7 @@ function createEmptyRow(): EditableRelationRow {
     id: nextRowId(),
     peer_id: "",
     peer_type: "application",
-    direction: "upstream",
+    direction: "downstream",
     relation_type: "http_call",
     description: "",
   };

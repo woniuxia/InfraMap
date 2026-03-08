@@ -23,7 +23,7 @@
 ## 常用命令
 
 ```bash
-pnpm dev              # 启动前端开发服务器 (localhost:1420)
+pnpm dev              # 启动前端开发服务器 (localhost:15420)
 pnpm build            # TypeScript 检查 + Vite 构建
 pnpm test             # 运行前端测试 (Vitest)
 pnpm test:watch       # 前端测试监听模式

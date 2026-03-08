@@ -5,7 +5,11 @@ import type { Host, IpAddress } from "@/types";
 import type { SearchFieldConfig, SearchToolbarQueryPayload } from "@/types/searchToolbar";
 import { listHosts, saveHost, deleteHost } from "@/api/hosts";
 import { listIpAddresses, saveIpAddress } from "@/api/ip-addresses";
-import { listHostCpuModelTerms, listHostOsTypeTerms, listHostTagTerms } from "@/api/taxonomy";
+import {
+  listHostCpuModelTerms,
+  listHostOsTypeTermsByCount,
+  listHostTagTerms,
+} from "@/api/taxonomy";
 import { bindHostIp, listHostIpBindings, unbindHostIp } from "@/api/host-ip-bindings";
 import { useResourceList } from "@/composables/useResourceList";
 import { buildHostCopyDraft } from "@/utils/resourceCopy";
@@ -230,6 +234,31 @@ export function useHostViewModel() {
     return Array.from(merged).map((value) => ({ label: value, value }));
   }
 
+  function buildOrderedOsSuggestionOptions(baseValues: string[], currentValue?: string) {
+    const orderedValues: string[] = [];
+    const seen = new Set<string>();
+
+    const appendValue = (value?: string) => {
+      const normalized = value?.trim();
+      if (!normalized || seen.has(normalized)) {
+        return;
+      }
+      seen.add(normalized);
+      orderedValues.push(normalized);
+    };
+
+    // 先展示按使用量排序的已使用项，再兜底当前值，最后补未使用的预设项。
+    for (const value of normalizeTermValues(baseValues)) {
+      appendValue(value);
+    }
+    appendValue(currentValue);
+    for (const value of DEFAULT_HOST_OS_OPTIONS) {
+      appendValue(value);
+    }
+
+    return orderedValues.map((value) => ({ label: value, value }));
+  }
+
   const formTagSuggestionOptions = computed(() =>
     buildSuggestionOptions(
       tagFilterOptions.value.map((item) => item.value),
@@ -237,10 +266,7 @@ export function useHostViewModel() {
     )
   );
   const formOsSuggestionOptions = computed(() =>
-    buildSuggestionOptions(
-      [...DEFAULT_HOST_OS_OPTIONS, ...osFilterOptions.value.map((item) => item.value)],
-      [editingHost.value.os_type ?? ""]
-    )
+    buildOrderedOsSuggestionOptions(osFilterOptions.value.map((item) => item.value), editingHost.value.os_type)
   );
   const formCpuModelSuggestionOptions = computed(() =>
     buildSuggestionOptions(
@@ -339,7 +365,7 @@ export function useHostViewModel() {
     try {
       const [tags, osTypes, cpuModels] = await Promise.all([
         listHostTagTerms(200),
-        listHostOsTypeTerms(200),
+        listHostOsTypeTermsByCount(200),
         listHostCpuModelTerms(200),
       ]);
       tagFilterOptions.value = termValuesToFilterOptions(tags);

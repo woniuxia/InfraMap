@@ -33,6 +33,31 @@ function setupMockHandlers() {
   __setMockHandler("list_host_ip_bindings", () => []);
 }
 
+function setupTaxonomyOrderHandlers() {
+  __setMockHandler("list_taxonomy_terms", (_cmd, args) => {
+    if (!args) {
+      return [];
+    }
+
+    if (args.fieldKey === "tags") {
+      expect(args.sortBy).toBe("recent");
+      return ["core", "edge"];
+    }
+
+    if (args.fieldKey === "cpu_model") {
+      expect(args.sortBy).toBe("recent");
+      return ["Intel Xeon Gold 6258R"];
+    }
+
+    if (args.fieldKey === "os_type") {
+      expect(args.sortBy).toBe("count");
+      return ["Ubuntu 22.04", "Windows Server 2022", "openEuler"];
+    }
+
+    return [];
+  });
+}
+
 describe("useHostViewModel", () => {
   beforeEach(() => {
     __clearMockHandlers();
@@ -103,11 +128,106 @@ describe("useHostViewModel", () => {
     expect(viewModel.editingHost.value.disk_gb).toBeUndefined();
   });
 
+  it("loads os filter options by count and keeps them at the front of form suggestions", async () => {
+    __setMockHandler("list_taxonomy_terms", (_cmd, args) => {
+      if (!args) {
+        return [];
+      }
+
+      if (args.fieldKey === "os_type" && args.sortBy === "count") {
+        return ["Ubuntu 22.04", "CentOS 7"];
+      }
+      return [];
+    });
+
+    const viewModel = useHostViewModel();
+
+    await viewModel.openAdd();
+
+    const osField = viewModel.toolbarFields.value.find((field) => field.key === "os_type");
+    expect((osField?.options ?? []).map((option) => option.value)).toEqual(["Ubuntu 22.04", "CentOS 7"]);
+    expect(viewModel.formOsSuggestionOptions.value.slice(0, 2).map((option) => option.value)).toEqual([
+      "Ubuntu 22.04",
+      "CentOS 7",
+    ]);
+    expect(
+      viewModel.formOsSuggestionOptions.value.findIndex((option) => option.value === "CentOS 8")
+    ).toBeGreaterThan(1);
+  });
+
+  it("keeps the current os value ahead of unused defaults when editing", async () => {
+    __setMockHandler("list_taxonomy_terms", (_cmd, args) => {
+      if (!args) {
+        return [];
+      }
+
+      if (args.fieldKey === "os_type" && args.sortBy === "count") {
+        return ["Ubuntu 22.04", "CentOS 7"];
+      }
+      return [];
+    });
+
+    const viewModel = useHostViewModel();
+
+    await viewModel.openEdit(
+      createHost({
+        os_type: "Custom Linux 1.0",
+      })
+    );
+
+    const optionValues = viewModel.formOsSuggestionOptions.value.map((option) => option.value);
+    expect(optionValues.slice(0, 3)).toEqual(["Ubuntu 22.04", "CentOS 7", "Custom Linux 1.0"]);
+    expect(optionValues.indexOf("Custom Linux 1.0")).toBeLessThan(optionValues.indexOf("CentOS 8"));
+  });
+
   it("should expose os_type and cpu_model filter fields for toolbar", () => {
     const viewModel = useHostViewModel();
     const keys = viewModel.toolbarFields.value.map((field) => field.key);
 
     expect(keys).toContain("os_type");
     expect(keys).toContain("cpu_model");
+  });
+
+  it("orders host os filter options by usage count after loading taxonomy", async () => {
+    setupTaxonomyOrderHandlers();
+    const viewModel = useHostViewModel();
+
+    await viewModel.openAdd();
+
+    const osField = viewModel.toolbarFields.value.find((field) => field.key === "os_type");
+    expect(osField?.options).toEqual([
+      { label: "Ubuntu 22.04", value: "Ubuntu 22.04" },
+      { label: "Windows Server 2022", value: "Windows Server 2022" },
+      { label: "openEuler", value: "openEuler" },
+    ]);
+  });
+
+  it("orders host os suggestions by usage count and appends unused defaults", async () => {
+    setupTaxonomyOrderHandlers();
+    const viewModel = useHostViewModel();
+
+    await viewModel.openAdd();
+
+    expect(viewModel.formOsSuggestionOptions.value.slice(0, 5)).toEqual([
+      { label: "Ubuntu 22.04", value: "Ubuntu 22.04" },
+      { label: "Windows Server 2022", value: "Windows Server 2022" },
+      { label: "openEuler", value: "openEuler" },
+      { label: "CentOS 7", value: "CentOS 7" },
+      { label: "CentOS 8", value: "CentOS 8" },
+    ]);
+  });
+
+  it("keeps current os value in suggestions when it is not counted or predefined", async () => {
+    setupTaxonomyOrderHandlers();
+    const viewModel = useHostViewModel();
+
+    await viewModel.openEdit(createHost({ os_type: "Arch Linux" }));
+
+    expect(viewModel.formOsSuggestionOptions.value.slice(0, 4)).toEqual([
+      { label: "Ubuntu 22.04", value: "Ubuntu 22.04" },
+      { label: "Windows Server 2022", value: "Windows Server 2022" },
+      { label: "openEuler", value: "openEuler" },
+      { label: "Arch Linux", value: "Arch Linux" },
+    ]);
   });
 });

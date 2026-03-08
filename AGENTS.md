@@ -25,7 +25,7 @@
 - `public/`：静态资源。
 
 ## 3. 开发与验证命令（与脚本保持同步）
-- `pnpm dev`：启动前端开发服务器（默认 `localhost:1420`）。
+- `pnpm dev`：启动前端开发服务器（默认 `localhost:15420`）。
 - `pnpm tauri dev`：以 Tauri 开发模式运行桌面应用。
 - `pnpm build`：执行 `vue-tsc --noEmit` 后构建前端。
 - `pnpm build:installer`：构建 Tauri 安装包。
