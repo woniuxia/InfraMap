@@ -12,6 +12,7 @@ import {
 } from "@/api/taxonomy";
 import { bindHostIp, listHostIpBindings, unbindHostIp } from "@/api/host-ip-bindings";
 import { useResourceList } from "@/composables/useResourceList";
+import { ENV_OPTIONS, STATUS_OPTIONS } from "@/constants/options";
 import { buildHostCopyDraft } from "@/utils/resourceCopy";
 import {
   COMMON_CPU_CORES_OPTIONS,
@@ -104,16 +105,8 @@ export function useHostViewModel() {
     real_ips: undefined,
     description: undefined,
   });
-  const envOptions = [
-    { label: "生产", value: "prod" },
-    { label: "开发", value: "dev" },
-    { label: "测试", value: "test" },
-  ];
-  const statusOptions = [
-    { label: "运行中", value: "running" },
-    { label: "已停止", value: "stopped" },
-    { label: "维护中", value: "maintenance" },
-  ];
+  const envOptions = ENV_OPTIONS;
+  const statusOptions = STATUS_OPTIONS;
   const tagFilterOptions = ref<Array<{ label: string; value: string }>>([]);
   const osFilterOptions = ref<Array<{ label: string; value: string }>>([]);
   const cpuModelFilterOptions = ref<Array<{ label: string; value: string }>>([]);
@@ -198,10 +191,10 @@ export function useHostViewModel() {
     cpu_threads: [{ validator: validateOptionalPositiveInteger, trigger: "change" }],
     ram_gb: [{ validator: validateOptionalPositiveInteger, trigger: "change" }],
     disk_gb: [{ validator: validateOptionalPositiveInteger, trigger: "change" }],
-    cpu_freq: [{ min: 0, max: 50, message: "Length should be less than 50 characters", trigger: "blur" }],
-    status: [
-      { required: true, message: "请选择状态", trigger: "change" },
+    cpu_freq: [
+      { min: 0, max: 50, message: "Length should be less than 50 characters", trigger: "blur" },
     ],
+    status: [{ required: true, message: "请选择状态", trigger: "change" }],
   };
 
   const quickIpFormRules: FormRules = {
@@ -214,13 +207,7 @@ export function useHostViewModel() {
   const tagList = ref<string[]>([]);
 
   function normalizeTermValues(values: string[]): string[] {
-    return Array.from(
-      new Set(
-        values
-          .map((item) => item.trim())
-          .filter((item) => item.length > 0)
-      )
-    );
+    return Array.from(new Set(values.map((item) => item.trim()).filter((item) => item.length > 0)));
   }
 
   function buildSuggestionOptions(baseValues: string[], currentValues: string[]) {
@@ -262,24 +249,30 @@ export function useHostViewModel() {
   const formTagSuggestionOptions = computed(() =>
     buildSuggestionOptions(
       tagFilterOptions.value.map((item) => item.value),
-      tagList.value
-    )
+      tagList.value,
+    ),
   );
   const formOsSuggestionOptions = computed(() =>
-    buildOrderedOsSuggestionOptions(osFilterOptions.value.map((item) => item.value), editingHost.value.os_type)
+    buildOrderedOsSuggestionOptions(
+      osFilterOptions.value.map((item) => item.value),
+      editingHost.value.os_type,
+    ),
   );
   const formCpuModelSuggestionOptions = computed(() =>
     buildSuggestionOptions(
       cpuModelFilterOptions.value.map((item) => item.value),
-      [editingHost.value.cpu_model ?? ""]
-    )
+      [editingHost.value.cpu_model ?? ""],
+    ),
   );
   const filteredIpOptions = computed(() => {
     const keyword = bindingSearchKeyword.value.trim().toLowerCase();
     const candidates = allowCrossEnv.value
       ? availableIps.value
       : availableIps.value.filter(
-          (ip) => !editingHost.value.env || ip.env === editingHost.value.env || selectedIpIds.value.includes(ip.id)
+          (ip) =>
+            !editingHost.value.env ||
+            ip.env === editingHost.value.env ||
+            selectedIpIds.value.includes(ip.id),
         );
 
     if (!keyword) {
@@ -299,7 +292,9 @@ export function useHostViewModel() {
     }
 
     const env = editingHost.value.env;
-    return !availableIps.value.some((ip) => ip.ip_address === searchedIpKeyword.value && (!env || ip.env === env));
+    return !availableIps.value.some(
+      (ip) => ip.ip_address === searchedIpKeyword.value && (!env || ip.env === env),
+    );
   });
 
   function parseTags(json?: string): string[] {
@@ -314,8 +309,8 @@ export function useHostViewModel() {
           arr
             .filter((item: unknown) => typeof item === "string")
             .map((item: string) => item.trim())
-            .filter((item) => item.length > 0)
-        )
+            .filter((item) => item.length > 0),
+        ),
       );
     } catch {
       return [];
@@ -324,7 +319,7 @@ export function useHostViewModel() {
 
   function tagsToJson(arr: string[]): string {
     const normalized = Array.from(
-      new Set(arr.map((item) => item.trim()).filter((item) => item.length > 0))
+      new Set(arr.map((item) => item.trim()).filter((item) => item.length > 0)),
     );
     return normalized.length > 0 ? JSON.stringify(normalized) : "";
   }
@@ -427,11 +422,7 @@ export function useHostViewModel() {
 
   function normalizeQuickRealIps(): string[] {
     return Array.from(
-      new Set(
-        quickRealIpList.value
-          .map((item) => item.trim())
-          .filter((item) => item.length > 0)
-      )
+      new Set(quickRealIpList.value.map((item) => item.trim()).filter((item) => item.length > 0)),
     );
   }
 
@@ -504,7 +495,7 @@ export function useHostViewModel() {
       await loadIpOptions();
 
       const created = availableIps.value.find(
-        (ip) => ip.ip_address === payload.ip_address && ip.env === payload.env
+        (ip) => ip.ip_address === payload.ip_address && ip.env === payload.env,
       );
       if (created && !selectedIpIds.value.includes(created.id)) {
         selectedIpIds.value.push(created.id);

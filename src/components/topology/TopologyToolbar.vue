@@ -2,6 +2,7 @@
 import { ref, computed, watch } from "vue";
 import { Refresh, FullScreen, Download, Search } from "@element-plus/icons-vue";
 import type { TopologyGroupKind, TopologyNode } from "@/types";
+import { TOPOLOGY_ENV_OPTIONS } from "@/constants/options";
 
 const props = defineProps<{
   nodes: TopologyNode[];
@@ -38,15 +39,15 @@ function doSearch() {
   matchIds.value = props.nodes
     .filter((node) => {
       const name = node.name.toLowerCase();
-      const nodeType = node.node_type.toLowerCase();
+      const nodeType = node.nodeType.toLowerCase();
       const extra = node.extra || {};
       const address = ((extra.address as string) || "").toLowerCase();
       const ip = ((extra.ip as string) || "").toLowerCase();
       return (
-        name.includes(keyword)
-        || nodeType.includes(keyword)
-        || address.includes(keyword)
-        || ip.includes(keyword)
+        name.includes(keyword) ||
+        nodeType.includes(keyword) ||
+        address.includes(keyword) ||
+        ip.includes(keyword)
       );
     })
     .map((node) => node.id);
@@ -85,11 +86,7 @@ const typeOptions = [
 ];
 const selectedTypes = ref<TopologyGroupKind[]>([]);
 
-const envOptions = [
-  { label: "生产", value: "prod" },
-  { label: "测试", value: "test" },
-  { label: "开发", value: "dev" },
-] as const;
+const envOptions = TOPOLOGY_ENV_OPTIONS;
 const selectedEnv = ref<"prod" | "test" | "dev">("prod");
 
 const selectedLayout = ref<"force" | "dagre">("dagre");
@@ -99,9 +96,13 @@ function emitFilter() {
 }
 
 watch([selectedTypes, selectedEnv], emitFilter, { deep: true, immediate: true });
-watch(selectedLayout, (layout) => {
-  emit("layout-change", layout);
-}, { immediate: true });
+watch(
+  selectedLayout,
+  (layout) => {
+    emit("layout-change", layout);
+  },
+  { immediate: true },
+);
 
 function handleExport(type: "png" | "svg") {
   emit("export", type);
@@ -130,11 +131,7 @@ function handleExport(type: "png" | "svg") {
       <el-divider direction="vertical" />
 
       <el-checkbox-group v-model="selectedTypes" size="small">
-        <el-checkbox-button
-          v-for="opt in typeOptions"
-          :key="opt.value"
-          :value="opt.value"
-        >
+        <el-checkbox-button v-for="opt in typeOptions" :key="opt.value" :value="opt.value">
           {{ opt.label }}
         </el-checkbox-button>
       </el-checkbox-group>

@@ -4,10 +4,11 @@ use crate::commands::taxonomy::{
     build_taxonomy_exists_filter, delete_resource_terms, parse_filter_values,
     parse_json_string_array, save_resource_terms, FIELD_TAGS,
 };
-use crate::db::audit::insert_audit_log;
-use crate::db::crud::{build_where_clause, count_query, delete_by_id};
+use crate::db::crud::{
+    build_where_clause, count_query, delete_with_audit, resolve_upsert_state, write_audit_log_entry,
+};
 use crate::db::transaction::with_transaction;
-use crate::db::DbPool;
+use crate::db::{get_conn, DbPool};
 use crate::error::{AppError, AppErrorCode, AppResult};
 use crate::models::common::{PagedResult, QueryParams};
 use crate::models::ip_address::IpAddress;
@@ -87,33 +88,18 @@ fn save_ip_address_inner(
     command: &str,
     conn: &rusqlite::Connection,
     data: IpAddress,
-) -> AppResult<()> {
+) -> AppResult<String> {
     validate_ip_address_resource(&data).map_err(|e| AppError::validation(command, e))?;
     let now = chrono::Utc::now().to_rfc3339();
-
-    let is_new = data.id.is_empty() || {
-        let count: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM ip_addresses WHERE id = ?1 AND is_deleted = 0",
-                rusqlite::params![data.id],
-                |row| row.get(0),
-            )
-            .unwrap_or(0);
-        count == 0
-    };
+    let (persisted_id, is_new) = resolve_upsert_state(command, conn, "ip_addresses", &data.id)?;
 
     with_transaction(conn, command, |conn| {
         if is_new {
-            let id = if data.id.is_empty() {
-                uuid::Uuid::new_v4().to_string()
-            } else {
-                data.id.clone()
-            };
             conn.execute(
                 "INSERT INTO ip_addresses (id, ip_address, env, is_vip, real_ips, tags, description, is_deleted, deleted_at, created_at, updated_at)
                  VALUES (?1,?2,?3,?4,?5,?6,?7,0,NULL,?8,?8)",
                 rusqlite::params![
-                    id,
+                    &persisted_id,
                     data.ip_address,
                     data.env,
                     data.is_vip,
@@ -124,20 +110,26 @@ fn save_ip_address_inner(
                 ],
             )
             .map_err(|e| AppError::from_db_error(command, "创建IP资源", e))?;
-
-            insert_audit_log(
-                &conn,
+            write_audit_log_entry(
+                command,
+                conn,
                 "create",
                 "ip_address",
-                &id,
+                &persisted_id,
                 Some(&data.ip_address),
-                None,
-            )
-            .map_err(|e| AppError::from_db_error(command, "写入审计日志", e))?;
+            )?;
 
             let tag_values = parse_json_string_array(data.tags.as_deref());
-            save_resource_terms(conn, "ip_address", &id, FIELD_TAGS, &tag_values, &now)
-                .map_err(|e| AppError::from_db_error(command, "同步标签词条", e))?;
+            save_resource_terms(
+                conn,
+                "ip_address",
+                &persisted_id,
+                FIELD_TAGS,
+                &tag_values,
+                &now,
+            )
+            .map_err(|e| AppError::from_db_error(command, "同步标签词条", e))?;
+            Ok(persisted_id)
         } else {
             conn.execute(
                 "UPDATE ip_addresses SET ip_address=?1, env=?2, is_vip=?3, real_ips=?4, tags=?5, description=?6, updated_at=?7
@@ -154,23 +146,20 @@ fn save_ip_address_inner(
                 ],
             )
             .map_err(|e| AppError::from_db_error(command, "更新IP资源", e))?;
-
-            insert_audit_log(
-                &conn,
+            write_audit_log_entry(
+                command,
+                conn,
                 "update",
                 "ip_address",
                 &data.id,
                 Some(&data.ip_address),
-                None,
-            )
-            .map_err(|e| AppError::from_db_error(command, "写入审计日志", e))?;
+            )?;
 
             let tag_values = parse_json_string_array(data.tags.as_deref());
             save_resource_terms(conn, "ip_address", &data.id, FIELD_TAGS, &tag_values, &now)
                 .map_err(|e| AppError::from_db_error(command, "同步标签词条", e))?;
+            Ok(data.id.clone())
         }
-
-        Ok(())
     })
 }
 
@@ -208,7 +197,7 @@ fn batch_create_ip_addresses_inner(
         };
 
         match save_ip_address_inner(command, conn, data) {
-            Ok(()) => created_count += 1,
+            Ok(_) => created_count += 1,
             Err(error) if error.code == AppErrorCode::Conflict => skipped_count += 1,
             Err(error) => return Err(error),
         }
@@ -226,9 +215,7 @@ pub fn list_ip_addresses(
     params: QueryParams,
 ) -> AppResult<PagedResult<IpAddress>> {
     let command = "list_ip_addresses";
-    let conn = pool
-        .get()
-        .map_err(|e| AppError::db_unavailable(command, format!("Pool error: {}", e)))?;
+    let conn = get_conn(pool.inner(), command)?;
 
     let search_columns = &["ip_address", "description", "real_ips", "tags"];
     let filter_columns = &["env", "is_vip"];
@@ -252,8 +239,14 @@ pub fn list_ip_addresses(
             }
         }
     }
-    let total = count_query(&conn, "ip_addresses", &where_clause, &sql_params)
-        .map_err(|e| AppError::from_db_error(command, "查询IP资源数量", e))?;
+    let total = count_query(
+        command,
+        "查询IP资源数量",
+        &conn,
+        "ip_addresses",
+        &where_clause,
+        &sql_params,
+    )?;
 
     let page = params.page();
     let page_size = params.page_size();
@@ -290,9 +283,7 @@ pub fn list_ip_addresses(
 #[tauri::command]
 pub fn get_ip_address(pool: State<DbPool>, id: String) -> AppResult<IpAddress> {
     let command = "get_ip_address";
-    let conn = pool
-        .get()
-        .map_err(|e| AppError::db_unavailable(command, format!("Pool error: {}", e)))?;
+    let conn = get_conn(pool.inner(), command)?;
     let sql = format!(
         "SELECT {} FROM ip_addresses WHERE id=?1 AND is_deleted=0",
         SELECT_COLUMNS
@@ -303,11 +294,9 @@ pub fn get_ip_address(pool: State<DbPool>, id: String) -> AppResult<IpAddress> {
 }
 
 #[tauri::command]
-pub fn save_ip_address(pool: State<DbPool>, data: IpAddress) -> AppResult<()> {
+pub fn save_ip_address(pool: State<DbPool>, data: IpAddress) -> AppResult<String> {
     let command = "save_ip_address";
-    let conn = pool
-        .get()
-        .map_err(|e| AppError::db_unavailable(command, format!("Pool error: {}", e)))?;
+    let conn = get_conn(pool.inner(), command)?;
     save_ip_address_inner(command, &conn, data)
 }
 
@@ -317,9 +306,7 @@ pub fn batch_create_ip_addresses(
     params: BatchCreateIpParams,
 ) -> AppResult<BatchCreateIpResult> {
     let command = "batch_create_ip_addresses";
-    let conn = pool
-        .get()
-        .map_err(|e| AppError::db_unavailable(command, format!("Pool error: {}", e)))?;
+    let conn = get_conn(pool.inner(), command)?;
     batch_create_ip_addresses_inner(command, &conn, params)
 }
 
@@ -352,10 +339,15 @@ fn delete_ip_address_inner(
     }
 
     with_transaction(conn, command, |conn| {
-        delete_by_id(conn, "ip_addresses", &id)
-            .map_err(|e| AppError::from_db_error(command, "删除IP资源", e))?;
-        insert_audit_log(conn, "delete", "ip_address", &id, name.as_deref(), None)
-            .map_err(|e| AppError::from_db_error(command, "写入审计日志", e))?;
+        delete_with_audit(
+            command,
+            "删除IP资源",
+            conn,
+            "ip_addresses",
+            "ip_address",
+            &id,
+            name.as_deref(),
+        )?;
         let now = chrono::Utc::now().to_rfc3339();
         delete_resource_terms(conn, "ip_address", &id, &now)
             .map_err(|e| AppError::from_db_error(command, "删除标签绑定", e))?;
@@ -366,9 +358,7 @@ fn delete_ip_address_inner(
 #[tauri::command]
 pub fn delete_ip_address(pool: State<DbPool>, id: String) -> AppResult<()> {
     let command = "delete_ip_address";
-    let conn = pool
-        .get()
-        .map_err(|e| AppError::db_unavailable(command, format!("Pool error: {}", e)))?;
+    let conn = get_conn(pool.inner(), command)?;
     delete_ip_address_inner(command, &conn, id)
 }
 

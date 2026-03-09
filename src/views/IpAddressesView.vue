@@ -13,6 +13,7 @@ import { listIpTagTerms } from "@/api/taxonomy";
 import type { IpAddress } from "@/types";
 import type { SearchFieldConfig, SearchToolbarQueryPayload } from "@/types/searchToolbar";
 import { useResourceList } from "@/composables/useResourceList";
+import { ENV_OPTIONS } from "@/constants/options";
 import SearchToolbar from "@/components/filters/SearchToolbar.vue";
 import CopyableTextCell from "@/components/table/CopyableTextCell.vue";
 
@@ -57,11 +58,7 @@ const batchTagList = ref<string[]>([]);
 
 const ipv4Pattern = /^((25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(25[0-5]|2[0-4]\d|[01]?\d\d?)$/;
 
-const envOptions = [
-  { label: "生产", value: "prod" },
-  { label: "开发", value: "dev" },
-  { label: "测试", value: "test" },
-];
+const envOptions = ENV_OPTIONS;
 const vipOptions = [
   { label: "VIP", value: "1" },
   { label: "普通IP", value: "0" },
@@ -147,7 +144,7 @@ function parseTags(json?: string): string[] {
 
 function tagsToJson(values: string[]): string | undefined {
   const normalized = Array.from(
-    new Set(values.map((item) => item.trim()).filter((item) => item.length > 0))
+    new Set(values.map((item) => item.trim()).filter((item) => item.length > 0)),
   );
   return normalized.length > 0 ? JSON.stringify(normalized) : undefined;
 }
@@ -220,11 +217,7 @@ function removeRealIp(index: number) {
 
 function normalizeRealIps(): string[] {
   return Array.from(
-    new Set(
-      realIpList.value
-        .map((item) => item.trim())
-        .filter((item) => item.length > 0)
-    )
+    new Set(realIpList.value.map((item) => item.trim()).filter((item) => item.length > 0)),
   );
 }
 
@@ -296,7 +289,7 @@ async function handleBatchCreate() {
       description: batchForm.value.description.trim() || undefined,
     });
     ElMessage.success(
-      `批量生成完成：新增 ${result.created_count} 条，跳过 ${result.skipped_count} 条`
+      `批量生成完成：新增 ${result.created_count} 条，跳过 ${result.skipped_count} 条`,
     );
     await Promise.all([fetchData(), loadTagFilterOptions()]);
   } catch {
@@ -316,11 +309,7 @@ onMounted(() => {
   <div class="resource-view">
     <el-card class="batch-card" shadow="never">
       <template #header>
-        <button
-          type="button"
-          class="batch-card-header"
-          @click="batchExpanded = !batchExpanded"
-        >
+        <button type="button" class="batch-card-header" @click="batchExpanded = !batchExpanded">
           <span class="batch-card-title">批量生成 IP 资源</span>
           <span class="batch-card-action">
             {{ batchExpanded ? "收起" : "展开" }}
@@ -345,7 +334,12 @@ onMounted(() => {
           <el-col :span="5">
             <el-form-item label="环境" required>
               <el-select v-model="batchForm.env" class="w-full">
-                <el-option v-for="option in envOptions" :key="option.value" :label="option.label" :value="option.value" />
+                <el-option
+                  v-for="option in envOptions"
+                  :key="option.value"
+                  :label="option.label"
+                  :value="option.value"
+                />
               </el-select>
             </el-form-item>
           </el-col>
@@ -423,11 +417,19 @@ onMounted(() => {
       <el-table-column label="标签" min-width="180" show-overflow-tooltip align="center">
         <template #default="{ row }">{{ formatTags(row.tags) }}</template>
       </el-table-column>
-      <el-table-column prop="description" label="描述" min-width="220" show-overflow-tooltip align="center" />
+      <el-table-column
+        prop="description"
+        label="描述"
+        min-width="220"
+        show-overflow-tooltip
+        align="center"
+      />
       <el-table-column label="操作" width="160" fixed="right" align="center">
         <template #default="{ row }">
           <el-button text type="primary" size="small" @click="openEdit(row)">编辑</el-button>
-          <el-button text type="danger" size="small" @click="handleDelete(row.id, row.ip_address)">删除</el-button>
+          <el-button text type="danger" size="small" @click="handleDelete(row.id, row.ip_address)">
+            删除
+          </el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -457,7 +459,12 @@ onMounted(() => {
         </el-form-item>
         <el-form-item label="环境" prop="env" required>
           <el-select v-model="editingIp.env" class="w-full">
-            <el-option v-for="option in envOptions" :key="option.value" :label="option.label" :value="option.value" />
+            <el-option
+              v-for="option in envOptions"
+              :key="option.value"
+              :label="option.label"
+              :value="option.value"
+            />
           </el-select>
         </el-form-item>
         <el-form-item label="是否VIP">
@@ -581,4 +588,3 @@ onMounted(() => {
   align-items: center;
 }
 </style>
-

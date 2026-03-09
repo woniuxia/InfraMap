@@ -1,6 +1,7 @@
 mod backup;
-mod commands;
+#[macro_use]
 mod db;
+mod commands;
 mod error;
 mod models;
 mod storage;
@@ -10,41 +11,48 @@ mod validation;
 mod test_helpers;
 
 use db::{init_db_pool, run_migrations};
+use error::{log_runtime_error, AppError, AppResult};
 use tauri::Manager;
+
+fn setup_app<R: tauri::Runtime>(app: &mut tauri::App<R>) -> AppResult<()> {
+    let command = "app_startup";
+    let storage_paths = storage::resolve_storage_paths(&app.handle())
+        .map_err(|error| AppError::from_legacy(command, error))?;
+    let db_path = storage_paths.db_path.clone();
+    let db_path_str = db_path.to_str().ok_or_else(|| {
+        AppError::validation(
+            command,
+            format!("数据库路径不是有效 UTF-8: {}", db_path.display()),
+        )
+    })?;
+
+    let pool = init_db_pool(db_path_str)?;
+
+    let backup_dir = backup::get_backup_dir(&storage_paths.active_root_path)
+        .map_err(|error| AppError::from_backup_error(command, "解析备份目录", error))?;
+    let backup_name = format!(
+        "backup_pre_migration_{}.db",
+        chrono::Utc::now().format("%Y%m%d_%H%M%S")
+    );
+    let backup_path = backup_dir.join(backup_name);
+    backup::perform_backup(&pool, &backup_path)
+        .map_err(|error| AppError::from_backup_error(command, "创建迁移前备份", error))?;
+
+    run_migrations(&pool)?;
+
+    app.manage(pool.clone());
+    app.manage(storage_paths.clone());
+    backup::start_auto_backup_thread(pool, storage_paths);
+
+    Ok(())
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .setup(|app| {
-            let storage_paths = storage::resolve_storage_paths(&app.handle())
-                .expect("Failed to resolve storage paths");
-            let db_path = storage_paths.db_path.clone();
-            let db_path_str = db_path.to_str().expect("Invalid database path");
-
-            let pool =
-                init_db_pool(db_path_str).expect("Failed to initialize database connection pool");
-
-            let backup_dir = backup::get_backup_dir(&storage_paths.active_root_path)
-                .expect("Failed to resolve backup directory");
-            let backup_name = format!(
-                "backup_pre_migration_{}.db",
-                chrono::Utc::now().format("%Y%m%d_%H%M%S")
-            );
-            let backup_path = backup_dir.join(backup_name);
-            backup::perform_backup(&pool, &backup_path)
-                .expect("Failed to create pre-migration backup");
-
-            run_migrations(&pool).expect("Database migration failed");
-
-            app.manage(pool.clone());
-            app.manage(storage_paths.clone());
-
-            backup::start_auto_backup_thread(pool, storage_paths);
-
-            Ok(())
-        })
+        .setup(|app| setup_app(app).map_err(|error| Box::new(error) as Box<dyn std::error::Error>))
         .invoke_handler(tauri::generate_handler![
             commands::health::health_check,
             commands::health::get_db_info,
@@ -89,11 +97,11 @@ pub fn run() {
             commands::dependencies::replace_resource_call_relations,
             commands::dashboard::get_dashboard_overview,
             commands::audit_logs::list_audit_logs,
-            commands::topology_v3::get_topology_snapshot_v3,
-            commands::topology_v3::get_topology_task_view_v3,
-            commands::topology_v3::get_topology_paths_v3,
-            commands::topology_v3::get_topology_impact_v3,
-            commands::topology_v3::get_topology_evidence_v3,
+            commands::topology::get_topology_snapshot_v3,
+            commands::topology::get_topology_task_view_v3,
+            commands::topology::get_topology_paths_v3,
+            commands::topology::get_topology_impact_v3,
+            commands::topology::get_topology_evidence_v3,
             commands::settings::get_settings,
             commands::settings::update_settings,
             commands::settings::get_storage_profile,
@@ -115,5 +123,5 @@ pub fn run() {
             commands::backup::import_json,
         ])
         .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .unwrap_or_else(|error| log_runtime_error("run", "Tauri 应用启动失败", error));
 }

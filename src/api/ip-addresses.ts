@@ -15,8 +15,8 @@ export function getIpAddress(id: string): Promise<IpAddress> {
   return tauriInvoke<IpAddress>("get_ip_address", { id });
 }
 
-export function saveIpAddress(data: Partial<IpAddress>): Promise<void> {
-  return tauriInvoke<void>("save_ip_address", { data });
+export function saveIpAddress(data: Partial<IpAddress>): Promise<string> {
+  return tauriInvoke<string>("save_ip_address", { data });
 }
 
 export function batchCreateIpAddresses(params: BatchCreateIpParams): Promise<BatchCreateIpResult> {
@@ -26,4 +26,3 @@ export function batchCreateIpAddresses(params: BatchCreateIpParams): Promise<Bat
 export function deleteIpAddress(id: string): Promise<void> {
   return tauriInvoke<void>("delete_ip_address", { id });
 }
-

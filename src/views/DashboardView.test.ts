@@ -128,10 +128,11 @@ function createOverview(): DashboardOverview {
   };
 }
 
-function mountDashboard() {
+function mountDashboard(componentStubs: Record<string, unknown> = {}) {
   return mount(DashboardView, {
     global: {
       stubs: {
+        ...componentStubs,
         ElRow: PassThroughStub,
         ElCol: PassThroughStub,
         ElCard: PassThroughStub,
@@ -179,6 +180,65 @@ describe("DashboardView", () => {
     const resourceTypeCell = wrapper.find('[data-testid="cell-resource_type-0"]');
     expect(resourceTypeCell.exists()).toBe(true);
     expect(resourceTypeCell.find('[data-testid="el-tag"]').exists()).toBe(true);
+  });
+
+  it("composes dashboard presentation with dedicated child sections", async () => {
+    getDashboardOverviewMock.mockResolvedValue(createOverview());
+
+    const wrapper = mountDashboard({
+      DashboardQuickHub: defineComponent({
+        name: "DashboardQuickHub",
+        props: {
+          primaryActions: {
+            type: Array,
+            default: () => [],
+          },
+          secondaryActions: {
+            type: Array,
+            default: () => [],
+          },
+        },
+        template:
+          '<div data-testid="dashboard-quick-hub-stub">{{ primaryActions.length }}-{{ secondaryActions.length }}</div>',
+      }),
+      DashboardKpiGrid: defineComponent({
+        name: "DashboardKpiGrid",
+        props: {
+          items: {
+            type: Array,
+            default: () => [],
+          },
+        },
+        template: '<div data-testid="dashboard-kpi-grid-stub">{{ items.length }}</div>',
+      }),
+      DashboardRecentChanges: defineComponent({
+        name: "DashboardRecentChanges",
+        props: {
+          items: {
+            type: Array,
+            default: () => [],
+          },
+        },
+        template: '<div data-testid="dashboard-recent-changes-stub">{{ items.length }}</div>',
+      }),
+      DashboardOverviewPanels: defineComponent({
+        name: "DashboardOverviewPanels",
+        props: {
+          overview: {
+            type: Object,
+            default: null,
+          },
+        },
+        template:
+          '<div data-testid="dashboard-overview-panels-stub">{{ overview?.risk_items?.length ?? 0 }}</div>',
+      }),
+    });
+    await flushPromises();
+
+    expect(wrapper.get('[data-testid="dashboard-quick-hub-stub"]').text()).toBe("5-2");
+    expect(wrapper.get('[data-testid="dashboard-kpi-grid-stub"]').text()).toBe("6");
+    expect(wrapper.get('[data-testid="dashboard-recent-changes-stub"]').text()).toBe("1");
+    expect(wrapper.get('[data-testid="dashboard-overview-panels-stub"]').text()).toBe("1");
   });
 
   it("navigates by quick actions and supports refresh action", async () => {

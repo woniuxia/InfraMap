@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
-import type { Middleware } from "@/types";
+import type { EditorMode, Middleware } from "@/types";
 import type { SearchFieldConfig, SearchToolbarQueryPayload } from "@/types/searchToolbar";
 import { listMiddlewares, deleteMiddleware } from "@/api/middlewares";
 import { useResourceList } from "@/composables/useResourceList";
+import { ENV_OPTIONS } from "@/constants/options";
+import { generateDraftId } from "@/utils/draft";
 import {
   MIDDLEWARE_CATEGORY_OPTIONS,
   getMiddlewareCategoryLabel,
@@ -12,8 +14,6 @@ import {
 import { buildMiddlewareCopyDraft } from "@/utils/resourceCopy";
 import SearchToolbar from "@/components/filters/SearchToolbar.vue";
 import MiddlewareEditorDialog from "@/components/resource-editors/MiddlewareEditorDialog.vue";
-
-type MiddlewareEditorMode = "create" | "edit" | "copy";
 
 const {
   loading,
@@ -33,7 +33,7 @@ const {
 
 const searchText = ref("");
 const editorVisible = ref(false);
-const editorMode = ref<MiddlewareEditorMode>("create");
+const editorMode = ref<EditorMode>("create");
 const editorInitialDraft = ref<Partial<Middleware>>({});
 
 interface MiddlewareListFilters {
@@ -51,11 +51,7 @@ function createDefaultFilters(): MiddlewareListFilters {
 const listFilters = ref<MiddlewareListFilters>(createDefaultFilters());
 const categoryOptions = MIDDLEWARE_CATEGORY_OPTIONS;
 
-const envOptions = [
-  { label: "生产", value: "prod" },
-  { label: "开发", value: "dev" },
-  { label: "测试", value: "test" },
-];
+const envOptions = ENV_OPTIONS;
 
 const toolbarFields: SearchFieldConfig[] = [
   {
@@ -80,16 +76,9 @@ function handleToolbarQuery(payload: SearchToolbarQueryPayload) {
   handleQuery(payload);
 }
 
-function generateDraftMiddlewareId() {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return `mw-${crypto.randomUUID()}`;
-  }
-  return `mw-draft-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
-}
-
 function openAdd() {
   editorInitialDraft.value = {
-    id: generateDraftMiddlewareId(),
+    id: generateDraftId("mw"),
     env: "prod",
     category: "database",
     created_at: "",
@@ -108,7 +97,7 @@ function openEdit(row: Middleware) {
 function openCopy(row: Middleware) {
   editorInitialDraft.value = {
     ...buildMiddlewareCopyDraft(row),
-    id: generateDraftMiddlewareId(),
+    id: generateDraftId("mw"),
   };
   editorMode.value = "copy";
   editorVisible.value = true;
@@ -183,7 +172,9 @@ onMounted(() => fetchData());
         </template>
       </el-table-column>
       <el-table-column label="地址" min-width="180" align="center">
-        <template #default="{ row }"> {{ row.address || "-" }}{{ row.port ? ":" + row.port : "" }} </template>
+        <template #default="{ row }">
+          {{ row.address || "-" }}{{ row.port ? ":" + row.port : "" }}
+        </template>
       </el-table-column>
       <el-table-column prop="version" label="版本" width="100" align="center" />
       <el-table-column prop="env" label="环境" width="80" align="center">
@@ -195,7 +186,9 @@ onMounted(() => fetchData());
         <template #default="{ row }">
           <el-button text type="primary" size="small" @click="openEdit(row)">编辑</el-button>
           <el-button text type="primary" size="small" @click="openCopy(row)">复制</el-button>
-          <el-button text type="danger" size="small" @click="handleDelete(row.id, row.name)">删除</el-button>
+          <el-button text type="danger" size="small" @click="handleDelete(row.id, row.name)">
+            删除
+          </el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -233,8 +226,11 @@ onMounted(() => fetchData());
   padding: 12px;
   border: 1px solid var(--im-border-light);
   border-radius: var(--im-radius-md);
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--im-surface-1) 82%, transparent), var(--im-surface-0));
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--im-surface-1) 82%, transparent),
+    var(--im-surface-0)
+  );
 }
 .filter-row {
   display: grid;

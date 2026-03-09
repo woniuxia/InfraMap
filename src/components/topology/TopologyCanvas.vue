@@ -1,98 +1,61 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import cytoscape, { type Core, type EventObject, type EventObjectNode, type LayoutOptions } from "cytoscape";
-import dagre from "cytoscape-dagre";
-import fcose from "cytoscape-fcose";
-import cytoscapeSvg from "cytoscape-svg";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import cytoscape, { type Core } from "cytoscape";
 import type { TopologyGraph, TopologyNode } from "@/types";
-import { toExternalNodeId } from "@/components/topology/topologyGraph.utils";
-import { buildTopologyCyElements } from "@/components/topology/topologyCytoscape.utils";
 import { buildNodeIconSpriteDataUri } from "@/icons/nodeIconSprite";
-import {
-  DENSITY_OPTIONS,
-  getDensityByZoom,
-  normalizeEdgesForDensity,
-  normalizeNodesForDensity,
-  selectVisibleEdgeIds,
-  type ZoomDensity,
-} from "@/components/topology/topologyDensity.utils";
-import {
-  hasTopologyNodeSetChanged,
-  isDegenerateNodeDistribution,
-} from "@/components/topology/topologyLayoutSafety.utils";
-import {
-  collectDirectionalReachability,
-  type DirectionalReachabilityEdge,
-} from "@/components/topology/topologyDirectionalReachability.utils";
+import { type ZoomDensity } from "@/components/topology/topologyDensity.utils";
+import { useTopologyDensity } from "@/components/topology/useTopologyDensity";
+import { useTopologyHighlight } from "@/components/topology/useTopologyHighlight";
+import { useTopologyInteraction } from "@/components/topology/useTopologyInteraction";
+import { useTopologyLayout } from "@/components/topology/useTopologyLayout";
+import { useTopologyRenderer } from "@/components/topology/useTopologyRenderer";
 
-const props = withDefaults(defineProps<{
-  graphData: TopologyGraph | null;
-  focusNeighborhood?: boolean;
-  layout?: "force" | "dagre";
-  performanceOptimizationEnabled?: boolean;
-}>(), {
-  focusNeighborhood: true,
-  layout: "force",
-  performanceOptimizationEnabled: false,
-});
+const props = withDefaults(
+  defineProps<{
+    graphData: TopologyGraph | null;
+    focusNeighborhood?: boolean;
+    layout?: "force" | "dagre";
+    performanceOptimizationEnabled?: boolean;
+  }>(),
+  {
+    focusNeighborhood: true,
+    layout: "force",
+    performanceOptimizationEnabled: false,
+  },
+);
 
 const emit = defineEmits<{
   (e: "node-click", node: TopologyNode): void;
   (e: "node-contextmenu", payload: { node: TopologyNode; x: number; y: number }): void;
   (e: "canvas-blank-click"): void;
-  (e: "layout-resolved", payload: { requested: "force" | "dagre"; applied: "force" | "dagre"; reason?: string }): void;
+  (
+    e: "layout-resolved",
+    payload: {
+      requested: "force" | "dagre";
+      applied: "force" | "dagre";
+      reason?: string;
+    },
+  ): void;
 }>();
 
 type LayoutType = "force" | "dagre";
 
-let cytoscapeExtensionsRegistered = false;
-
-function registerCytoscapeExtensions() {
-  if (cytoscapeExtensionsRegistered) return;
-  cytoscape.use(dagre);
-  cytoscape.use(fcose);
-  cytoscapeSvg(cytoscape);
-  cytoscapeExtensionsRegistered = true;
-}
-
 const containerRef = ref<HTMLDivElement>();
 const activeLayout = ref<LayoutType>(props.layout);
+let currentCy: Core | null = null;
 
-let cy: Core | null = null;
-let resizeObserver: ResizeObserver | null = null;
-let themeObserver: MutationObserver | null = null;
-let resizeAnimationFrame: number | null = null;
-let syncVersion = 0;
+let getCyImpl: () => Core | null = () => null;
+let syncGraphDataImpl: (options?: {
+  preserveViewport?: boolean;
+  runLayout?: boolean;
+}) => Promise<void> = async () => {};
+let applyRendererStylesImpl: () => void = () => {};
 let graphTheme: GraphTheme | null = null;
-let hasRenderedGraph = false;
-let pendingInitialResizeRefit = false;
-let hasUserAdjustedViewport = false;
 
 const renderFlags = {
   isLargeGraph: false,
   hideEdgeLabels: false,
 };
-
-let nodeById = new Map<string, TopologyNode>();
-let renderableNodeIds = new Set<string>();
-let edgeIdByPair = new Map<string, string>();
-let zoomDensityRaf: number | null = null;
-let densityWorker: Worker | null = null;
-let densityWorkerRequestId = 0;
-const densityWorkerResolvers = new Map<number, (edgeIds?: string[]) => void>();
-const densitySelectionCache = new WeakMap<TopologyGraph, Partial<Record<ZoomDensity, string[]>>>();
-let forcedDensity: ZoomDensity | null = null;
-let pendingDensityAfterFocus: ZoomDensity | null = null;
-let focusDensityTimer: number | null = null;
-
-type HighlightState
-  = { kind: "none" }
-  | { kind: "paths"; paths: string[][] }
-  | { kind: "impact"; nodeId: string; result: { affected_nodes: { id: string; depth: number }[] } }
-  | { kind: "neighborhood"; nodeId: string }
-  | { kind: "search"; nodeIds: string[]; focusId?: string };
-
-let activeHighlightState: HighlightState = { kind: "none" };
 
 const viewportState = ref({
   zoom: 1,
@@ -101,23 +64,65 @@ const viewportState = ref({
   visibleEdges: 0,
 });
 
-interface DensityWorkerRequest {
-  requestId: number;
-  density: ZoomDensity;
-  nodes: { id: string; importance: number }[];
-  edges: { id: string; source: string; target: string; strength: number; cross_env: boolean }[];
-}
+const performanceOptimizationEnabled = computed(() => props.performanceOptimizationEnabled);
 
-interface DensityWorkerResponse {
-  requestId: number;
-  visibleEdgeIds: string[];
-}
+const {
+  densityHintText,
+  resolveZoomDensity,
+  getActiveDensity,
+  rebuildIndexes,
+  resolveRenderableNodeId,
+  findNodeById,
+  findEdgeId,
+  buildDensityGraphData,
+  activateFocusDensity,
+  deactivateFocusDensity,
+  handleViewportZoomChange,
+  resetDensityState,
+  dispose: disposeDensity,
+} = useTopologyDensity({
+  performanceOptimizationEnabled,
+  viewportState,
+  requestSyncGraphData: () => {
+    void syncGraphDataImpl({ preserveViewport: true, runLayout: false });
+  },
+});
 
-interface LayoutRunResult {
-  requested: LayoutType;
-  applied: LayoutType;
-  reason?: string;
-}
+const {
+  applyHighlightState,
+  clearHighlight,
+  highlightPaths,
+  highlightImpact,
+  highlightSearch,
+  focusNeighborhood: focusNeighborhoodInternal,
+  isNeighborhoodHighlightActive,
+} = useTopologyHighlight({
+  getCy: () => getCyImpl(),
+  resolveRenderableNodeId,
+  findEdgeId,
+  activateFocusDensity,
+  deactivateFocusDensity,
+});
+
+const { handleCanvasTap, handleNodeTap, handleNodeContextTap } = useTopologyInteraction({
+  getCy: () => getCyImpl(),
+  getContainer: () => containerRef.value,
+  focusNeighborhoodEnabled: () => props.focusNeighborhood,
+  focusNeighborhood: focusNeighborhoodInternal,
+  findNodeById,
+  emitNodeClick: (node) => emit("node-click", node),
+  emitNodeContextmenu: (payload) => emit("node-contextmenu", payload),
+  emitCanvasBlankClick: () => emit("canvas-blank-click"),
+});
+
+const { snapshotLeafNodePositions, restoreLeafNodePositions, runLayout } = useTopologyLayout({
+  getCy: () => getCyImpl(),
+  getIsLargeGraph: () => renderFlags.isLargeGraph,
+  onFallbackToForce: () => {
+    activeLayout.value = "force";
+    applyRendererStylesImpl();
+  },
+});
 
 interface GraphTheme {
   statusColors: Record<string, string>;
@@ -214,9 +219,15 @@ function buildGraphTheme(): GraphTheme {
       tcp: { stroke: cssVar("--el-color-info", "#5ca3ff") },
       mq_produce: { stroke: warning, lineDash: [4, 4] },
       mq_consume: { stroke: warning, lineDash: [4, 4] },
-      grpc_call: { stroke: cssVar("--el-color-primary", "#409eff"), lineDash: [6, 3] },
+      grpc_call: {
+        stroke: cssVar("--el-color-primary", "#409eff"),
+        lineDash: [6, 3],
+      },
       db_query: { stroke: cssVar("--el-color-success", "#67c23a") },
-      cache_access: { stroke: cssVar("--el-color-warning", "#e6a23c"), lineDash: [2, 4] },
+      cache_access: {
+        stroke: cssVar("--el-color-warning", "#e6a23c"),
+        lineDash: [2, 4],
+      },
     },
     labelPrimary: textPrimary,
     labelSecondary: textSecondary,
@@ -236,231 +247,16 @@ function refreshTheme() {
   graphTheme = buildGraphTheme();
 }
 
-function resolveZoomDensity(zoom: number): ZoomDensity {
-  if (!props.performanceOptimizationEnabled) return "detail";
-  return getDensityByZoom(zoom);
-}
-
-function getActiveDensity(): ZoomDensity {
-  if (!props.performanceOptimizationEnabled) return "detail";
-  return forcedDensity || viewportState.value.density;
-}
-
-const densityHintText = computed(() => {
-  const density = DENSITY_OPTIONS[getActiveDensity()];
-  const suffix = !props.performanceOptimizationEnabled
-    ? "（性能优化关闭）"
-    : (forcedDensity ? "（聚焦）" : "");
-  return `渲染: ${density.label}${suffix} · 关系 ${viewportState.value.visibleEdges}/${viewportState.value.totalEdges}`;
-});
-
-function edgePairKey(source: string, target: string): string {
-  return `${source}=>${target}`;
-}
-
-function rebuildIndexes(graphData: TopologyGraph | null) {
-  nodeById = new Map();
-  renderableNodeIds = new Set();
-  edgeIdByPair = new Map();
-
-  if (!graphData) return;
-
-  graphData.nodes.forEach((node) => {
-    nodeById.set(node.id, node);
-    renderableNodeIds.add(node.id);
-  });
-
-  graphData.edges.forEach((edge) => {
-    edgeIdByPair.set(edgePairKey(edge.source, edge.target), edge.id);
-  });
-}
-
-function resolveRenderableNodeId(rawNodeId: string): string | null {
-  if (renderableNodeIds.has(rawNodeId)) return rawNodeId;
-  const externalId = toExternalNodeId(rawNodeId);
-  if (renderableNodeIds.has(externalId)) return externalId;
-  return null;
-}
-
-function cacheVisibleEdgeIds(graphData: TopologyGraph, density: ZoomDensity, edgeIds: string[]) {
-  const cache = densitySelectionCache.get(graphData) || {};
-  cache[density] = edgeIds;
-  densitySelectionCache.set(graphData, cache);
-}
-
-function ensureDensityWorker(): Worker | null {
-  if (densityWorker || typeof Worker === "undefined") return densityWorker;
-
-  densityWorker = new Worker(new URL("./topologyDensity.worker.ts", import.meta.url), { type: "module" });
-  densityWorker.onmessage = (event: MessageEvent<DensityWorkerResponse>) => {
-    const { requestId, visibleEdgeIds } = event.data;
-    const resolve = densityWorkerResolvers.get(requestId);
-    if (!resolve) return;
-    densityWorkerResolvers.delete(requestId);
-    resolve(visibleEdgeIds);
-  };
-  densityWorker.onerror = () => {
-    densityWorkerResolvers.forEach((resolve) => resolve(undefined));
-    densityWorkerResolvers.clear();
-    densityWorker?.terminate();
-    densityWorker = null;
-  };
-
-  return densityWorker;
-}
-
-async function resolveVisibleEdgeIds(graphData: TopologyGraph, density: ZoomDensity): Promise<string[]> {
-  const cache = densitySelectionCache.get(graphData);
-  const cachedEdgeIds = cache?.[density];
-  if (cachedEdgeIds) return cachedEdgeIds;
-
-  const nodes = normalizeNodesForDensity(graphData.nodes);
-  const edges = normalizeEdgesForDensity(graphData.edges);
-
-  const computeSynchronously = () => {
-    const edgeIds = selectVisibleEdgeIds(density, nodes, edges);
-    cacheVisibleEdgeIds(graphData, density, edgeIds);
-    return edgeIds;
-  };
-
-  if (density === "detail" || edges.length < 260) {
-    return computeSynchronously();
-  }
-
-  const worker = ensureDensityWorker();
-  if (!worker) {
-    return computeSynchronously();
-  }
-
-  const requestId = ++densityWorkerRequestId;
-  const payload: DensityWorkerRequest = {
-    requestId,
-    density,
-    nodes,
-    edges,
-  };
-
-  return new Promise((resolve) => {
-    const timeoutId = globalThis.setTimeout(() => {
-      densityWorkerResolvers.delete(requestId);
-      resolve(computeSynchronously());
-    }, 180);
-
-    densityWorkerResolvers.set(requestId, (edgeIds?: string[]) => {
-      globalThis.clearTimeout(timeoutId);
-      if (edgeIds === undefined) {
-        resolve(computeSynchronously());
-        return;
-      }
-      cacheVisibleEdgeIds(graphData, density, edgeIds);
-      resolve(edgeIds);
-    });
-
-    try {
-      worker.postMessage(payload);
-    } catch {
-      densityWorkerResolvers.delete(requestId);
-      globalThis.clearTimeout(timeoutId);
-      resolve(computeSynchronously());
-    }
-  });
-}
-
-async function buildDensityGraphData(graphData: TopologyGraph, density: ZoomDensity): Promise<TopologyGraph> {
-  if (!props.performanceOptimizationEnabled) {
-    return graphData;
-  }
-  const edgeIds = await resolveVisibleEdgeIds(graphData, density);
-  const edgeIdSet = new Set(edgeIds);
-  return {
-    ...graphData,
-    edges: graphData.edges.filter((edge) => edgeIdSet.has(edge.id)),
-  };
-}
-
-function clearFocusDensityTimer() {
-  if (focusDensityTimer) {
-    globalThis.clearTimeout(focusDensityTimer);
-    focusDensityTimer = null;
-  }
-}
-
-function scheduleDensitySync() {
-  if (zoomDensityRaf) {
-    cancelAnimationFrame(zoomDensityRaf);
-  }
-  zoomDensityRaf = requestAnimationFrame(() => {
-    zoomDensityRaf = null;
-    void syncGraphData({ preserveViewport: true, runLayout: false });
-  });
-}
-
-function deactivateFocusDensity(options: { sync?: boolean } = {}) {
-  const shouldSync = options.sync !== false;
-  if (!forcedDensity) return;
-
-  forcedDensity = null;
-  clearFocusDensityTimer();
-  const nextDensity = pendingDensityAfterFocus || resolveZoomDensity(viewportState.value.zoom);
-  pendingDensityAfterFocus = null;
-  if (viewportState.value.density !== nextDensity) {
-    viewportState.value.density = nextDensity;
-    if (shouldSync) scheduleDensitySync();
-  } else if (shouldSync) {
-    scheduleDensitySync();
-  }
-}
-
-function activateFocusDensity(durationMs = 14_000) {
-  if (!props.performanceOptimizationEnabled) return;
-  forcedDensity = "detail";
-  pendingDensityAfterFocus = resolveZoomDensity(viewportState.value.zoom);
-  clearFocusDensityTimer();
-  focusDensityTimer = globalThis.setTimeout(() => {
-    focusDensityTimer = null;
-    deactivateFocusDensity();
-  }, durationMs);
-
-  if (viewportState.value.density !== "detail") {
-    viewportState.value.density = "detail";
-    scheduleDensitySync();
-  }
-}
-
-function markViewportAsUserAdjusted(event?: { originalEvent?: unknown }) {
-  if (!event?.originalEvent) return;
-  hasUserAdjustedViewport = true;
-  pendingInitialResizeRefit = false;
-}
-
-function handleViewportTransform(event?: { originalEvent?: unknown }) {
-  if (!cy) return;
-  markViewportAsUserAdjusted(event);
-  const zoom = cy.zoom();
-  viewportState.value.zoom = zoom;
-  const nextDensity = resolveZoomDensity(zoom);
-  if (forcedDensity) {
-    pendingDensityAfterFocus = nextDensity;
-    return;
-  }
-  if (nextDensity !== viewportState.value.density) {
-    viewportState.value.density = nextDensity;
-    scheduleDensitySync();
-  }
-}
-
-function handleViewportPan(event?: { originalEvent?: unknown }) {
-  markViewportAsUserAdjusted(event);
-}
-
 function resolveAppTypeColor(data: Record<string, unknown>, theme: GraphTheme): string {
   const appType = String(data.app_type_key || "other");
-  return theme.applicationTypeColors[appType as keyof GraphTheme["applicationTypeColors"]]
-    || theme.applicationTypeColors.other;
+  return (
+    theme.applicationTypeColors[appType as keyof GraphTheme["applicationTypeColors"]] ||
+    theme.applicationTypeColors.other
+  );
 }
 
 function resolveNodeBaseColor(data: Record<string, unknown>, theme: GraphTheme): string {
-  const nodeType = String(data.node_type || "application");
+  const nodeType = String(data.nodeType || "application");
   const status = String(data.status || "");
 
   if (nodeType === "application") {
@@ -477,33 +273,33 @@ function resolveNodeBaseColor(data: Record<string, unknown>, theme: GraphTheme):
 }
 
 function resolveNodeStroke(data: Record<string, unknown>, theme: GraphTheme): string {
-  const isExternal = Boolean(data.is_external);
+  const isExternal = Boolean(data.isExternal);
   const typeColor = resolveNodeBaseColor(data, theme);
   return isExternal ? withAlpha(typeColor, "A2") : withAlpha(typeColor, "EE");
 }
 
 function resolveNodeBorderWidth(data: Record<string, unknown>): number {
-  const groupKind = String(data.group_kind || "application_service");
+  const groupKind = String(data.groupKind || "application_service");
   if (groupKind === "nginx") return 2.8;
   if (groupKind === "middleware") return 2.2;
   return 2.6;
 }
 
 function resolveEdgeStroke(data: Record<string, unknown>, theme: GraphTheme): string {
-  if (Boolean(data.cross_env)) return theme.impact;
-  const sourceNodeType = String(data.source_node_type || "");
+  if (data.crossEnv) return theme.impact;
+  const sourceNodeType = String(data.source_nodeType || "");
   if (sourceNodeType === "application") {
     const appType = String(data.source_app_type_key || "other");
     const color = theme.applicationTypeColors[appType as keyof GraphTheme["applicationTypeColors"]];
     if (color) return color;
   }
-  const edgeType = String(data.edge_type || "http_call");
+  const edgeType = String(data.edgeType || "http_call");
   return theme.edgeStyles[edgeType]?.stroke || theme.edgeStyles.http_call.stroke;
 }
 
 function resolveEdgeDash(data: Record<string, unknown>, theme: GraphTheme): string {
-  if (Boolean(data.cross_env)) return "6 4";
-  const edgeType = String(data.edge_type || "http_call");
+  if (data.crossEnv) return "6 4";
+  const edgeType = String(data.edgeType || "http_call");
   const dash = theme.edgeStyles[edgeType]?.lineDash;
   return dash ? dash.join(" ") : "";
 }
@@ -512,7 +308,7 @@ function resolveEdgeCurveStyle(
   data: Record<string, unknown>,
   runtime: { dense: boolean; layout: "force" | "dagre" },
 ): "bezier" | "taxi" {
-  if (Boolean(data.cross_env)) return "bezier";
+  if (data.crossEnv) return "bezier";
   if (runtime.layout === "dagre" && runtime.dense) {
     return "taxi";
   }
@@ -539,13 +335,15 @@ function buildStylesheet(
         width: "data(size)",
         height: "data(size)",
         "font-size": "data(label_font_size)",
-        color: (ele: cytoscape.NodeSingular) => ele.data("is_external") ? theme.labelSecondary : theme.labelPrimary,
+        color: (ele: cytoscape.NodeSingular) =>
+          ele.data("isExternal") ? theme.labelSecondary : theme.labelPrimary,
         "text-halign": "center",
         "text-valign": "bottom",
         "text-margin-y": 6,
         "text-outline-color": withAlpha(theme.labelBg, "D9"),
         "text-outline-width": 1.2,
-        "background-color": (ele: cytoscape.NodeSingular) => resolveNodeBaseColor(ele.data(), theme),
+        "background-color": (ele: cytoscape.NodeSingular) =>
+          resolveNodeBaseColor(ele.data(), theme),
         "background-image": (ele: cytoscape.NodeSingular) => {
           const src = String(ele.data("icon_src") || "").trim();
           if (src.length === 0) return "none";
@@ -561,8 +359,8 @@ function buildStylesheet(
         "border-color": (ele: cytoscape.NodeSingular) => resolveNodeStroke(ele.data(), theme),
         "border-width": (ele: cytoscape.NodeSingular) => resolveNodeBorderWidth(ele.data()),
         "border-style": (ele: cytoscape.NodeSingular) => {
-          if (ele.data("is_external")) return "dashed";
-          if (ele.data("group_kind") === "middleware") return "dashed";
+          if (ele.data("isExternal")) return "dashed";
+          if (ele.data("groupKind") === "middleware") return "dashed";
           return "solid";
         },
         "background-opacity": 0,
@@ -601,7 +399,8 @@ function buildStylesheet(
         "taxi-turn-min-distance": 12,
         "line-color": (ele: cytoscape.EdgeSingular) => resolveEdgeStroke(ele.data(), theme),
         "target-arrow-color": (ele: cytoscape.EdgeSingular) => resolveEdgeStroke(ele.data(), theme),
-        "line-style": (ele: cytoscape.EdgeSingular) => resolveEdgeDash(ele.data(), theme) ? "dashed" : "solid",
+        "line-style": (ele: cytoscape.EdgeSingular) =>
+          resolveEdgeDash(ele.data(), theme) ? "dashed" : "solid",
         width: "data(line_width)",
         opacity: "data(opacity)",
         "target-arrow-shape": "data(arrow)",
@@ -664,482 +463,51 @@ function buildStylesheet(
   ];
 }
 
-function syncParentDimState() {
-  if (!cy) return;
-  cy.nodes(":parent").forEach((parent) => {
-    const children = parent.children();
-    const hasActiveChild = children.filter(".im-highlight, .im-impact").nonempty();
-    if (hasActiveChild) {
-      parent.removeClass("im-dim");
-    } else {
-      parent.addClass("im-dim");
-    }
-  });
-}
-
-function clearHighlightStates() {
-  if (!cy) return;
-  cy.nodes().removeClass("im-highlight im-dim im-impact");
-  cy.edges().removeClass("im-highlight im-dim");
-}
-
-function applyPathHighlight(paths: string[][]) {
-  if (!cy) return;
-  clearHighlightStates();
-
-  const nodeIds = new Set<string>();
-  const edgeIds = new Set<string>();
-
-  paths.forEach((path) => {
-    path.forEach((rawId) => {
-      const renderId = resolveRenderableNodeId(rawId);
-      if (renderId) nodeIds.add(renderId);
-    });
-
-    for (let index = 0; index < path.length - 1; index += 1) {
-      const source = resolveRenderableNodeId(path[index]);
-      const target = resolveRenderableNodeId(path[index + 1]);
-      if (!source || !target) continue;
-      const edgeId = edgeIdByPair.get(edgePairKey(source, target));
-      if (edgeId) edgeIds.add(edgeId);
-    }
-  });
-
-  cy.nodes().forEach((node) => {
-    if (node.isParent()) return;
-    node.addClass(nodeIds.has(node.id()) ? "im-highlight" : "im-dim");
-  });
-  cy.edges().forEach((edge) => {
-    edge.addClass(edgeIds.has(edge.id()) ? "im-highlight" : "im-dim");
-  });
-  syncParentDimState();
-}
-
-function applyImpactHighlight(nodeId: string, result: { affected_nodes: { id: string; depth: number }[] }) {
-  if (!cy) return;
-  clearHighlightStates();
-
-  const focusNodeId = resolveRenderableNodeId(nodeId) || nodeId;
-  const affectedIds = new Set<string>([focusNodeId]);
-  result.affected_nodes.forEach((item) => {
-    const renderId = resolveRenderableNodeId(item.id);
-    if (renderId) affectedIds.add(renderId);
-  });
-
-  cy.nodes().forEach((node) => {
-    if (node.isParent()) return;
-    if (node.id() === focusNodeId) {
-      node.addClass("im-impact");
-    } else if (affectedIds.has(node.id())) {
-      node.addClass("im-highlight");
-    } else {
-      node.addClass("im-dim");
-    }
-  });
-
-  cy.edges().forEach((edge) => {
-    const sourceHit = affectedIds.has(edge.source().id());
-    const targetHit = affectedIds.has(edge.target().id());
-    edge.addClass(sourceHit && targetHit ? "im-highlight" : "im-dim");
-  });
-  syncParentDimState();
-}
-
-function applyNeighborhoodHighlight(nodeId: string, allowFocus = true) {
-  if (!cy) return;
-  clearHighlightStates();
-
-  const renderFocusId = resolveRenderableNodeId(nodeId);
-  if (!renderFocusId) return;
-
-  const focus = cy.getElementById(renderFocusId);
-  if (focus.empty()) return;
-
-  const visibleEdges: DirectionalReachabilityEdge[] = [];
-  cy.edges().forEach((edge: cytoscape.EdgeSingular) => {
-    visibleEdges.push({
-      id: edge.id(),
-      source: edge.source().id(),
-      target: edge.target().id(),
-    });
-  });
-
-  const { highlightedNodeIds, highlightedEdgeIds } = collectDirectionalReachability(renderFocusId, visibleEdges);
-  highlightedNodeIds.add(renderFocusId);
-
-  cy.nodes().forEach((node) => {
-    if (node.isParent()) return;
-    if (node.id() === renderFocusId) {
-      node.addClass("im-impact");
-    } else if (highlightedNodeIds.has(node.id())) {
-      node.addClass("im-highlight");
-    } else {
-      node.addClass("im-dim");
-    }
-  });
-
-  cy.edges().forEach((edge) => {
-    edge.addClass(highlightedEdgeIds.has(edge.id()) ? "im-highlight" : "im-dim");
-  });
-
-  if (allowFocus) {
-    cy.animate({
-      center: { eles: focus },
-      duration: 220,
-    });
-  }
-
-  syncParentDimState();
-}
-
-function applySearchHighlight(nodeIds: string[], focusId?: string, allowFocus = true) {
-  if (!cy) return;
-  clearHighlightStates();
-
-  const matchSet = new Set<string>();
-  nodeIds.forEach((id) => {
-    const renderId = resolveRenderableNodeId(id);
-    if (renderId) matchSet.add(renderId);
-  });
-
-  cy.nodes().forEach((node) => {
-    if (node.isParent()) return;
-    node.addClass(matchSet.has(node.id()) ? "im-highlight" : "im-dim");
-  });
-
-  if (allowFocus && focusId) {
-    const renderFocusId = resolveRenderableNodeId(focusId);
-    if (renderFocusId) {
-      const target = cy.getElementById(renderFocusId);
-      if (target.nonempty()) {
-        cy.center(target);
-      }
-    }
-  }
-  syncParentDimState();
-}
-
-function applyHighlightState(options: { allowFocus?: boolean } = {}) {
-  const allowFocus = options.allowFocus !== false;
-  if (!cy) return;
-
-  if (activeHighlightState.kind === "none") {
-    clearHighlightStates();
-    return;
-  }
-  if (activeHighlightState.kind === "paths") {
-    applyPathHighlight(activeHighlightState.paths);
-    return;
-  }
-  if (activeHighlightState.kind === "impact") {
-    applyImpactHighlight(activeHighlightState.nodeId, activeHighlightState.result);
-    return;
-  }
-  if (activeHighlightState.kind === "neighborhood") {
-    applyNeighborhoodHighlight(activeHighlightState.nodeId, allowFocus);
-    return;
-  }
-  applySearchHighlight(activeHighlightState.nodeIds, activeHighlightState.focusId, allowFocus);
-}
-
-function snapshotLeafNodePositions(): Map<string, { x: number; y: number }> {
-  const positionMap = new Map<string, { x: number; y: number }>();
-  if (!cy) return positionMap;
-
-  cy.nodes()
-    .not(":parent")
-    .forEach((node: cytoscape.NodeSingular) => {
-      const position = node.position();
-      positionMap.set(node.id(), { x: position.x, y: position.y });
-    });
-  return positionMap;
-}
-
-function restoreLeafNodePositions(positionMap: Map<string, { x: number; y: number }>) {
-  if (!cy || positionMap.size === 0) return;
-  cy.batch(() => {
-    cy!.nodes()
-      .not(":parent")
-      .forEach((node: cytoscape.NodeSingular) => {
-        const position = positionMap.get(node.id());
-        if (!position) return;
-        node.position(position);
-      });
-  });
-}
-
-function hasDegenerateLayout(): boolean {
-  if (!cy) return false;
-  const points: Array<{ x: number; y: number }> = [];
-  cy.nodes()
-    .not(":parent")
-    .forEach((node: cytoscape.NodeSingular) => {
-      const position = node.position();
-      points.push({ x: position.x, y: position.y });
-    });
-  return isDegenerateNodeDistribution(points);
-}
-
-function buildLayoutOptions(layoutType: LayoutType): LayoutOptions {
-  if (layoutType === "dagre") {
-    return {
-      name: "dagre",
-      rankDir: "LR",
-      nodeSep: 72,
-      rankSep: 180,
-      fit: true,
-      padding: 36,
-      animate: false,
-    } as unknown as LayoutOptions;
-  }
-
-  return {
-    name: "fcose",
-    quality: renderFlags.isLargeGraph ? "default" : "proof",
-    randomize: true,
-    animate: false,
-    fit: true,
-    padding: 40,
-    packComponents: false,
-    nodeRepulsion: (node: cytoscape.NodeSingular) => node.data("is_external") ? 8000 : 12000,
-    idealEdgeLength: (edge: cytoscape.EdgeSingular) => edge.data("cross_env") ? 240 : 180,
-    numIter: renderFlags.isLargeGraph ? 1600 : 2200,
-    tile: true,
-  } as unknown as LayoutOptions;
-}
-
-function runLayoutOnce(layoutType: LayoutType): Promise<boolean> {
-  if (!cy) return Promise.resolve(true);
-  return new Promise((resolve) => {
-    let settled = false;
-    const finish = (ok: boolean) => {
-      if (settled) return;
-      settled = true;
-      resolve(ok);
-    };
-
-    let layout: ReturnType<Core["layout"]> | null = null;
-    try {
-      layout = cy!.layout(buildLayoutOptions(layoutType));
-    } catch {
-      finish(false);
-      return;
-    }
-
-    layout.one("layoutstop", () => finish(true));
-    try {
-      layout.run();
-    } catch {
-      finish(false);
-      return;
-    }
-
-    globalThis.setTimeout(() => finish(true), renderFlags.isLargeGraph ? 2600 : 1800);
-  });
-}
-
-async function runLayout(layoutType: LayoutType): Promise<LayoutRunResult> {
-  const primaryOk = await runLayoutOnce(layoutType);
-  if (layoutType !== "dagre") {
-    return {
-      requested: layoutType,
-      applied: layoutType,
-      reason: primaryOk ? undefined : "force_layout_error",
-    };
-  }
-
-  if (primaryOk && !hasDegenerateLayout()) {
-    return {
-      requested: layoutType,
-      applied: layoutType,
-    };
-  }
-
-  const fallbackOk = await runLayoutOnce("force");
-  activeLayout.value = "force";
-  applyStyles();
-  return {
-    requested: layoutType,
-    applied: "force",
-    reason: primaryOk ? "dagre_degenerate" : (fallbackOk ? "dagre_error" : "dagre_and_force_error"),
-  };
-}
-
-function applyStyles() {
-  if (!cy) return;
-  const theme = getTheme();
-  const dense = props.performanceOptimizationEnabled
-    && (renderFlags.hideEdgeLabels || viewportState.value.visibleEdges > 140);
-  cy.style(buildStylesheet(theme, {
-    dense,
-    layout: activeLayout.value,
-  }) as unknown as cytoscape.StylesheetJsonBlock[]);
-}
-
-function getContextMenuPosition(evt: EventObjectNode): { x: number; y: number } {
-  const mouse = evt.originalEvent as MouseEvent | undefined;
-  if (mouse && Number.isFinite(mouse.clientX) && Number.isFinite(mouse.clientY)) {
-    return { x: mouse.clientX, y: mouse.clientY };
-  }
-
-  const rect = containerRef.value?.getBoundingClientRect();
-  const rendered = evt.renderedPosition || evt.target.renderedPosition();
-  if (rect && rendered) {
-    return {
-      x: rect.left + rendered.x,
-      y: rect.top + rendered.y,
-    };
-  }
-
-  return { x: 0, y: 0 };
-}
-
-function handleCanvasTap(evt: EventObject) {
-  if (!cy) return;
-  if (evt.target !== cy) return;
-  emit("canvas-blank-click");
-}
-
-function handleNodeTap(evt: EventObjectNode) {
-  const target = evt.target;
-  if (typeof target.isNode !== "function" || !target.isNode()) return;
-  if (typeof target.isParent === "function" && target.isParent()) return;
-  if (props.focusNeighborhood) {
-    activeHighlightState = { kind: "neighborhood", nodeId: target.id() };
-    activateFocusDensity(9_000);
-    applyHighlightState({ allowFocus: false });
-  }
-  const node = nodeById.get(target.id());
-  if (node) emit("node-click", node);
-}
-
-function handleNodeContextTap(evt: EventObjectNode) {
-  const target = evt.target;
-  if (typeof target.isNode !== "function" || !target.isNode()) return;
-  if (typeof target.isParent === "function" && target.isParent()) return;
-  const node = nodeById.get(target.id());
-  if (!node) return;
-  const position = getContextMenuPosition(evt);
-  emit("node-contextmenu", { node, x: position.x, y: position.y });
-}
-
-async function ensureCy() {
-  if (!containerRef.value || cy) return;
-
-  registerCytoscapeExtensions();
-  refreshTheme();
-
-  cy = cytoscape({
-    container: containerRef.value,
-    elements: [],
-    style: buildStylesheet(getTheme(), {
-      dense: false,
-      layout: activeLayout.value,
-    }) as unknown as cytoscape.StylesheetJsonBlock[],
-    zoomingEnabled: true,
-    userZoomingEnabled: true,
-    panningEnabled: true,
-    userPanningEnabled: true,
-    boxSelectionEnabled: false,
-    autounselectify: true,
-    minZoom: 0.15,
-    maxZoom: 4,
-  });
-
-  cy.on("tap", "node", (evt) => handleNodeTap(evt as EventObjectNode));
-  cy.on("tap", (evt) => handleCanvasTap(evt as EventObject));
-  cy.on("cxttap", "node", (evt) => handleNodeContextTap(evt as EventObjectNode));
-  cy.on("zoom", handleViewportTransform);
-  cy.on("pan", handleViewportPan);
-
-  viewportState.value.zoom = cy.zoom();
-  viewportState.value.density = resolveZoomDensity(viewportState.value.zoom);
-}
-
-async function syncGraphData(options: { preserveViewport?: boolean; runLayout?: boolean } = {}) {
-  const currentVersion = ++syncVersion;
-  await nextTick();
-
-  if (!containerRef.value) return;
-  await ensureCy();
-  if (!cy || currentVersion !== syncVersion) return;
-
-  const preservedZoom = options.preserveViewport ? cy.zoom() : null;
-  const preservedPan = options.preserveViewport ? { ...cy.pan() } : null;
-  const preservedNodePositions = snapshotLeafNodePositions();
-  const previousNodeIds = new Set(
-    cy
-      .nodes()
-      .not(":parent")
-      .map((node) => node.id()),
-  );
-
-  if (!props.graphData) {
-    viewportState.value.totalEdges = 0;
-    viewportState.value.visibleEdges = 0;
-    pendingInitialResizeRefit = false;
-    rebuildIndexes(null);
-    cy.elements().remove();
-    hasRenderedGraph = false;
-    return;
-  }
-
-  const density = getActiveDensity();
-  const densityGraph = await buildDensityGraphData(props.graphData, density);
-  if (!cy || currentVersion !== syncVersion) return;
-
-  viewportState.value.totalEdges = props.graphData.edges.length;
-  viewportState.value.visibleEdges = densityGraph.edges.length;
-  renderFlags.isLargeGraph = densityGraph.nodes.length > 500;
-  renderFlags.hideEdgeLabels = props.performanceOptimizationEnabled
-    ? (DENSITY_OPTIONS[density].hideEdgeLabels
-      || props.graphData.layout_hints.high_density_mode
-      || densityGraph.edges.length > 90)
-    : false;
-  applyStyles();
-
-  const elements = buildTopologyCyElements(densityGraph, {
-    density,
-    hideEdgeLabels: renderFlags.hideEdgeLabels,
-    isLargeGraph: renderFlags.isLargeGraph,
-  });
-
-  rebuildIndexes(densityGraph);
-
-  cy.batch(() => {
-    cy!.elements().remove();
-    cy!.add(elements);
-  });
-
-  let shouldRunLayout = options.runLayout ?? !hasRenderedGraph;
-  if (!shouldRunLayout && hasTopologyNodeSetChanged(previousNodeIds, densityGraph.nodes)) {
-    shouldRunLayout = true;
-  }
-
-  let layoutResult: LayoutRunResult | null = null;
-  if (shouldRunLayout) {
-    layoutResult = await runLayout(activeLayout.value);
-  } else {
-    // 仅做边密度切换时保持节点坐标，避免 remove/add 导致节点回到原点聚团。
-    restoreLeafNodePositions(preservedNodePositions);
-  }
-
-  if (layoutResult && (layoutResult.reason || layoutResult.applied !== layoutResult.requested)) {
-    emit("layout-resolved", layoutResult);
-  }
-
-  if (options.preserveViewport && preservedZoom !== null && preservedPan) {
-    cy.zoom(preservedZoom);
-    cy.pan(preservedPan);
-  } else if (!hasRenderedGraph && cy.elements().nonempty()) {
-    cy.fit(undefined, 40);
-    pendingInitialResizeRefit = true;
-    hasUserAdjustedViewport = false;
-  }
-
-  hasRenderedGraph = true;
-  applyHighlightState({ allowFocus: false });
-}
+void getTheme;
+void refreshTheme;
+void buildStylesheet;
+
+const {
+  syncGraphData,
+  mount,
+  dispose,
+  exportImage: exportCanvasImage,
+  applyStyles: applyRendererStyles,
+} = useTopologyRenderer({
+  getCy: () => currentCy,
+  setCy: (cy) => {
+    currentCy = cy;
+  },
+  getContainer: () => containerRef.value,
+  getGraphData: () => props.graphData,
+  getLayout: () => activeLayout.value,
+  setLayout: (layout) => {
+    activeLayout.value = layout;
+  },
+  performanceOptimizationEnabled: () => performanceOptimizationEnabled.value,
+  viewportState,
+  resolveZoomDensity,
+  getActiveDensity,
+  buildDensityGraphData,
+  rebuildIndexes,
+  snapshotLeafNodePositions,
+  restoreLeafNodePositions,
+  runLayout,
+  applyHighlightState,
+  emitLayoutResolved: (payload) => emit("layout-resolved", payload),
+  handleCanvasTap,
+  handleNodeTap,
+  handleNodeContextTap,
+  handleViewportZoomChange,
+  onRenderFlagsChange: (flags) => {
+    renderFlags.isLargeGraph = flags.isLargeGraph;
+    renderFlags.hideEdgeLabels = flags.hideEdgeLabels;
+  },
+});
+
+getCyImpl = () => currentCy;
+syncGraphDataImpl = syncGraphData;
+applyRendererStylesImpl = applyRendererStyles;
 
 watch(
   () => props.graphData,
@@ -1151,7 +519,7 @@ watch(
 watch(
   () => props.focusNeighborhood,
   (enabled) => {
-    if (!enabled && activeHighlightState.kind === "neighborhood") {
+    if (!enabled && isNeighborhoodHighlightActive()) {
       clearHighlight();
     }
   },
@@ -1167,156 +535,46 @@ watch(
 
 watch(
   () => props.performanceOptimizationEnabled,
-  (enabled) => {
-    if (!enabled) {
-      forcedDensity = null;
-      pendingDensityAfterFocus = null;
-      clearFocusDensityTimer();
-    }
-    viewportState.value.density = resolveZoomDensity(viewportState.value.zoom);
+  () => {
+    resetDensityState();
     void syncGraphData({ preserveViewport: true, runLayout: false });
   },
 );
 
 onMounted(() => {
+  mount();
   void syncGraphData();
-
-  if (containerRef.value) {
-    resizeObserver = new ResizeObserver(() => {
-      if (!cy || !containerRef.value) return;
-      if (resizeAnimationFrame) {
-        cancelAnimationFrame(resizeAnimationFrame);
-      }
-      resizeAnimationFrame = requestAnimationFrame(() => {
-        resizeAnimationFrame = null;
-        if (!cy || !containerRef.value) return;
-        cy.resize();
-        // 仅在首屏阶段补一次 refit，避免容器首次稳定后拓扑图贴边，同时不打断用户手动缩放/平移。
-        if (pendingInitialResizeRefit && !hasUserAdjustedViewport && cy.elements().nonempty()) {
-          cy.fit(undefined, 40);
-          pendingInitialResizeRefit = false;
-        }
-      });
-    });
-    resizeObserver.observe(containerRef.value);
-  }
-
-  themeObserver = new MutationObserver((mutations) => {
-    const changed = mutations.some(
-      (mutation) => mutation.type === "attributes" && mutation.attributeName === "data-theme",
-    );
-    if (changed) {
-      refreshTheme();
-      applyStyles();
-    }
-  });
-  themeObserver.observe(document.documentElement, {
-    attributes: true,
-    attributeFilter: ["data-theme"],
-  });
 });
 
 onBeforeUnmount(() => {
-  resizeObserver?.disconnect();
-  themeObserver?.disconnect();
-
-  if (resizeAnimationFrame) {
-    cancelAnimationFrame(resizeAnimationFrame);
-    resizeAnimationFrame = null;
-  }
-  if (zoomDensityRaf) {
-    cancelAnimationFrame(zoomDensityRaf);
-    zoomDensityRaf = null;
-  }
-
-  clearFocusDensityTimer();
-  forcedDensity = null;
-  pendingDensityAfterFocus = null;
-
-  if (densityWorker) {
-    densityWorker.terminate();
-    densityWorker = null;
-  }
-  densityWorkerResolvers.forEach((resolve) => resolve(undefined));
-  densityWorkerResolvers.clear();
-
-  if (cy) {
-    cy.destroy();
-    cy = null;
-  }
-
-  themeObserver = null;
+  disposeDensity();
+  dispose();
 });
 
-function clearHighlight() {
-  activeHighlightState = { kind: "none" };
-  deactivateFocusDensity();
-  clearHighlightStates();
-}
-
-function highlightPaths(paths: string[][]) {
-  activeHighlightState = { kind: "paths", paths };
-  activateFocusDensity();
-  applyHighlightState();
-}
-
-function highlightImpact(nodeId: string, result: { affected_nodes: { id: string; depth: number }[] }) {
-  activeHighlightState = { kind: "impact", nodeId, result };
-  activateFocusDensity();
-  applyHighlightState();
-}
-
-function highlightSearch(nodeIds: string[], focusId?: string) {
-  if (nodeIds.length === 0) {
-    clearHighlight();
-    return;
-  }
-  activeHighlightState = { kind: "search", nodeIds, focusId };
-  activateFocusDensity(10_000);
-  applyHighlightState({ allowFocus: true });
-}
-
-function focusNeighborhood(nodeId: string, _depth?: number) {
-  activeHighlightState = { kind: "neighborhood", nodeId };
-  activateFocusDensity(9_000);
-  applyHighlightState({ allowFocus: true });
+function focusNeighborhoodAction(nodeId: string) {
+  focusNeighborhoodInternal(nodeId, { allowFocus: true, durationMs: 9_000 });
 }
 
 async function setLayout(type: LayoutType) {
-  if (activeLayout.value === type) return;
+  if (type === activeLayout.value) return;
   activeLayout.value = type;
-  applyStyles();
-  await syncGraphData({ runLayout: true, preserveViewport: false });
+  applyRendererStylesImpl();
+  await syncGraphDataImpl({ preserveViewport: true, runLayout: true });
 }
 
-function applyFilter(_payload: unknown) {
+function applyFilter() {
   void syncGraphData({ preserveViewport: true, runLayout: false });
 }
 
 async function exportImage(type: "png" | "svg"): Promise<string | undefined> {
-  if (!cy) return;
-  if (type === "svg" && typeof cy.svg === "function") {
-    const svgText = cy.svg({
-      full: true,
-      scale: 1,
-      bg: cssVar("--im-surface-0", "#0f1728"),
-    });
-    return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgText)}`;
-  }
-
-  return cy.png({
-    full: true,
-    scale: 2,
-    bg: cssVar("--im-surface-0", "#0f1728"),
-    output: "base64uri",
-  });
+  return exportCanvasImage(type);
 }
 
 defineExpose({
   highlightPaths,
   highlightImpact,
   highlightSearch,
-  focusNeighborhood,
+  focusNeighborhood: focusNeighborhoodAction,
   applyFilter,
   setLayout,
   exportImage,
@@ -1327,7 +585,11 @@ defineExpose({
 <template>
   <div class="topology-canvas">
     <div ref="containerRef" class="topology-canvas-surface" />
-    <div v-if="viewportState.totalEdges > 0" class="canvas-density-hint" data-testid="canvas-density-hint">
+    <div
+      v-if="viewportState.totalEdges > 0"
+      class="canvas-density-hint"
+      data-testid="canvas-density-hint"
+    >
       {{ densityHintText }}
     </div>
   </div>
@@ -1345,8 +607,16 @@ defineExpose({
   height: 100%;
   min-height: 420px;
   background:
-    radial-gradient(120% 90% at 10% 0%, color-mix(in srgb, var(--im-accent) 8%, transparent) 0%, transparent 58%),
-    radial-gradient(140% 110% at 100% 100%, color-mix(in srgb, var(--im-success) 8%, transparent) 0%, transparent 62%),
+    radial-gradient(
+      120% 90% at 10% 0%,
+      color-mix(in srgb, var(--im-accent) 8%, transparent) 0%,
+      transparent 58%
+    ),
+    radial-gradient(
+      140% 110% at 100% 100%,
+      color-mix(in srgb, var(--im-success) 8%, transparent) 0%,
+      transparent 62%
+    ),
     repeating-linear-gradient(
       0deg,
       color-mix(in srgb, var(--im-border-subtle) 26%, transparent) 0 1px,

@@ -4,9 +4,14 @@ import { mount } from "@vue/test-utils";
 import DeploymentPanel from "@/components/DeploymentPanel.vue";
 import { __clearMockHandlers, __setMockHandler } from "@/__mocks__/tauri";
 
-const { messageSuccess, messageWarning } = vi.hoisted(() => ({
+const { generateDraftId, messageSuccess, messageWarning } = vi.hoisted(() => ({
+  generateDraftId: vi.fn(() => "dep-draft-fixed"),
   messageSuccess: vi.fn(),
   messageWarning: vi.fn(),
+}));
+
+vi.mock("@/utils/draft", () => ({
+  generateDraftId,
 }));
 
 vi.mock("element-plus", () => ({
@@ -110,7 +115,7 @@ function mountPanel(
     resourcePersisted?: boolean;
     resourceAddress?: string;
     resourceEnv?: "prod" | "dev" | "test";
-  } = {}
+  } = {},
 ) {
   return mount(DeploymentPanel, {
     props: {
@@ -144,6 +149,7 @@ describe("DeploymentPanel", () => {
   beforeEach(() => {
     __clearMockHandlers();
     vi.clearAllMocks();
+    generateDraftId.mockReturnValue("dep-draft-fixed");
   });
 
   it("offers quick-create host when parsed ip has no match", async () => {
@@ -225,7 +231,9 @@ describe("DeploymentPanel", () => {
     await addBtn!.trigger("click");
     await flushPromises();
 
-    const quickCreateBtn = wrapper.findAll("button").find((btn) => btn.text().includes("快捷新建服务器"));
+    const quickCreateBtn = wrapper
+      .findAll("button")
+      .find((btn) => btn.text().includes("快捷新建服务器"));
     expect(quickCreateBtn).toBeDefined();
     await quickCreateBtn!.trigger("click");
     await flushPromises();
@@ -282,6 +290,7 @@ describe("DeploymentPanel", () => {
         port: undefined,
       },
     ]);
+    expect(generateDraftId).toHaveBeenCalledWith("dep");
     expect(messageSuccess).toHaveBeenCalledWith("部署关系已暂存，保存应用后生效");
   });
 

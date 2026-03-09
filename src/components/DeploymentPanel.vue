@@ -11,6 +11,7 @@ import {
 import { listHosts, saveHost } from "@/api/hosts";
 import { listIpAddresses, saveIpAddress } from "@/api/ip-addresses";
 import { bindHostIp } from "@/api/host-ip-bindings";
+import { generateDraftId } from "@/utils/draft";
 
 const props = defineProps<{
   resourceId: string;
@@ -34,7 +35,7 @@ const resourceContext = ref<ResourceDeployContext | null>(null);
 const isDraftMode = computed(() => props.resourcePersisted === false);
 
 const hasUnmatchedIp = computed(
-  () => Boolean(resourceContext.value?.parsed_ip) && !resourceContext.value?.matched_host_id
+  () => Boolean(resourceContext.value?.parsed_ip) && !resourceContext.value?.matched_host_id,
 );
 const parsedIp = computed(() => resourceContext.value?.parsed_ip || "");
 
@@ -148,7 +149,8 @@ async function handleQuickCreateHost() {
       const hostIps = splitIpDisplay(host.ip_display);
       return host.env === normalizedEnv && hostIps.includes(ip);
     });
-    const hostId = existingHost?.id ?? `host-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+    const hostId =
+      existingHost?.id ?? `host-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
 
     if (!existingHost) {
       await saveHost({
@@ -181,7 +183,9 @@ async function handleQuickCreateHost() {
       search: ip,
       filters: { env: normalizedEnv },
     });
-    const ipResource = ipResult.data.find((item) => item.ip_address === ip && item.env === normalizedEnv);
+    const ipResource = ipResult.data.find(
+      (item) => item.ip_address === ip && item.env === normalizedEnv,
+    );
     if (!ipResource) {
       ElMessage.warning("快捷创建失败，未找到对应 IP 资源，请手动处理");
       return;
@@ -193,7 +197,7 @@ async function handleQuickCreateHost() {
   } finally {
     await fetchHosts();
     const matched = hosts.value.find(
-      (h) => h.env === normalizedEnv && splitIpDisplay(h.ip_display).includes(ip)
+      (h) => h.env === normalizedEnv && splitIpDisplay(h.ip_display).includes(ip),
     );
     if (matched) {
       newDeploy.value.host_id = matched.id;
@@ -235,7 +239,7 @@ async function handleAdd() {
       return;
     }
     const draftDeployment: Deployment = {
-      id: `draft-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+      id: generateDraftId("dep"),
       resource_id: props.resourceId,
       resource_type: props.resourceType,
       host_id: newDeploy.value.host_id,
@@ -306,7 +310,7 @@ watch(
   () => props.resourcePersisted,
   () => {
     fetchDeployments();
-  }
+  },
 );
 onMounted(() => {
   fetchDeployments();
@@ -335,11 +339,7 @@ onMounted(() => {
       </el-table-column>
     </el-table>
 
-    <el-empty
-      v-if="!deployments.length && !loading"
-      description="暂无部署关系"
-      :image-size="40"
-    />
+    <el-empty v-if="!deployments.length && !loading" description="暂无部署关系" :image-size="40" />
 
     <el-dialog v-model="addVisible" title="添加部署关系" width="420px" append-to-body>
       <el-form :model="newDeploy" label-width="110px">
@@ -364,7 +364,13 @@ onMounted(() => {
           </div>
           <div v-if="hasUnmatchedIp" class="ip-warning-row">
             <span class="warning-text">未找到 IP {{ parsedIp }} 对应服务器</span>
-            <el-button text type="primary" size="small" :loading="quickCreateLoading" @click="handleQuickCreateHost">
+            <el-button
+              text
+              type="primary"
+              size="small"
+              :loading="quickCreateLoading"
+              @click="handleQuickCreateHost"
+            >
               快捷新建服务器
             </el-button>
           </div>
@@ -375,7 +381,12 @@ onMounted(() => {
       </el-form>
       <template #footer>
         <el-button @click="addVisible = false">取消</el-button>
-        <el-button type="primary" :loading="saveLoading" :disabled="!newDeploy.host_id || contextLoading" @click="handleAdd">
+        <el-button
+          type="primary"
+          :loading="saveLoading"
+          :disabled="!newDeploy.host_id || contextLoading"
+          @click="handleAdd"
+        >
           确定
         </el-button>
       </template>

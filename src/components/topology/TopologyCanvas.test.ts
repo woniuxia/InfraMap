@@ -5,7 +5,7 @@ import type { TopologyGraph } from "@/types";
 
 const { capturedStylesheets, capturedCores } = vi.hoisted(() => ({
   capturedStylesheets: [] as Array<Array<{ selector: string; style: Record<string, unknown> }>>,
-  capturedCores: [] as Array<Record<string, any>>,
+  capturedCores: [] as Array<Record<string, unknown>>,
 }));
 
 vi.mock("cytoscape-dagre", () => ({
@@ -21,7 +21,7 @@ vi.mock("cytoscape-svg", () => ({
 }));
 
 vi.mock("cytoscape", () => {
-  function createCollection(items: any[], onRemove?: () => void) {
+  function createCollection(items: unknown[], onRemove?: () => void) {
     return {
       not(selector: string) {
         if (selector !== ":parent") return createCollection(items, onRemove);
@@ -30,13 +30,13 @@ vi.mock("cytoscape", () => {
           onRemove,
         );
       },
-      forEach(callback: (item: any) => void) {
+      forEach(callback: (item: unknown) => void) {
         items.forEach(callback);
       },
-      map<T>(callback: (item: any) => T) {
+      map<T>(callback: (item: unknown) => T) {
         return items.map(callback);
       },
-      filter(predicate: ((item: any) => boolean) | string) {
+      filter(predicate: ((item: unknown) => boolean) | string) {
         if (typeof predicate === "string") {
           return createCollection(items, onRemove);
         }
@@ -61,7 +61,11 @@ vi.mock("cytoscape", () => {
     };
   }
 
-  function createNode(item: { data?: Record<string, unknown> }, index: number, parentIds: Set<string>) {
+  function createNode(
+    item: { data?: Record<string, unknown> },
+    index: number,
+    parentIds: Set<string>,
+  ) {
     let position = { x: index * 40, y: index * 20 };
     return {
       id: () => String(item.data?.id || ""),
@@ -89,15 +93,19 @@ vi.mock("cytoscape", () => {
 
       const core = {
         on: vi.fn((events: string, selectorOrHandler: unknown, maybeHandler?: unknown) => {
-          const handler = typeof selectorOrHandler === "function"
-            ? selectorOrHandler as (event?: unknown) => void
-            : maybeHandler as ((event?: unknown) => void) | undefined;
+          const handler =
+            typeof selectorOrHandler === "function"
+              ? (selectorOrHandler as (event?: unknown) => void)
+              : (maybeHandler as ((event?: unknown) => void) | undefined);
           if (!handler) return core;
-          events.split(/\s+/).filter(Boolean).forEach((eventName) => {
-            const handlers = eventHandlers.get(eventName) || [];
-            handlers.push(handler);
-            eventHandlers.set(eventName, handlers);
-          });
+          events
+            .split(/\s+/)
+            .filter(Boolean)
+            .forEach((eventName) => {
+              const handlers = eventHandlers.get(eventName) || [];
+              handlers.push(handler);
+              eventHandlers.set(eventName, handlers);
+            });
           return core;
         }),
         zoom: vi.fn(() => 1),
@@ -117,9 +125,11 @@ vi.mock("cytoscape", () => {
           return createCollection(nodes);
         }),
         edges: vi.fn(() => createCollection([])),
-        elements: vi.fn(() => createCollection(state.elements, () => {
-          state.elements = [];
-        })),
+        elements: vi.fn(() =>
+          createCollection(state.elements, () => {
+            state.elements = [];
+          }),
+        ),
         batch: vi.fn((callback: () => void) => callback()),
         add: vi.fn((elements: Array<{ data?: Record<string, unknown> }>) => {
           state.elements = elements;
@@ -169,17 +179,17 @@ vi.mock("cytoscape", () => {
 
 const graphFixture: TopologyGraph = {
   lanes: [
-    { id: "prod", label: "生产", order: 0, node_count: 1, app_count: 1 },
-    { id: "test", label: "测试", order: 1, node_count: 0, app_count: 0 },
-    { id: "dev", label: "开发", order: 2, node_count: 0, app_count: 0 },
+    { id: "prod", label: "生产", order: 0, nodeCount: 1, appCount: 1 },
+    { id: "test", label: "测试", order: 1, nodeCount: 0, appCount: 0 },
+    { id: "dev", label: "开发", order: 2, nodeCount: 0, appCount: 0 },
   ],
   nodes: [
     {
       id: "app-prod-1",
       name: "订单服务",
-      node_type: "application",
+      nodeType: "application",
       env: "prod",
-      group_kind: "application_service",
+      groupKind: "application_service",
       importance: 1,
       status: "running",
       extra: {
@@ -188,41 +198,41 @@ const graphFixture: TopologyGraph = {
     },
   ],
   edges: [],
-  legend_stats: {
-    env_counts: [
-      { env: "prod", count: 1, app_count: 1 },
-      { env: "test", count: 0, app_count: 0 },
-      { env: "dev", count: 0, app_count: 0 },
+  legendStats: {
+    envCounts: [
+      { env: "prod", count: 1, appCount: 1 },
+      { env: "test", count: 0, appCount: 0 },
+      { env: "dev", count: 0, appCount: 0 },
     ],
-    node_type_counts: [{ kind: "application", count: 1 }],
-    edge_type_counts: [],
-    application_service_count: 1,
-    current_env: "prod",
-    external_node_count: 0,
-    cross_env_edge_count: 0,
+    nodeTypeCounts: [{ kind: "application", count: 1 }],
+    edgeTypeCounts: [],
+    applicationServiceCount: 1,
+    currentEnv: "prod",
+    externalNodeCount: 0,
+    crossEnvEdgeCount: 0,
   },
-  layout_hints: {
-    lane_order: ["prod", "test", "dev"],
-    default_collapsed_groups: [],
-    high_density_mode: false,
+  layoutHints: {
+    laneOrder: ["prod", "test", "dev"],
+    defaultCollapsedGroups: [],
+    highDensityMode: false,
   },
 };
 
 const edgeGraphFixture: TopologyGraph = {
   ...graphFixture,
   lanes: [
-    { id: "prod", label: "生产", order: 0, node_count: 2, app_count: 2 },
-    { id: "test", label: "测试", order: 1, node_count: 0, app_count: 0 },
-    { id: "dev", label: "开发", order: 2, node_count: 0, app_count: 0 },
+    { id: "prod", label: "生产", order: 0, nodeCount: 2, appCount: 2 },
+    { id: "test", label: "测试", order: 1, nodeCount: 0, appCount: 0 },
+    { id: "dev", label: "开发", order: 2, nodeCount: 0, appCount: 0 },
   ],
   nodes: [
     ...graphFixture.nodes,
     {
       id: "app-prod-2",
       name: "库存服务",
-      node_type: "application",
+      nodeType: "application",
       env: "prod",
-      group_kind: "application_service",
+      groupKind: "application_service",
       importance: 1,
       status: "running",
       extra: {
@@ -235,21 +245,21 @@ const edgeGraphFixture: TopologyGraph = {
       id: "edge-1",
       source: "app-prod-1",
       target: "app-prod-2",
-      edge_type: "http_call",
+      edgeType: "http_call",
       label: "http",
       strength: 1,
-      cross_env: false,
+      crossEnv: false,
     },
   ],
-  legend_stats: {
-    ...graphFixture.legend_stats,
-    env_counts: [
-      { env: "prod", count: 2, app_count: 2 },
-      { env: "test", count: 0, app_count: 0 },
-      { env: "dev", count: 0, app_count: 0 },
+  legendStats: {
+    ...graphFixture.legendStats,
+    envCounts: [
+      { env: "prod", count: 2, appCount: 2 },
+      { env: "test", count: 0, appCount: 0 },
+      { env: "dev", count: 0, appCount: 0 },
     ],
-    edge_type_counts: [{ kind: "http_call", count: 1 }],
-    application_service_count: 2,
+    edgeTypeCounts: [{ kind: "http_call", count: 1 }],
+    applicationServiceCount: 2,
   },
 };
 
@@ -274,10 +284,7 @@ function findStyleBlock(
   return block!;
 }
 
-function resolveStyleValue(
-  value: unknown,
-  data: Record<string, unknown>,
-) {
+function resolveStyleValue(value: unknown, data: Record<string, unknown>) {
   if (typeof value !== "function") return value;
   return value({
     data(key?: string) {
@@ -300,13 +307,16 @@ describe("TopologyCanvas", () => {
     capturedStylesheets.length = 0;
     capturedCores.length = 0;
     resizeObserverCallback = null;
-    vi.stubGlobal("ResizeObserver", class {
-      constructor(callback: ResizeObserverCallback) {
-        resizeObserverCallback = callback;
-      }
-      observe() {}
-      disconnect() {}
-    });
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(callback: ResizeObserverCallback) {
+          resizeObserverCallback = callback;
+        }
+        observe() {}
+        disconnect() {}
+      },
+    );
     vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
       callback(0);
       return 1;
@@ -332,18 +342,19 @@ describe("TopologyCanvas", () => {
     const parentBlock = findStyleBlock(stylesheet, "node:parent");
     const externalBlock = findStyleBlock(stylesheet, 'node[kind = "external"]');
     const backgroundImage = resolveStyleValue(nodeBlock.style["background-image"], {
-      node_type: "application",
+      nodeType: "application",
       app_type_key: "frontend",
-      is_external: false,
+      isExternal: false,
       status: "running",
-      icon_src: "data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2024%2024%22%3E%3Cpath%20d%3D%22M0%200h24v24H0z%22/%3E%3C/svg%3E",
+      icon_src:
+        "data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2024%2024%22%3E%3Cpath%20d%3D%22M0%200h24v24H0z%22/%3E%3C/svg%3E",
     });
 
     expect(
       resolveStyleValue(nodeBlock.style["background-opacity"], {
-        node_type: "application",
+        nodeType: "application",
         app_type_key: "frontend",
-        is_external: false,
+        isExternal: false,
         status: "running",
       }),
     ).toBe(0);
@@ -368,11 +379,12 @@ describe("TopologyCanvas", () => {
     const stylesheet = getLatestStylesheet();
     const nodeBlock = findStyleBlock(stylesheet, "node[shape][size][label_font_size]");
     const backgroundImage = resolveStyleValue(nodeBlock.style["background-image"], {
-      node_type: "application",
+      nodeType: "application",
       app_type_key: "frontend",
-      is_external: false,
+      isExternal: false,
       status: "running",
-      icon_src: "data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2024%2024%22%3E%3Cpath%20d%3D%22M0%200h24v24H0z%22/%3E%3C/svg%3E",
+      icon_src:
+        "data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2024%2024%22%3E%3Cpath%20d%3D%22M0%200h24v24H0z%22/%3E%3C/svg%3E",
     });
 
     expect(nodeBlock.style["background-fit"]).toBe("contain");
@@ -382,7 +394,9 @@ describe("TopologyCanvas", () => {
     expect(nodeBlock.style["background-offset-y"]).toBe(0);
     expect(nodeBlock.style["background-width"]).toBeUndefined();
     expect(nodeBlock.style["background-height"]).toBeUndefined();
-    expect(decodeSvgDataUri(String(backgroundImage))).toContain('preserveAspectRatio="xMidYMid meet"');
+    expect(decodeSvgDataUri(String(backgroundImage))).toContain(
+      'preserveAspectRatio="xMidYMid meet"',
+    );
   });
 
   it("performs a one-time refit after the first container resize during initialization", async () => {

@@ -1,23 +1,22 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { ElMessage } from "element-plus";
-import type { NginxConfig, NginxEndpoint } from "@/types";
+import type { EditorMode, NginxConfig, NginxEndpoint } from "@/types";
 import { saveNginxConfig } from "@/api/nginx-configs";
 import { replaceResourceCallRelations } from "@/api/call-relations";
+import { ENV_OPTIONS, STATUS_OPTIONS } from "@/constants/options";
 import CallRelationsEditor from "@/components/CallRelationsEditor.vue";
 import DeploymentPanel from "@/components/DeploymentPanel.vue";
 
-type NginxEditorMode = "create" | "edit" | "copy";
-
 const props = defineProps<{
   modelValue: boolean;
-  mode: NginxEditorMode;
+  mode: EditorMode;
   initialDraft: Partial<NginxConfig>;
 }>();
 
 const emit = defineEmits<{
   (e: "update:modelValue", value: boolean): void;
-  (e: "saved", payload: { id: string; mode: NginxEditorMode }): void;
+  (e: "saved", payload: { id: string; mode: EditorMode }): void;
 }>();
 
 const visible = computed({
@@ -103,7 +102,12 @@ function pickDeployContextAddress(endpoints?: NginxEndpoint[]): string | undefin
   const normalized = normalizeEndpointsForSave(endpoints);
   if (normalized.length === 0) return undefined;
   const selected = normalized.find((item) => isValidIpv4(item.host)) || normalized[0];
-  if (!selected.host || !Number.isInteger(selected.port) || selected.port < 1 || selected.port > 65535) {
+  if (
+    !selected.host ||
+    !Number.isInteger(selected.port) ||
+    selected.port < 1 ||
+    selected.port > 65535
+  ) {
     return undefined;
   }
   return `${selected.host}:${selected.port}`;
@@ -181,7 +185,7 @@ watch(
       hydrateFromDraft();
     }
   },
-  { immediate: true }
+  { immediate: true },
 );
 
 watch(
@@ -191,18 +195,12 @@ watch(
       hydrateFromDraft();
     }
   },
-  { deep: true }
+  { deep: true },
 );
 </script>
 
 <template>
-  <el-dialog
-    v-model="visible"
-    :title="dialogTitle"
-    width="700px"
-    align-center
-    destroy-on-close
-  >
+  <el-dialog v-model="visible" :title="dialogTitle" width="700px" align-center destroy-on-close>
     <el-form :model="editingNc" label-width="96px">
       <el-divider content-position="left">基础信息</el-divider>
       <el-form-item label="配置名称" required>
@@ -223,7 +221,12 @@ watch(
               class="endpoint-port"
               controls-position="right"
             />
-            <el-button text type="danger" :disabled="(editingNc.endpoints || []).length <= 1" @click="removeEndpoint(index)">
+            <el-button
+              text
+              type="danger"
+              :disabled="(editingNc.endpoints || []).length <= 1"
+              @click="removeEndpoint(index)"
+            >
               删除
             </el-button>
           </div>
@@ -240,20 +243,32 @@ watch(
       <el-divider content-position="left">运维信息</el-divider>
       <el-form-item label="环境" required>
         <el-select v-model="editingNc.env" class="w-full">
-          <el-option label="生产" value="prod" />
-          <el-option label="开发" value="dev" />
-          <el-option label="测试" value="test" />
+          <el-option
+            v-for="item in ENV_OPTIONS"
+            :key="item.value"
+            :label="item.label"
+            :value="item.value"
+          />
         </el-select>
       </el-form-item>
       <el-form-item label="状态" required>
         <el-select v-model="editingNc.status" class="w-full">
-          <el-option label="运行中" value="running" />
-          <el-option label="已停止" value="stopped" />
-          <el-option label="维护中" value="maintenance" />
+          <el-option
+            v-for="item in STATUS_OPTIONS"
+            :key="item.value"
+            :label="item.label"
+            :value="item.value"
+          />
         </el-select>
       </el-form-item>
       <el-form-item label="描述">
-        <el-input v-model="editingNc.description" type="textarea" :rows="3" maxlength="300" show-word-limit />
+        <el-input
+          v-model="editingNc.description"
+          type="textarea"
+          :rows="3"
+          maxlength="300"
+          show-word-limit
+        />
       </el-form-item>
     </el-form>
 

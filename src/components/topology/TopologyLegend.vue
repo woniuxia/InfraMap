@@ -36,27 +36,29 @@ const EDGE_LABELS: Record<TopologyEdgeType, string> = {
 
 const currentEnvCount = computed(() => {
   const env = props.filter.env;
-  return props.stats?.env_counts.find((item) => item.env === env)?.count || 0;
+  return props.stats?.envCounts.find((item) => item.env === env)?.count || 0;
 });
 
 const currentEnvAppCount = computed(() => {
   const env = props.filter.env;
-  return props.stats?.env_counts.find((item) => item.env === env)?.app_count || 0;
+  return props.stats?.envCounts.find((item) => item.env === env)?.appCount || 0;
 });
 
 const nodeItems = computed(() => {
-  const source = props.stats?.node_type_counts || [];
+  const source = props.stats?.nodeTypeCounts || [];
   return source
     .map((item) => ({
       kind: item.kind === "application" ? "application_service" : item.kind,
       count: item.count,
     }))
     .filter((item): item is { kind: TopologyGroupKind; count: number } => {
-      return item.kind === "application_service" || item.kind === "middleware" || item.kind === "nginx";
+      return (
+        item.kind === "application_service" || item.kind === "middleware" || item.kind === "nginx"
+      );
     });
 });
 
-const edgeItems = computed(() => props.stats?.edge_type_counts || []);
+const edgeItems = computed(() => props.stats?.edgeTypeCounts || []);
 
 function switchEnv(env: TopologyEnv) {
   if (props.filter.env === env) return;
@@ -93,12 +95,7 @@ function updateShowAllEdges(value: boolean | string | number) {
   <aside class="topology-legend" :class="{ collapsed }">
     <header class="legend-header">
       <strong class="legend-title">图例与筛选</strong>
-      <el-button
-        text
-        size="small"
-        class="legend-collapse-btn"
-        @click="collapsed = !collapsed"
-      >
+      <el-button text size="small" class="legend-collapse-btn" @click="collapsed = !collapsed">
         {{ collapsed ? "展开" : "收起" }}
       </el-button>
     </header>
@@ -134,11 +131,11 @@ function updateShowAllEdges(value: boolean | string | number) {
           </div>
           <div class="metric-item">
             <span class="metric-label">跨环境节点</span>
-            <span class="metric-value">{{ stats?.external_node_count || 0 }}</span>
+            <span class="metric-value">{{ stats?.externalNodeCount || 0 }}</span>
           </div>
           <div class="metric-item">
             <span class="metric-label">跨环境关系</span>
-            <span class="metric-value">{{ stats?.cross_env_edge_count || 0 }}</span>
+            <span class="metric-value">{{ stats?.crossEnvEdgeCount || 0 }}</span>
           </div>
         </div>
       </section>
@@ -170,7 +167,9 @@ function updateShowAllEdges(value: boolean | string | number) {
           :class="{ active: filter.edgeTypes.includes(item.kind as TopologyEdgeType) }"
           @click="toggleEdgeKind(item.kind)"
         >
-          <span class="item-label">{{ EDGE_LABELS[item.kind as TopologyEdgeType] || item.kind }}</span>
+          <span class="item-label">
+            {{ EDGE_LABELS[item.kind as TopologyEdgeType] || item.kind }}
+          </span>
           <span class="item-count">{{ item.count }}</span>
         </button>
 

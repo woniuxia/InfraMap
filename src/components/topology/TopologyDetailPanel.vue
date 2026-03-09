@@ -1,110 +1,115 @@
 <script setup lang="ts">
-import { computed } from 'vue'
-import { WarningFilled } from '@element-plus/icons-vue'
-import type { TopologyNode, PathResult, ImpactResult, TopologyV3EvidenceItem } from '@/types'
+import { computed } from "vue";
+import { WarningFilled } from "@element-plus/icons-vue";
+import type {
+  TopologyEvidenceItem,
+  TopologyImpactResponse,
+  TopologyNode,
+  TopologyPathsResponse,
+} from "@/types";
 
 const props = defineProps<{
-  mode: 'detail' | 'path' | 'impact' | null
-  selectedNode: TopologyNode | null
-  pathResult: PathResult | null
-  impactResult: ImpactResult | null
-  evidenceItems: TopologyV3EvidenceItem[]
-  evidenceTotal: number
-  evidenceLoading: boolean
-  nodeNameMap: Record<string, string>
-}>()
+  mode: "detail" | "path" | "impact" | null;
+  selectedNode: TopologyNode | null;
+  pathResult: TopologyPathsResponse | null;
+  impactResult: TopologyImpactResponse | null;
+  evidenceItems: TopologyEvidenceItem[];
+  evidenceTotal: number;
+  evidenceLoading: boolean;
+  nodeNameMap: Record<string, string>;
+}>();
 
 const emit = defineEmits<{
-  (e: 'close'): void
-}>()
+  (e: "close"): void;
+}>();
 
-const visible = computed(() => props.mode !== null)
+const visible = computed(() => props.mode !== null);
 
 const NODE_TYPE_LABELS: Record<string, string> = {
-  application: '应用',
-  middleware: '中间件',
-  nginx: '负载均衡',
-}
+  application: "应用",
+  middleware: "中间件",
+  nginx: "负载均衡",
+};
 
 const STATUS_LABELS: Record<string, string> = {
-  running: '运行中',
-  stopped: '已停止',
-  maintenance: '维护中',
-}
+  running: "运行中",
+  stopped: "已停止",
+  maintenance: "维护中",
+};
 
 const ENV_LABELS: Record<string, string> = {
-  prod: '生产',
-  dev: '开发',
-  test: '测试',
-}
+  prod: "生产",
+  dev: "开发",
+  test: "测试",
+};
 
 const EVIDENCE_TYPE_LABELS: Record<string, string> = {
-  profile: '节点画像',
-  dependency_summary: '依赖摘要',
-  deployment: '部署记录',
-  audit: '审计事件',
-  call_relation: '调用关系',
-  metric: '监控指标',
-  alert: '告警',
-  change: '变更',
-  annotation: '注释',
-}
+  profile: "节点画像",
+  dependency_summary: "依赖摘要",
+  deployment: "部署记录",
+  audit: "审计事件",
+  call_relation: "调用关系",
+  metric: "监控指标",
+  alert: "告警",
+  change: "变更",
+  annotation: "注释",
+};
 
 function getNodeName(id: string): string {
-  return props.nodeNameMap[id] || id.substring(0, 8)
+  return props.nodeNameMap[id] || id.substring(0, 8);
 }
 
 // Impact: group affected nodes by depth
 const impactByDepth = computed(() => {
-  if (!props.impactResult) return []
-  const depthMap: Record<number, { id: string; name: string; node_type: string }[]> = {}
-  props.impactResult.affected_nodes.forEach((n) => {
-    if (!depthMap[n.depth]) depthMap[n.depth] = []
-    depthMap[n.depth].push(n)
-  })
+  if (!props.impactResult) return [];
+  const depthMap: Record<number, { id: string; name: string; nodeType: string }[]> = {};
+  props.impactResult.affectedNodes.forEach((n) => {
+    if (!depthMap[n.depth]) depthMap[n.depth] = [];
+    depthMap[n.depth].push(n);
+  });
   return Object.entries(depthMap)
     .sort(([a], [b]) => Number(a) - Number(b))
-    .map(([depth, nodes]) => ({ depth: Number(depth), nodes }))
-})
+    .map(([depth, nodes]) => ({ depth: Number(depth), nodes }));
+});
 
 function extraEntries(node: TopologyNode): { key: string; value: string }[] {
-  if (!node.extra) return []
-  const entries: { key: string; value: string }[] = []
+  if (!node.extra) return [];
+  const entries: { key: string; value: string }[] = [];
   const LABELS: Record<string, string> = {
-    type: '类型',
-    category: '分类',
-    tech_stack: '技术栈',
-    address: '地址',
-    port: '端口',
-    version: '版本',
-    endpoint_count: '端点数量',
-    first_endpoint: '首个端点',
-    strategy: '策略',
-  }
+    type: "类型",
+    category: "分类",
+    tech_stack: "技术栈",
+    address: "地址",
+    port: "端口",
+    version: "版本",
+    endpoint_count: "端点数量",
+    first_endpoint: "首个端点",
+    strategy: "策略",
+  };
   for (const [k, v] of Object.entries(node.extra)) {
-    if (v !== undefined && v !== null && v !== '') {
-      entries.push({ key: LABELS[k] || k, value: String(v) })
+    if (v !== undefined && v !== null && v !== "") {
+      entries.push({ key: LABELS[k] || k, value: String(v) });
     }
   }
-  return entries
+  return entries;
 }
 
-function evidenceTypeLabel(item: TopologyV3EvidenceItem): string {
-  const type = item.evidenceType
-  return EVIDENCE_TYPE_LABELS[type] || type
+function evidenceTypeLabel(item: TopologyEvidenceItem): string {
+  const type = item.evidenceType;
+  return EVIDENCE_TYPE_LABELS[type] || type;
 }
 
-function evidenceTagType(item: TopologyV3EvidenceItem): 'danger' | 'warning' | 'info' {
-  if (item.severity === 'critical') return 'danger'
-  if (item.severity === 'warning') return 'warning'
-  return 'info'
+function evidenceTagType(item: TopologyEvidenceItem): "danger" | "warning" | "info" {
+  if (item.severity === "critical") return "danger";
+  if (item.severity === "warning") return "warning";
+  return "info";
 }
 
 function formatEvidenceTime(timestamp?: string): string {
-  if (!timestamp) return '未知时间'
-  const date = new Date(timestamp)
-  if (Number.isNaN(date.getTime())) return timestamp
-  return date.toLocaleString('zh-CN', { hour12: false })
+  if (!timestamp) return "未知时间";
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return timestamp;
+  return date.toLocaleString("zh-CN", { hour12: false });
 }
 </script>
 
@@ -113,7 +118,7 @@ function formatEvidenceTime(timestamp?: string): string {
     <div v-if="visible" class="detail-panel">
       <div class="panel-header">
         <span class="panel-title">
-          {{ mode === 'detail' ? '节点详情' : mode === 'path' ? '路径追踪' : '影响分析' }}
+          {{ mode === "detail" ? "节点详情" : mode === "path" ? "路径追踪" : "影响分析" }}
         </span>
         <el-button text size="small" @click="emit('close')">关闭</el-button>
       </div>
@@ -124,12 +129,20 @@ function formatEvidenceTime(timestamp?: string): string {
           <el-descriptions :column="1" size="small" border>
             <el-descriptions-item label="名称">{{ selectedNode.name }}</el-descriptions-item>
             <el-descriptions-item label="类型">
-              <el-tag size="small">{{ NODE_TYPE_LABELS[selectedNode.node_type] || selectedNode.node_type }}</el-tag>
+              <el-tag size="small">
+                {{ NODE_TYPE_LABELS[selectedNode.nodeType] || selectedNode.nodeType }}
+              </el-tag>
             </el-descriptions-item>
             <el-descriptions-item v-if="selectedNode.status" label="状态">
               <el-tag
                 size="small"
-                :type="selectedNode.status === 'running' ? 'success' : selectedNode.status === 'stopped' ? 'info' : 'warning'"
+                :type="
+                  selectedNode.status === 'running'
+                    ? 'success'
+                    : selectedNode.status === 'stopped'
+                      ? 'info'
+                      : 'warning'
+                "
               >
                 {{ STATUS_LABELS[selectedNode.status] || selectedNode.status }}
               </el-tag>
@@ -159,11 +172,7 @@ function formatEvidenceTime(timestamp?: string): string {
               <el-empty description="暂无关联证据" :image-size="50" />
             </div>
             <div v-else class="evidence-list">
-              <article
-                v-for="item in evidenceItems"
-                :key="item.id"
-                class="evidence-item"
-              >
+              <article v-for="item in evidenceItems" :key="item.id" class="evidence-item">
                 <div class="evidence-item-head">
                   <el-tag size="small" :type="evidenceTagType(item)">
                     {{ evidenceTypeLabel(item) }}
@@ -174,7 +183,7 @@ function formatEvidenceTime(timestamp?: string): string {
                 <div v-if="item.description" class="evidence-item-description">
                   {{ item.description }}
                 </div>
-                <div class="evidence-item-source">{{ item.source || 'topology_v3' }}</div>
+                <div class="evidence-item-source">{{ item.source || "topology_v3" }}</div>
               </article>
             </div>
           </div>
@@ -193,16 +202,12 @@ function formatEvidenceTime(timestamp?: string): string {
                 结果已截断
               </el-tag>
             </div>
-            <div
-              v-for="(path, idx) in pathResult.paths"
-              :key="idx"
-              class="path-item"
-            >
+            <div v-for="(path, idx) in pathResult.paths" :key="idx" class="path-item">
               <div class="path-index">#{{ idx + 1 }}</div>
               <div class="path-chain">
-                <template v-for="(nodeId, nIdx) in path" :key="nodeId">
+                <template v-for="(nodeId, nIdx) in path.nodeIds" :key="nodeId">
                   <span class="path-node">{{ getNodeName(nodeId) }}</span>
-                  <span v-if="nIdx < path.length - 1" class="path-arrow">-></span>
+                  <span v-if="nIdx < path.nodeIds.length - 1" class="path-arrow">-></span>
                 </template>
               </div>
             </div>
@@ -212,24 +217,21 @@ function formatEvidenceTime(timestamp?: string): string {
         <!-- Impact mode -->
         <template v-if="mode === 'impact' && impactResult">
           <div class="impact-summary">
-            <el-statistic title="受影响节点" :value="impactResult.total_count" />
-            <el-statistic title="最大层级" :value="impactResult.max_depth" />
+            <el-statistic title="受影响节点" :value="impactResult.totalCount" />
+            <el-statistic title="最大层级" :value="impactResult.maxDepth" />
           </div>
-          <div v-if="impactResult.affected_nodes.length === 0" class="empty-tip">
+          <div v-if="impactResult.affectedNodes.length === 0" class="empty-tip">
             <el-empty description="无上游依赖" :image-size="60" />
           </div>
           <template v-else>
             <div v-for="group in impactByDepth" :key="group.depth" class="impact-group">
               <div class="impact-depth-label">第 {{ group.depth }} 层</div>
               <div class="impact-nodes">
-                <el-tag
-                  v-for="node in group.nodes"
-                  :key="node.id"
-                  size="small"
-                  class="impact-tag"
-                >
+                <el-tag v-for="node in group.nodes" :key="node.id" size="small" class="impact-tag">
                   {{ node.name }}
-                  <span class="impact-node-type">({{ NODE_TYPE_LABELS[node.node_type] || node.node_type }})</span>
+                  <span class="impact-node-type">
+                    ({{ NODE_TYPE_LABELS[node.nodeType] || node.nodeType }})
+                  </span>
                 </el-tag>
               </div>
             </div>

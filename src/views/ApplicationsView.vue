@@ -1,14 +1,14 @@
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
-import type { Application } from "@/types";
+import type { Application, EditorMode } from "@/types";
 import type { SearchFieldConfig, SearchToolbarQueryPayload } from "@/types/searchToolbar";
 import { listApplications, deleteApplication } from "@/api/applications";
 import { useResourceList } from "@/composables/useResourceList";
+import { DEPLOY_MODE_OPTIONS, ENV_OPTIONS, STATUS_OPTIONS } from "@/constants/options";
+import { generateDraftId } from "@/utils/draft";
 import { buildApplicationCopyDraft } from "@/utils/resourceCopy";
 import SearchToolbar from "@/components/filters/SearchToolbar.vue";
 import ApplicationEditorDialog from "@/components/resource-editors/ApplicationEditorDialog.vue";
-
-type ApplicationEditorMode = "create" | "edit" | "copy";
 
 const {
   loading,
@@ -28,7 +28,7 @@ const {
 
 const searchText = ref("");
 const editorVisible = ref(false);
-const editorMode = ref<ApplicationEditorMode>("create");
+const editorMode = ref<EditorMode>("create");
 const editorInitialDraft = ref<Partial<Application>>({});
 
 interface ApplicationListFilters {
@@ -57,26 +57,9 @@ const typeOptions = [
   { label: "其他", value: "other" },
 ];
 
-const envOptions = [
-  { label: "生产", value: "prod" },
-  { label: "开发", value: "dev" },
-  { label: "测试", value: "test" },
-];
-
-const statusOptions = [
-  { label: "运行中", value: "running" },
-  { label: "已停止", value: "stopped" },
-  { label: "维护中", value: "maintenance" },
-];
-
-const deployModeOptions = [
-  { label: "物理机", value: "physical" },
-  { label: "虚拟机", value: "vm" },
-  { label: "Docker", value: "docker" },
-  { label: "Kubernetes", value: "k8s" },
-  { label: "Serverless", value: "serverless" },
-  { label: "其他", value: "other" },
-];
+const envOptions = ENV_OPTIONS;
+const statusOptions = STATUS_OPTIONS;
+const deployModeOptions = DEPLOY_MODE_OPTIONS;
 
 const toolbarFields: SearchFieldConfig[] = [
   {
@@ -119,9 +102,7 @@ function handleToolbarQuery(payload: SearchToolbarQueryPayload) {
 }
 
 function normalizeOwners(owners?: string[]) {
-  const values = [...(owners ?? [])]
-    .map((item) => item.trim())
-    .filter((item) => item.length > 0);
+  const values = [...(owners ?? [])].map((item) => item.trim()).filter((item) => item.length > 0);
   return Array.from(new Set(values));
 }
 
@@ -129,16 +110,9 @@ function ownersForRow(row: Application) {
   return normalizeOwners(row.owners);
 }
 
-function generateDraftApplicationId() {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return `app-${crypto.randomUUID()}`;
-  }
-  return `app-draft-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
-}
-
 function openAdd() {
   editorInitialDraft.value = {
-    id: generateDraftApplicationId(),
+    id: generateDraftId("app"),
     status: "running",
     env: "prod",
     type: "backend",
@@ -164,7 +138,7 @@ function openEdit(row: Application) {
 function openCopy(row: Application) {
   editorInitialDraft.value = {
     ...buildApplicationCopyDraft(row),
-    id: generateDraftApplicationId(),
+    id: generateDraftId("app"),
   };
   editorMode.value = "copy";
   editorVisible.value = true;
@@ -184,19 +158,25 @@ function statusTagType(status: string): "primary" | "success" | "warning" | "inf
 }
 
 function statusLabel(status: string) {
-  return ({ running: "运行中", stopped: "已停止", maintenance: "维护中" } as Record<string, string>)[status] || status;
+  return (
+    ({ running: "运行中", stopped: "已停止", maintenance: "维护中" } as Record<string, string>)[
+      status
+    ] || status
+  );
 }
 
 function typeLabel(type: string) {
   return (
-    ({
-      frontend: "前端",
-      backend: "后端",
-      gateway: "网关",
-      batch_job: "批处理",
-      microservice: "微服务",
-      other: "其他",
-    } as Record<string, string>)[type] || type
+    (
+      {
+        frontend: "前端",
+        backend: "后端",
+        gateway: "网关",
+        batch_job: "批处理",
+        microservice: "微服务",
+        other: "其他",
+      } as Record<string, string>
+    )[type] || type
   );
 }
 
@@ -239,35 +219,54 @@ onMounted(() => {
         <template #default="{ row }">{{ typeLabel(row.type) }}</template>
       </el-table-column>
       <el-table-column label="地址" min-width="180" align="center">
-        <template #default="{ row }"> {{ row.address || "-" }}{{ row.port ? ":" + row.port : "" }} </template>
+        <template #default="{ row }">
+          {{ row.address || "-" }}{{ row.port ? ":" + row.port : "" }}
+        </template>
       </el-table-column>
       <el-table-column prop="env" label="环境" width="80" align="center">
         <template #default="{ row }">
           <el-tag :type="envTagType(row.env)" size="small">{{ envLabel(row.env) }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="tech_stack" label="技术栈" width="140" show-overflow-tooltip align="center" />
+      <el-table-column
+        prop="tech_stack"
+        label="技术栈"
+        width="140"
+        show-overflow-tooltip
+        align="center"
+      />
       <el-table-column label="负责人" min-width="160" align="center">
         <template #default="{ row }">
           <div v-if="ownersForRow(row).length > 0" class="owner-tags">
-            <el-tag v-for="owner in ownersForRow(row)" :key="owner" size="small" effect="plain">{{ owner }}</el-tag>
+            <el-tag v-for="owner in ownersForRow(row)" :key="owner" size="small" effect="plain">
+              {{ owner }}
+            </el-tag>
           </div>
           <span v-else>-</span>
         </template>
       </el-table-column>
-      <el-table-column prop="business_application_name" label="所属业务应用" min-width="150" align="center">
+      <el-table-column
+        prop="business_application_name"
+        label="所属业务应用"
+        min-width="150"
+        align="center"
+      >
         <template #default="{ row }">{{ row.business_application_name || "-" }}</template>
       </el-table-column>
       <el-table-column prop="status" label="状态" width="100" align="center">
         <template #default="{ row }">
-          <el-tag :type="statusTagType(row.status)" size="small">{{ statusLabel(row.status) }}</el-tag>
+          <el-tag :type="statusTagType(row.status)" size="small">
+            {{ statusLabel(row.status) }}
+          </el-tag>
         </template>
       </el-table-column>
       <el-table-column label="操作" width="210" fixed="right" align="center">
         <template #default="{ row }">
           <el-button text type="primary" size="small" @click="openEdit(row)">编辑</el-button>
           <el-button text type="primary" size="small" @click="openCopy(row)">复制</el-button>
-          <el-button text type="danger" size="small" @click="handleDelete(row.id, row.name)">删除</el-button>
+          <el-button text type="danger" size="small" @click="handleDelete(row.id, row.name)">
+            删除
+          </el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -305,8 +304,11 @@ onMounted(() => {
   padding: 12px;
   border: 1px solid var(--im-border-light);
   border-radius: var(--im-radius-md);
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--im-surface-1) 82%, transparent), var(--im-surface-0));
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--im-surface-1) 82%, transparent),
+    var(--im-surface-0)
+  );
 }
 .filter-row {
   display: grid;

@@ -1,18 +1,12 @@
+use super::migrations::hooks::{run_post_migration_hook, run_post_migration_repairs};
+use super::migrations::MIGRATIONS;
 use super::pool::DbPool;
-use super::schema::{ensure_taxonomy_schema_consistency, MIGRATIONS};
+use super::{get_conn, transaction::with_transaction};
+use crate::error::{AppError, AppResult};
 
-fn run_post_migration_hook(conn: &rusqlite::Connection, version: i32) -> Result<(), String> {
-    match version {
-        12 => super::schema::migrate_taxonomy_v2(conn)
-            .map_err(|e| format!("Post-migration hook v{} failed: {}", version, e)),
-        _ => Ok(()),
-    }
-}
-
-pub fn run_migrations(pool: &DbPool) -> Result<(), String> {
-    let conn = pool
-        .get()
-        .map_err(|e| format!("Failed to get connection: {}", e))?;
+pub fn run_migrations(pool: &DbPool) -> AppResult<()> {
+    let command = "run_migrations";
+    let conn = get_conn(pool, command)?;
 
     // Ensure schema_version table exists
     conn.execute_batch(
@@ -21,7 +15,7 @@ pub fn run_migrations(pool: &DbPool) -> Result<(), String> {
             applied_at TEXT NOT NULL
         );",
     )
-    .map_err(|e| format!("Failed to create schema_version table: {}", e))?;
+    .map_err(|error| AppError::from_db_error(command, "初始化 schema_version 表", error))?;
 
     // Get current version
     let current_version: i32 = conn
@@ -30,7 +24,7 @@ pub fn run_migrations(pool: &DbPool) -> Result<(), String> {
             [],
             |row| row.get(0),
         )
-        .map_err(|e| format!("Failed to query schema version: {}", e))?;
+        .map_err(|error| AppError::from_db_error(command, "读取当前迁移版本", error))?;
 
     let target_version = MIGRATIONS.last().map(|(v, _)| *v).unwrap_or(0);
 
@@ -41,46 +35,28 @@ pub fn run_migrations(pool: &DbPool) -> Result<(), String> {
                 continue;
             }
 
-            // Each migration in a transaction
-            conn.execute_batch("BEGIN TRANSACTION;").map_err(|e| {
-                format!(
-                    "Failed to begin transaction for migration v{}: {}",
-                    version, e
+            with_transaction(&conn, command, |conn| {
+                conn.execute_batch(sql).map_err(|error| {
+                    AppError::from_db_error(command, &format!("执行迁移 v{version}"), error)
+                })?;
+
+                let now = chrono::Utc::now().to_rfc3339();
+                conn.execute(
+                    "INSERT INTO schema_version (version, applied_at) VALUES (?1, ?2)",
+                    rusqlite::params![version, now],
                 )
+                .map_err(|error| {
+                    AppError::from_db_error(command, &format!("记录迁移版本 v{version}"), error)
+                })?;
+
+                Ok(())
             })?;
 
-            match conn.execute_batch(sql) {
-                Ok(_) => {
-                    let now = chrono::Utc::now().to_rfc3339();
-                    conn.execute(
-                        "INSERT INTO schema_version (version, applied_at) VALUES (?1, ?2)",
-                        rusqlite::params![version, now],
-                    )
-                    .map_err(|e| {
-                        let _ = conn.execute_batch("ROLLBACK;");
-                        format!("Failed to record migration v{}: {}", version, e)
-                    })?;
-                    conn.execute_batch("COMMIT;")
-                        .map_err(|e| format!("Failed to commit migration v{}: {}", version, e))?;
-                    run_post_migration_hook(&conn, *version)?;
-                }
-                Err(e) => {
-                    let _ = conn.execute_batch("ROLLBACK;");
-                    return Err(format!(
-                        "Migration v{} failed: {}. Startup aborted.",
-                        version, e
-                    ));
-                }
-            }
+            run_post_migration_hook(command, &conn, *version)?;
         }
     }
 
-    if let Err(error) = ensure_taxonomy_schema_consistency(&conn) {
-        eprintln!(
-            "[run_migrations] taxonomy schema consistency check failed: {}",
-            error
-        );
-    }
+    run_post_migration_repairs(command, &conn);
 
     Ok(())
 }

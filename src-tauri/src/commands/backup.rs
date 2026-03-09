@@ -143,7 +143,7 @@ pub fn preview_restore(
         )
         .unwrap_or(0);
 
-    let current_max_version = crate::db::schema::MIGRATIONS
+    let current_max_version = crate::db::migrations::MIGRATIONS
         .last()
         .map(|(v, _)| *v)
         .unwrap_or(0);
@@ -318,15 +318,20 @@ pub fn import_json(
 
         let hosts_count = import_table_rows(&conn, "hosts", &export.data.hosts)
             .map_err(|e| AppError::from_backup_error(command, "import hosts", e))?;
-        conn.execute("DELETE FROM taxonomy_bindings WHERE resource_type = 'application'", [])
-            .map_err(|e| AppError::from_db_error(command, "clear application taxonomy bindings", e))?;
+        conn.execute(
+            "DELETE FROM taxonomy_bindings WHERE resource_type = 'application'",
+            [],
+        )
+        .map_err(|e| AppError::from_db_error(command, "clear application taxonomy bindings", e))?;
         let (application_rows, application_terms) =
-            split_application_rows_for_import(&export.data.applications)
-                .map_err(|e| AppError::from_backup_error(command, "parse applications import payload", e))?;
+            split_application_rows_for_import(&export.data.applications).map_err(|e| {
+                AppError::from_backup_error(command, "parse applications import payload", e)
+            })?;
         let apps_count = import_table_rows(&conn, "applications", &application_rows)
             .map_err(|e| AppError::from_backup_error(command, "import applications", e))?;
-        sync_imported_application_terms(&conn, &application_terms)
-            .map_err(|e| AppError::from_backup_error(command, "sync application taxonomy terms", e))?;
+        sync_imported_application_terms(&conn, &application_terms).map_err(|e| {
+            AppError::from_backup_error(command, "sync application taxonomy terms", e)
+        })?;
         let mw_count = import_table_rows(&conn, "middlewares", &export.data.middlewares)
             .map_err(|e| AppError::from_backup_error(command, "import middlewares", e))?;
         let nginx_count = import_table_rows(&conn, "nginx_configs", &export.data.nginx_configs)
@@ -461,14 +466,19 @@ fn load_application_owner_map(
         .map_err(|e| format!("Prepare failed for application owners: {}", e))?;
 
     let rows = stmt
-        .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
         .map_err(|e| format!("Query failed for application owners: {}", e))?;
 
     let mut owner_map: HashMap<String, Vec<String>> = HashMap::new();
     for row in rows {
         let (application_id, owner_name) =
             row.map_err(|e| format!("Row read error in application owners: {}", e))?;
-        owner_map.entry(application_id).or_default().push(owner_name);
+        owner_map
+            .entry(application_id)
+            .or_default()
+            .push(owner_name);
     }
     Ok(owner_map)
 }
@@ -564,8 +574,15 @@ fn sync_imported_application_terms(
 ) -> Result<(), String> {
     let now = chrono::Utc::now().to_rfc3339();
     for item in items {
-        save_resource_terms(conn, "application", &item.id, FIELD_OWNER, &item.owners, &now)
-            .map_err(|e| format!("Sync application owners failed: {}", e))?;
+        save_resource_terms(
+            conn,
+            "application",
+            &item.id,
+            FIELD_OWNER,
+            &item.owners,
+            &now,
+        )
+        .map_err(|e| format!("Sync application owners failed: {}", e))?;
         save_resource_terms(
             conn,
             "application",

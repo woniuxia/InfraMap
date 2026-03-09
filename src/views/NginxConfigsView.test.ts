@@ -12,16 +12,18 @@ const editorState = vi.hoisted(() => ({
 
 vi.mock("@/api/nginx-configs", () => ({
   listNginxConfigs: vi.fn(async () => ({
-    data: [{
-      id: "ng-1",
-      name: "网关入口",
-      endpoints: [{ host: "10.0.0.8", port: 80 }],
-      strategy: "roundrobin",
-      env: "prod",
-      status: "running",
-      created_at: "",
-      updated_at: "",
-    }],
+    data: [
+      {
+        id: "ng-1",
+        name: "网关入口",
+        endpoints: [{ host: "10.0.0.8", port: 80 }],
+        strategy: "roundrobin",
+        env: "prod",
+        status: "running",
+        created_at: "",
+        updated_at: "",
+      },
+    ],
     total: 1,
     page: 1,
     page_size: 20,
@@ -74,9 +76,9 @@ const ElTableColumnStub = defineComponent({
           h(
             "div",
             { key: `${props.prop}-${index}` },
-            slots.default ? slots.default({ row, $index: index }) : String(row[props.prop] ?? "")
-          )
-        )
+            slots.default ? slots.default({ row, $index: index }) : String(row[props.prop] ?? ""),
+          ),
+        ),
       );
   },
 });
@@ -104,10 +106,14 @@ const NginxConfigEditorDialogStub = defineComponent({
       editorState.mode = props.mode;
       editorState.initialDraft = props.initialDraft as Record<string, unknown>;
       return h("div", { "data-testid": "nginx-editor-dialog" }, [
-        h("button", {
-          "data-testid": "emit-editor-saved",
-          onClick: () => emit("saved", { id: "ng-1", mode: props.mode }),
-        }, "emit-editor-saved"),
+        h(
+          "button",
+          {
+            "data-testid": "emit-editor-saved",
+            onClick: () => emit("saved", { id: "ng-1", mode: props.mode }),
+          },
+          "emit-editor-saved",
+        ),
       ]);
     };
   },
@@ -185,7 +191,7 @@ describe("NginxConfigsView", () => {
     expect(editorState.visible).toBe(true);
     expect(editorState.mode).toBe("copy");
     expect(editorState.initialDraft.id).toBeUndefined();
-    expect(String(editorState.initialDraft.name || "")).toContain("副本-");
+    expect(String(editorState.initialDraft.name || "")).toContain("副本 ");
   });
 
   it("refreshes list after editor emits saved", async () => {

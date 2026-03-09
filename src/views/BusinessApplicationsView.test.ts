@@ -16,7 +16,34 @@ import {
   saveResourceTerms,
 } from "@/api/taxonomy";
 
-const { messageSuccess } = vi.hoisted(() => ({
+const {
+  businessEnvOptions,
+  businessStatusOptions,
+  getEnvLabelMock,
+  getBusinessApplicationStatusLabelMock,
+  messageSuccess,
+} = vi.hoisted(() => ({
+  businessEnvOptions: [
+    { label: "生产", value: "prod" },
+    { label: "开发", value: "dev" },
+    { label: "测试", value: "test" },
+  ],
+  businessStatusOptions: [
+    { label: "激活", value: "active" },
+    { label: "停用", value: "inactive" },
+  ],
+  getEnvLabelMock: vi.fn(
+    (env?: string) =>
+      (({ prod: "生产", dev: "开发", test: "测试" }) as Record<string, string>)[env ?? ""] ||
+      env ||
+      "-",
+  ),
+  getBusinessApplicationStatusLabelMock: vi.fn(
+    (status?: string) =>
+      (({ active: "激活", inactive: "停用" }) as Record<string, string>)[status ?? ""] ||
+      status ||
+      "-",
+  ),
   messageSuccess: vi.fn(),
 }));
 
@@ -90,9 +117,31 @@ vi.mock("@/api/taxonomy", () => ({
   saveResourceTerms: vi.fn(async () => undefined),
 }));
 
+vi.mock("@/constants/options", () => ({
+  ENV_OPTIONS: businessEnvOptions,
+  BUSINESS_APPLICATION_STATUS_OPTIONS: businessStatusOptions,
+  BUSINESS_APPLICATION_STATUS_LABELS: {
+    active: "激活",
+    inactive: "停用",
+  },
+  getEnvLabel: getEnvLabelMock,
+  getBusinessApplicationStatusLabel: getBusinessApplicationStatusLabelMock,
+}));
+
 const SearchToolbarStub = defineComponent({
   name: "SearchToolbar",
-  template: `<div><slot name="actions" :hasActiveFilters="false" :reset="() => {}" /></div>`,
+  props: {
+    fields: {
+      type: Array,
+      default: () => [],
+    },
+  },
+  template: `
+    <div>
+      <div data-testid="search-toolbar-fields">{{ JSON.stringify(fields) }}</div>
+      <slot name="actions" :hasActiveFilters="false" :reset="() => {}" />
+    </div>
+  `,
 });
 
 const ElButtonStub = defineComponent({
@@ -109,7 +158,7 @@ const ElDialogStub = defineComponent({
       default: false,
     },
   },
-  template: `<section v-if="modelValue"><slot /><slot name="footer" /></section>`,
+  template: `<section v-if="modelValue" data-testid="dialog-stub"><slot /><slot name="footer" /></section>`,
 });
 
 const ElInputStub = defineComponent({
@@ -142,7 +191,13 @@ const ElSelectStub = defineComponent({
 
 const ElOptionStub = defineComponent({
   name: "ElOption",
-  template: `<div><slot /></div>`,
+  props: {
+    label: {
+      type: String,
+      default: "",
+    },
+  },
+  template: `<div class="el-option-stub">{{ label }}<slot /></div>`,
 });
 
 const ElOptionGroupStub = defineComponent({
@@ -190,20 +245,16 @@ const ElTableColumnStub = defineComponent({
   setup(props, { slots }) {
     const tableProps = inject<{ data: Record<string, unknown>[] }>(tableDataKey);
     return () =>
-      h(
-        "div",
-        {},
-        [
-          h("div", { "data-testid": `column-${props.prop || props.label}` }, props.label || ""),
-          ...(tableProps?.data || []).map((row, index) =>
-            h(
-              "div",
-              { key: `${props.prop || props.label}-${index}` },
-              slots.default ? slots.default({ row, $index: index }) : String(row[props.prop] ?? ""),
-            ),
+      h("div", {}, [
+        h("div", { "data-testid": `column-${props.prop || props.label}` }, props.label || ""),
+        ...(tableProps?.data || []).map((row, index) =>
+          h(
+            "div",
+            { key: `${props.prop || props.label}-${index}` },
+            slots.default ? slots.default({ row, $index: index }) : String(row[props.prop] ?? ""),
           ),
-        ],
-      );
+        ),
+      ]);
   },
 });
 
@@ -266,9 +317,7 @@ describe("BusinessApplicationsView", () => {
     await addButton!.trigger("click");
     await flushPromises();
 
-    const saveButton = wrapper
-      .findAll("button")
-      .find((button) => button.text().trim() === "保存");
+    const saveButton = wrapper.findAll("button").find((button) => button.text().trim() === "保存");
     expect(saveButton).toBeDefined();
     await saveButton!.trigger("click");
     await flushPromises();
@@ -291,5 +340,31 @@ describe("BusinessApplicationsView", () => {
     expect(deleteBusinessApplication).not.toHaveBeenCalled();
     expect(messageSuccess).toHaveBeenCalled();
   });
-});
 
+  it("uses shared business status options and label helpers", async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    const renderedFields = wrapper.get('[data-testid="search-toolbar-fields"]').text();
+    expect(renderedFields).toContain('"label":"激活"');
+    expect(renderedFields).toContain('"value":"active"');
+    expect(renderedFields).toContain('"label":"停用"');
+    expect(renderedFields).toContain('"value":"inactive"');
+    expect(getEnvLabelMock).toHaveBeenCalledWith("prod");
+    expect(getBusinessApplicationStatusLabelMock).toHaveBeenCalledWith("active");
+
+    const addButton = wrapper
+      .findAll("button")
+      .find((button) => button.text().trim() === "新增业务应用");
+    expect(addButton).toBeDefined();
+    await addButton!.trigger("click");
+    await flushPromises();
+
+    const dialogText = wrapper.get('[data-testid="dialog-stub"]').text();
+    expect(dialogText).toContain("生产");
+    expect(dialogText).toContain("开发");
+    expect(dialogText).toContain("测试");
+    expect(dialogText).toContain("激活");
+    expect(dialogText).toContain("停用");
+  });
+});

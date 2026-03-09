@@ -1,14 +1,13 @@
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
-import type { NginxConfig, NginxEndpoint } from "@/types";
+import type { EditorMode, NginxConfig, NginxEndpoint } from "@/types";
 import type { SearchFieldConfig, SearchToolbarQueryPayload } from "@/types/searchToolbar";
 import { listNginxConfigs, deleteNginxConfig } from "@/api/nginx-configs";
 import { useResourceList } from "@/composables/useResourceList";
+import { ENV_OPTIONS, STATUS_OPTIONS } from "@/constants/options";
 import { buildNginxCopyDraft } from "@/utils/resourceCopy";
 import SearchToolbar from "@/components/filters/SearchToolbar.vue";
 import NginxConfigEditorDialog from "@/components/resource-editors/NginxConfigEditorDialog.vue";
-
-type NginxEditorMode = "create" | "edit" | "copy";
 
 const {
   loading,
@@ -28,7 +27,7 @@ const {
 
 const searchText = ref("");
 const editorVisible = ref(false);
-const editorMode = ref<NginxEditorMode>("create");
+const editorMode = ref<EditorMode>("create");
 const editorInitialDraft = ref<Partial<NginxConfig>>({});
 
 interface NginxListFilters {
@@ -46,17 +45,8 @@ function createDefaultFilters(): NginxListFilters {
 }
 
 const listFilters = ref<NginxListFilters>(createDefaultFilters());
-const envOptions = [
-  { label: "生产", value: "prod" },
-  { label: "开发", value: "dev" },
-  { label: "测试", value: "test" },
-];
-
-const statusOptions = [
-  { label: "运行中", value: "running" },
-  { label: "已停止", value: "stopped" },
-  { label: "维护中", value: "maintenance" },
-];
+const envOptions = ENV_OPTIONS;
+const statusOptions = STATUS_OPTIONS;
 
 const strategyOptions = [
   { label: "轮询", value: "roundrobin" },
@@ -159,11 +149,19 @@ function statusTagType(status: string): "primary" | "success" | "warning" | "inf
 }
 
 function statusLabel(status: string) {
-  return ({ running: "运行中", stopped: "已停止", maintenance: "维护中" } as Record<string, string>)[status] || status;
+  return (
+    ({ running: "运行中", stopped: "已停止", maintenance: "维护中" } as Record<string, string>)[
+      status
+    ] || status
+  );
 }
 
 function strategyLabel(strategy: string) {
-  return ({ roundrobin: "轮询", ip_hash: "IP 哈希" } as Record<string, string>)[strategy] || strategy || "-";
+  return (
+    ({ roundrobin: "轮询", ip_hash: "IP 哈希" } as Record<string, string>)[strategy] ||
+    strategy ||
+    "-"
+  );
 }
 
 function formatEndpoint(item: NginxEndpoint): string {
@@ -228,14 +226,18 @@ onMounted(() => fetchData());
       </el-table-column>
       <el-table-column prop="status" label="状态" width="100" align="center">
         <template #default="{ row }">
-          <el-tag :type="statusTagType(row.status)" size="small">{{ statusLabel(row.status) }}</el-tag>
+          <el-tag :type="statusTagType(row.status)" size="small">
+            {{ statusLabel(row.status) }}
+          </el-tag>
         </template>
       </el-table-column>
       <el-table-column label="操作" width="210" fixed="right" align="center">
         <template #default="{ row }">
           <el-button text type="primary" size="small" @click="openEdit(row)">编辑</el-button>
           <el-button text type="primary" size="small" @click="openCopy(row)">复制</el-button>
-          <el-button text type="danger" size="small" @click="handleDelete(row.id, row.name)">删除</el-button>
+          <el-button text type="danger" size="small" @click="handleDelete(row.id, row.name)">
+            删除
+          </el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -273,8 +275,11 @@ onMounted(() => fetchData());
   padding: 12px;
   border: 1px solid var(--im-border-light);
   border-radius: var(--im-radius-md);
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--im-surface-1) 82%, transparent), var(--im-surface-0));
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--im-surface-1) 82%, transparent),
+    var(--im-surface-0)
+  );
 }
 .filter-row {
   display: grid;

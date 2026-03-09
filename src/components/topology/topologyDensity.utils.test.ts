@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { getDensityByZoom, selectVisibleEdgeIds } from "@/components/topology/topologyDensity.utils";
+import {
+  getDensityByZoom,
+  selectVisibleEdgeIds,
+} from "@/components/topology/topologyDensity.utils";
 
 describe("topologyDensity.utils", () => {
   it("maps zoom level to density tier", () => {
@@ -14,8 +17,8 @@ describe("topologyDensity.utils", () => {
       { id: "B", importance: 1 },
     ];
     const edges = [
-      { id: "e1", source: "A", target: "B", strength: 1, cross_env: false },
-      { id: "e2", source: "B", target: "A", strength: 2, cross_env: false },
+      { id: "e1", source: "A", target: "B", strength: 1, crossEnv: false },
+      { id: "e2", source: "B", target: "A", strength: 2, crossEnv: false },
     ];
 
     const ids = selectVisibleEdgeIds("detail", nodes, edges);
@@ -30,12 +33,12 @@ describe("topologyDensity.utils", () => {
       { id: "D", importance: 1 },
     ];
     const edges = [
-      { id: "e1", source: "A", target: "B", strength: 1, cross_env: false },
-      { id: "e2", source: "A", target: "C", strength: 1, cross_env: false },
-      { id: "e3", source: "A", target: "D", strength: 1, cross_env: false },
-      { id: "e4", source: "B", target: "C", strength: 4, cross_env: false },
-      { id: "e5", source: "C", target: "D", strength: 2, cross_env: false },
-      { id: "e6", source: "D", target: "A", strength: 1, cross_env: true },
+      { id: "e1", source: "A", target: "B", strength: 1, crossEnv: false },
+      { id: "e2", source: "A", target: "C", strength: 1, crossEnv: false },
+      { id: "e3", source: "A", target: "D", strength: 1, crossEnv: false },
+      { id: "e4", source: "B", target: "C", strength: 4, crossEnv: false },
+      { id: "e5", source: "C", target: "D", strength: 2, crossEnv: false },
+      { id: "e6", source: "D", target: "A", strength: 1, crossEnv: true },
     ];
 
     const ids = selectVisibleEdgeIds("overview", nodes, edges);
@@ -53,16 +56,15 @@ describe("topologyDensity.utils", () => {
       { id: "G", importance: 1 },
     ];
     const edges = [
-      { id: "e1", source: "A", target: "B", strength: 2, cross_env: false },
-      { id: "e2", source: "A", target: "C", strength: 2, cross_env: false },
-      { id: "e3", source: "A", target: "D", strength: 2, cross_env: false },
-      { id: "e4", source: "A", target: "E", strength: 2, cross_env: false },
-      { id: "e5", source: "A", target: "F", strength: 2, cross_env: false },
-      { id: "e6", source: "A", target: "G", strength: 2, cross_env: false },
+      { id: "e1", source: "A", target: "B", strength: 2, crossEnv: false },
+      { id: "e2", source: "A", target: "C", strength: 2, crossEnv: false },
+      { id: "e3", source: "A", target: "D", strength: 2, crossEnv: false },
+      { id: "e4", source: "A", target: "E", strength: 2, crossEnv: false },
+      { id: "e5", source: "A", target: "F", strength: 2, crossEnv: false },
+      { id: "e6", source: "A", target: "G", strength: 2, crossEnv: false },
     ];
 
     const ids = selectVisibleEdgeIds("overview", nodes, edges);
     expect(ids.length).toBe(4);
   });
 });
-

@@ -9,9 +9,9 @@ const {
   fetchGraphMock,
   setTaskViewMock,
   setMaxDepthMock,
-  getTopologyPathsV3Mock,
-  getTopologyImpactV3Mock,
-  getTopologyEvidenceV3Mock,
+  getTopologyPathsMock,
+  getTopologyImpactMock,
+  getTopologyEvidenceMock,
   getApplicationMock,
   getMiddlewareMock,
   getNginxConfigMock,
@@ -23,21 +23,26 @@ const {
   storeState: {
     taskView: "explore",
     maxDepth: 3,
-    taskInsights: [] as Array<{ kind: string; title: string; severity?: "info" | "warning" | "critical"; nodeIds?: string[] }>,
+    taskInsights: [] as Array<{
+      kind: string;
+      title: string;
+      severity?: "info" | "warning" | "critical";
+      nodeIds?: string[];
+    }>,
   },
   fetchGraphMock: vi.fn(async () => null),
   setTaskViewMock: vi.fn(),
   setMaxDepthMock: vi.fn(),
-  getTopologyPathsV3Mock: vi.fn(async () => ({
+  getTopologyPathsMock: vi.fn(async () => ({
     paths: [{ nodeIds: ["node-1"] }],
     truncated: false,
   })),
-  getTopologyImpactV3Mock: vi.fn(async () => ({
+  getTopologyImpactMock: vi.fn(async () => ({
     affectedNodes: [],
     totalCount: 0,
     maxDepth: 0,
   })),
-  getTopologyEvidenceV3Mock: vi.fn(async () => ({
+  getTopologyEvidenceMock: vi.fn(async () => ({
     items: [],
     total: 0,
   })),
@@ -85,17 +90,17 @@ setMaxDepthMock.mockImplementation((maxDepth: number) => {
 
 const graphFixture: TopologyGraph = {
   lanes: [
-    { id: "prod", label: "生产", order: 0, node_count: 1, app_count: 1 },
-    { id: "test", label: "测试", order: 1, node_count: 0, app_count: 0 },
-    { id: "dev", label: "开发", order: 2, node_count: 0, app_count: 0 },
+    { id: "prod", label: "生产", order: 0, nodeCount: 1, appCount: 1 },
+    { id: "test", label: "测试", order: 1, nodeCount: 0, appCount: 0 },
+    { id: "dev", label: "开发", order: 2, nodeCount: 0, appCount: 0 },
   ],
   nodes: [
     {
       id: "node-1",
       name: "订单服务",
-      node_type: "application",
+      nodeType: "application",
       env: "prod",
-      group_kind: "application_service",
+      groupKind: "application_service",
       importance: 1,
       extra: {
         address: "10.0.0.11",
@@ -103,23 +108,23 @@ const graphFixture: TopologyGraph = {
     },
   ],
   edges: [],
-  legend_stats: {
-    env_counts: [
-      { env: "prod", count: 1, app_count: 1 },
-      { env: "test", count: 0, app_count: 0 },
-      { env: "dev", count: 0, app_count: 0 },
+  legendStats: {
+    envCounts: [
+      { env: "prod", count: 1, appCount: 1 },
+      { env: "test", count: 0, appCount: 0 },
+      { env: "dev", count: 0, appCount: 0 },
     ],
-    node_type_counts: [{ kind: "application", count: 1 }],
-    edge_type_counts: [],
-    application_service_count: 1,
-    current_env: "prod",
-    external_node_count: 0,
-    cross_env_edge_count: 0,
+    nodeTypeCounts: [{ kind: "application", count: 1 }],
+    edgeTypeCounts: [],
+    applicationServiceCount: 1,
+    currentEnv: "prod",
+    externalNodeCount: 0,
+    crossEnvEdgeCount: 0,
   },
-  layout_hints: {
-    lane_order: ["prod", "test", "dev"],
-    default_collapsed_groups: [],
-    high_density_mode: false,
+  layoutHints: {
+    laneOrder: ["prod", "test", "dev"],
+    defaultCollapsedGroups: [],
+    highDensityMode: false,
   },
 };
 
@@ -142,10 +147,10 @@ vi.mock("@/stores/topology", () => ({
   }),
 }));
 
-vi.mock("@/api/topologyV3", () => ({
-  getTopologyPathsV3: getTopologyPathsV3Mock,
-  getTopologyImpactV3: getTopologyImpactV3Mock,
-  getTopologyEvidenceV3: getTopologyEvidenceV3Mock,
+vi.mock("@/api/topology", () => ({
+  getTopologyPaths: getTopologyPathsMock,
+  getTopologyImpact: getTopologyImpactMock,
+  getTopologyEvidence: getTopologyEvidenceMock,
 }));
 
 vi.mock("@/api/applications", () => ({
@@ -230,60 +235,64 @@ const TopologyCanvasStub = defineComponent({
     });
 
     return () =>
-      h("div", {
-        "data-testid": "topology-canvas",
-        "data-layout": props.layout,
-        "data-perf-opt": props.performanceOptimizationEnabled ? "on" : "off",
-      }, [
-        h(
-          "button",
-          {
-            "data-testid": "emit-node-click",
-            onClick: (event: MouseEvent) => {
-              event.stopPropagation();
-              emit("node-click", sampleNode);
+      h(
+        "div",
+        {
+          "data-testid": "topology-canvas",
+          "data-layout": props.layout,
+          "data-perf-opt": props.performanceOptimizationEnabled ? "on" : "off",
+        },
+        [
+          h(
+            "button",
+            {
+              "data-testid": "emit-node-click",
+              onClick: (event: MouseEvent) => {
+                event.stopPropagation();
+                emit("node-click", sampleNode);
+              },
             },
-          },
-          "emit-node-click",
-        ),
-        h(
-          "button",
-          {
-            "data-testid": "emit-node-contextmenu",
-            onClick: (event: MouseEvent) => {
-              event.stopPropagation();
-              emit("node-contextmenu", { node: sampleNode, x: 120, y: 160 });
+            "emit-node-click",
+          ),
+          h(
+            "button",
+            {
+              "data-testid": "emit-node-contextmenu",
+              onClick: (event: MouseEvent) => {
+                event.stopPropagation();
+                emit("node-contextmenu", { node: sampleNode, x: 120, y: 160 });
+              },
             },
-          },
-          "emit-node-contextmenu",
-        ),
-        h(
-          "button",
-          {
-            "data-testid": "emit-canvas-blank-click",
-            onClick: (event: MouseEvent) => {
-              event.stopPropagation();
-              emit("canvas-blank-click");
+            "emit-node-contextmenu",
+          ),
+          h(
+            "button",
+            {
+              "data-testid": "emit-canvas-blank-click",
+              onClick: (event: MouseEvent) => {
+                event.stopPropagation();
+                emit("canvas-blank-click");
+              },
             },
-          },
-          "emit-canvas-blank-click",
-        ),
-        h(
-          "button",
-          {
-            "data-testid": "emit-layout-resolved-fallback",
-            onClick: (event: MouseEvent) => {
-              event.stopPropagation();
-              emit("layout-resolved", {
-                requested: "dagre",
-                applied: "force",
-                reason: "graph-density",
-              });
+            "emit-canvas-blank-click",
+          ),
+          h(
+            "button",
+            {
+              "data-testid": "emit-layout-resolved-fallback",
+              onClick: (event: MouseEvent) => {
+                event.stopPropagation();
+                emit("layout-resolved", {
+                  requested: "dagre",
+                  applied: "force",
+                  reason: "graph-density",
+                });
+              },
             },
-          },
-          "emit-layout-resolved-fallback",
-        ),
-      ]);
+            "emit-layout-resolved-fallback",
+          ),
+        ],
+      );
   },
 });
 
@@ -321,7 +330,12 @@ const NginxConfigEditorDialogStub = defineComponent({
 });
 
 function mountView(options?: {
-  taskInsights?: Array<{ kind: string; title: string; severity?: "info" | "warning" | "critical"; nodeIds?: string[] }>;
+  taskInsights?: Array<{
+    kind: string;
+    title: string;
+    severity?: "info" | "warning" | "critical";
+    nodeIds?: string[];
+  }>;
 }) {
   storeState.taskView = "explore";
   storeState.maxDepth = 3;
@@ -330,9 +344,9 @@ function mountView(options?: {
   fetchGraphMock.mockClear();
   setTaskViewMock.mockClear();
   setMaxDepthMock.mockClear();
-  getTopologyPathsV3Mock.mockClear();
-  getTopologyImpactV3Mock.mockClear();
-  getTopologyEvidenceV3Mock.mockClear();
+  getTopologyPathsMock.mockClear();
+  getTopologyImpactMock.mockClear();
+  getTopologyEvidenceMock.mockClear();
   getApplicationMock.mockClear();
   getMiddlewareMock.mockClear();
   getNginxConfigMock.mockClear();
@@ -494,7 +508,7 @@ describe("TopologyView", () => {
     expect(fetchGraphMock).toHaveBeenCalledTimes(2);
   });
 
-  it("uses V3 paths api for path tracing", async () => {
+  it("uses topology paths api for path tracing", async () => {
     const wrapper = mountView();
     await flushPromises();
 
@@ -502,7 +516,7 @@ describe("TopologyView", () => {
     await wrapper.get('[data-testid="context-path-trace"]').trigger("click");
     await wrapper.get('[data-testid="emit-node-click"]').trigger("click");
 
-    expect(getTopologyPathsV3Mock).toHaveBeenCalledWith({
+    expect(getTopologyPathsMock).toHaveBeenCalledWith({
       sourceId: "node-1",
       targetId: "node-1",
       taskView: "explore",
@@ -511,22 +525,22 @@ describe("TopologyView", () => {
     expect(highlightPathsMock).toHaveBeenCalledWith([["node-1"]]);
   });
 
-  it("uses V3 impact api for impact analysis", async () => {
+  it("uses topology impact api for impact analysis", async () => {
     const wrapper = mountView();
     await flushPromises();
 
     await wrapper.get('[data-testid="emit-node-contextmenu"]').trigger("click");
     await wrapper.get('[data-testid="context-impact"]').trigger("click");
 
-    expect(getTopologyImpactV3Mock).toHaveBeenCalledWith({
+    expect(getTopologyImpactMock).toHaveBeenCalledWith({
       nodeId: "node-1",
       taskView: "explore",
       maxDepth: 3,
     });
     expect(highlightImpactMock).toHaveBeenCalledWith("node-1", {
-      affected_nodes: [],
-      total_count: 0,
-      max_depth: 0,
+      affectedNodes: [],
+      totalCount: 0,
+      maxDepth: 0,
     });
   });
 
@@ -551,32 +565,34 @@ describe("TopologyView", () => {
 
   it("highlights related nodes when task insight chip is clicked", async () => {
     const wrapper = mountView({
-      taskInsights: [{
-        kind: "dependency",
-        title: "依赖关系摘要",
-        severity: "warning",
-        nodeIds: ["node-1"],
-      }],
+      taskInsights: [
+        {
+          kind: "dependency",
+          title: "依赖关系摘要",
+          severity: "warning",
+          nodeIds: ["node-1"],
+        },
+      ],
     });
     await flushPromises();
 
     await wrapper.get('[data-testid="task-insight-0"]').trigger("click");
     expect(highlightSearchMock).toHaveBeenCalledWith(["node-1"], "node-1");
-    expect(getTopologyEvidenceV3Mock).toHaveBeenCalledWith({
+    expect(getTopologyEvidenceMock).toHaveBeenCalledWith({
       nodeId: "node-1",
       taskView: "explore",
       maxItems: 20,
     });
   });
 
-  it("requests V3 evidence when opening node detail panel", async () => {
+  it("requests topology evidence when opening node detail panel", async () => {
     const wrapper = mountView();
     await flushPromises();
 
     await wrapper.get('[data-testid="emit-node-click"]').trigger("click");
     await flushPromises();
 
-    expect(getTopologyEvidenceV3Mock).toHaveBeenCalledWith({
+    expect(getTopologyEvidenceMock).toHaveBeenCalledWith({
       nodeId: "node-1",
       taskView: "explore",
       maxItems: 20,

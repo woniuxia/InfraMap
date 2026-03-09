@@ -1,10 +1,11 @@
 use std::net::Ipv4Addr;
 use tauri::State;
 
-use crate::db::audit::insert_audit_log;
-use crate::db::crud::{build_where_clause, count_query, delete_by_id};
+use crate::db::crud::{
+    build_where_clause, count_query, resolve_upsert_state, write_audit_log_entry,
+};
 use crate::db::transaction::with_transaction;
-use crate::db::DbPool;
+use crate::db::{get_conn, DbPool};
 use crate::error::{AppError, AppResult};
 use crate::models::common::{PagedResult, QueryParams};
 use crate::models::deployment::Deployment;
@@ -312,9 +313,7 @@ pub fn get_resource_deploy_context(
     resource_env_override: Option<String>,
 ) -> AppResult<ResourceDeployContext> {
     let command = "get_resource_deploy_context";
-    let conn = pool
-        .get()
-        .map_err(|e| AppError::db_unavailable(command, format!("Pool error: {}", e)))?;
+    let conn = get_conn(pool.inner(), command)?;
 
     build_resource_deploy_context(
         command,
@@ -332,16 +331,20 @@ pub fn list_deployments(
     params: QueryParams,
 ) -> AppResult<PagedResult<Deployment>> {
     let command = "list_deployments";
-    let conn = pool
-        .get()
-        .map_err(|e| AppError::db_unavailable(command, format!("Pool error: {}", e)))?;
+    let conn = get_conn(pool.inner(), command)?;
 
     let search_columns: &[&str] = &[];
     let filter_columns = &["resource_id", "resource_type", "host_id"];
     let (where_clause, sql_params) = build_where_clause(&params, search_columns, filter_columns);
 
-    let total = count_query(&conn, "deployments", &where_clause, &sql_params)
-        .map_err(|e| AppError::from_db_error(command, "查询部署关系数量", e))?;
+    let total = count_query(
+        command,
+        "查询部署关系数量",
+        &conn,
+        "deployments",
+        &where_clause,
+        &sql_params,
+    )?;
 
     let page = params.page();
     let page_size = params.page_size();
@@ -381,36 +384,21 @@ fn save_deployment_inner(
     command: &str,
     conn: &rusqlite::Connection,
     data: Deployment,
-) -> AppResult<()> {
+) -> AppResult<String> {
     validate_deployment(&data).map_err(|e| AppError::validation(command, e))?;
     ensure_deployment_refs_exist(command, conn, &data)?;
 
     let now = chrono::Utc::now().to_rfc3339();
-
-    let is_new = data.id.is_empty() || {
-        let count: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM deployments WHERE id = ?1 AND is_deleted = 0",
-                rusqlite::params![data.id],
-                |row| row.get(0),
-            )
-            .unwrap_or(0);
-        count == 0
-    };
+    let (persisted_id, is_new) = resolve_upsert_state(command, conn, "deployments", &data.id)?;
 
     with_transaction(conn, command, |conn| {
         if is_new {
-            let id = if data.id.is_empty() {
-                uuid::Uuid::new_v4().to_string()
-            } else {
-                data.id.clone()
-            };
             conn.execute(
                 "INSERT INTO deployments (id, resource_id, resource_type, host_id, port,
                                           is_deleted, deleted_at, created_at, updated_at)
                  VALUES (?1,?2,?3,?4,?5,0,NULL,?6,?6)",
                 rusqlite::params![
-                    id,
+                    &persisted_id,
                     data.resource_id,
                     data.resource_type,
                     data.host_id,
@@ -419,8 +407,8 @@ fn save_deployment_inner(
                 ],
             )
             .map_err(|e| AppError::from_db_error(command, "创建部署关系", e))?;
-            insert_audit_log(conn, "create", "deployment", &id, None, None)
-                .map_err(|e| AppError::from_db_error(command, "写入审计日志", e))?;
+            write_audit_log_entry(command, conn, "create", "deployment", &persisted_id, None)?;
+            Ok(persisted_id)
         } else {
             conn.execute(
                 "UPDATE deployments SET resource_id=?1, resource_type=?2, host_id=?3, port=?4, updated_at=?5
@@ -428,37 +416,25 @@ fn save_deployment_inner(
                 rusqlite::params![data.resource_id, data.resource_type, data.host_id, data.port, now, data.id],
             )
             .map_err(|e| AppError::from_db_error(command, "更新部署关系", e))?;
-            insert_audit_log(conn, "update", "deployment", &data.id, None, None)
-                .map_err(|e| AppError::from_db_error(command, "写入审计日志", e))?;
+            write_audit_log_entry(command, conn, "update", "deployment", &data.id, None)?;
+            Ok(data.id.clone())
         }
-        Ok(())
     })
 }
 
 #[tauri::command]
-pub fn save_deployment(pool: State<DbPool>, data: Deployment) -> AppResult<()> {
+pub fn save_deployment(pool: State<DbPool>, data: Deployment) -> AppResult<String> {
     let command = "save_deployment";
-    let conn = pool
-        .get()
-        .map_err(|e| AppError::db_unavailable(command, format!("Pool error: {}", e)))?;
+    let conn = get_conn(pool.inner(), command)?;
     save_deployment_inner(command, &conn, data)
 }
 
-#[tauri::command]
-pub fn delete_deployment(pool: State<DbPool>, id: String) -> AppResult<()> {
-    let command = "delete_deployment";
-    let conn = pool
-        .get()
-        .map_err(|e| AppError::db_unavailable(command, format!("Pool error: {}", e)))?;
-
-    with_transaction(&conn, command, |conn| {
-        delete_by_id(conn, "deployments", &id)
-            .map_err(|e| AppError::from_db_error(command, "删除部署关系", e))?;
-        insert_audit_log(conn, "delete", "deployment", &id, None, None)
-            .map_err(|e| AppError::from_db_error(command, "写入审计日志", e))?;
-        Ok(())
-    })
-}
+impl_delete_command!(
+    fn_name: delete_deployment,
+    table: "deployments",
+    resource_type: "deployment",
+    delete_label: "删除部署关系",
+);
 
 #[cfg(test)]
 mod tests {

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { ElMessage } from "element-plus";
-import type { Middleware } from "@/types";
+import type { EditorMode, Middleware } from "@/types";
 import { saveMiddleware } from "@/api/middlewares";
 import { replaceResourceCallRelations } from "@/api/call-relations";
 import { saveDeployment } from "@/api/deployments";
@@ -11,20 +11,19 @@ import {
   getMiddlewareIconByType,
   getMiddlewareTypeOptionsWithIcon,
 } from "@/utils/middlewareCatalog";
+import { ENV_OPTIONS } from "@/constants/options";
 import CallRelationsEditor from "@/components/CallRelationsEditor.vue";
 import DeploymentPanel from "@/components/DeploymentPanel.vue";
 
-type MiddlewareEditorMode = "create" | "edit" | "copy";
-
 const props = defineProps<{
   modelValue: boolean;
-  mode: MiddlewareEditorMode;
+  mode: EditorMode;
   initialDraft: Partial<Middleware>;
 }>();
 
 const emit = defineEmits<{
   (e: "update:modelValue", value: boolean): void;
-  (e: "saved", payload: { id: string; mode: MiddlewareEditorMode }): void;
+  (e: "saved", payload: { id: string; mode: EditorMode }): void;
 }>();
 
 interface DraftDeploymentItem {
@@ -55,7 +54,7 @@ const deploymentPanelRef = ref<DeploymentPanelExposed | null>(null);
 
 const categoryOptions = MIDDLEWARE_CATEGORY_OPTIONS;
 const middlewareTypeOptionsWithIcon = computed(() =>
-  getMiddlewareTypeOptionsWithIcon(editingMw.value.category, editingMw.value.type)
+  getMiddlewareTypeOptionsWithIcon(editingMw.value.category, editingMw.value.type),
 );
 
 function cloneDraft(draft: Partial<Middleware>): Partial<Middleware> {
@@ -102,7 +101,9 @@ async function handleSave() {
   }
 
   const wasEditing = isEditing.value;
-  const draftDeployments = !wasEditing ? deploymentPanelRef.value?.getDraftDeployments?.() ?? [] : [];
+  const draftDeployments = !wasEditing
+    ? (deploymentPanelRef.value?.getDraftDeployments?.() ?? [])
+    : [];
   const payload: Partial<Middleware> = {
     id: "",
     created_at: "",
@@ -131,8 +132,8 @@ async function handleSave() {
               resource_type: "middleware",
               host_id: item.host_id,
               port: item.port,
-            })
-          )
+            }),
+          ),
         );
       } catch {
         ElMessage.warning("中间件已保存，部署关系保存失败，请在部署关系中重试。");
@@ -158,7 +159,7 @@ watch(
       editingMw.value.port = defaultPort;
       autoFilledPort.value = defaultPort;
     }
-  }
+  },
 );
 
 watch(
@@ -168,7 +169,7 @@ watch(
       hydrateFromDraft();
     }
   },
-  { immediate: true }
+  { immediate: true },
 );
 
 watch(
@@ -178,18 +179,12 @@ watch(
       hydrateFromDraft();
     }
   },
-  { deep: true }
+  { deep: true },
 );
 </script>
 
 <template>
-  <el-dialog
-    v-model="visible"
-    :title="dialogTitle"
-    width="700px"
-    align-center
-    destroy-on-close
-  >
+  <el-dialog v-model="visible" :title="dialogTitle" width="700px" align-center destroy-on-close>
     <el-form :model="editingMw" label-width="96px">
       <el-divider content-position="left">基础信息</el-divider>
       <el-form-item label="实例名称" required>
@@ -232,7 +227,11 @@ watch(
             :value="option.value"
           >
             <div class="middleware-type-option">
-              <img :src="option.icon.src" :alt="option.icon.alt" class="middleware-type-option-icon" />
+              <img
+                :src="option.icon.src"
+                :alt="option.icon.alt"
+                class="middleware-type-option-icon"
+              />
               <span>{{ option.label }}</span>
             </div>
           </el-option>
@@ -251,15 +250,24 @@ watch(
       </el-form-item>
       <el-form-item label="环境" required>
         <el-select v-model="editingMw.env" class="w-full">
-          <el-option label="生产" value="prod" />
-          <el-option label="开发" value="dev" />
-          <el-option label="测试" value="test" />
+          <el-option
+            v-for="item in ENV_OPTIONS"
+            :key="item.value"
+            :label="item.label"
+            :value="item.value"
+          />
         </el-select>
       </el-form-item>
 
       <el-divider content-position="left">运维信息</el-divider>
       <el-form-item label="描述">
-        <el-input v-model="editingMw.description" type="textarea" :rows="3" maxlength="300" show-word-limit />
+        <el-input
+          v-model="editingMw.description"
+          type="textarea"
+          :rows="3"
+          maxlength="300"
+          show-word-limit
+        />
       </el-form-item>
     </el-form>
 

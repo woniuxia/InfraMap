@@ -1,4 +1,4 @@
-use crate::db::schema::MIGRATIONS;
+use crate::db::migrations::MIGRATIONS;
 use rusqlite::Connection;
 
 /// Create an in-memory SQLite database and apply all migrations.

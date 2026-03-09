@@ -2,13 +2,15 @@ use std::collections::{HashMap, HashSet};
 use tauri::State;
 
 use crate::commands::taxonomy::{
-    build_taxonomy_exists_filter, delete_resource_terms, parse_filter_values,
-    parse_tech_stack_terms, save_resource_terms, FIELD_OWNER, FIELD_TECH_STACK,
+    delete_resource_terms, parse_tech_stack_terms, save_resource_terms, FIELD_OWNER,
+    FIELD_TECH_STACK,
 };
-use crate::db::audit::insert_audit_log;
-use crate::db::crud::delete_by_id;
+use crate::db::crud::{
+    build_exists_like_clause, build_resource_where_clause, count_query, delete_with_audit,
+    resolve_upsert_state, write_audit_log_entry, SqlParam,
+};
 use crate::db::transaction::with_transaction;
-use crate::db::DbPool;
+use crate::db::{get_conn, DbPool};
 use crate::error::{AppError, AppResult};
 use crate::models::application::Application;
 use crate::models::common::{PagedResult, QueryParams};
@@ -143,86 +145,37 @@ fn merge_owner_fields(app: &mut Application, owner_map: &HashMap<String, Vec<Str
     app.owners = Some(owner_map.get(&app.id).cloned().unwrap_or_default());
 }
 
-fn build_applications_where_clause(
-    params: &QueryParams,
-) -> (String, Vec<Box<dyn rusqlite::types::ToSql>>) {
-    let mut conditions: Vec<String> = vec!["applications.is_deleted = 0".to_string()];
-    let mut sql_params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+fn build_applications_where_clause(params: &QueryParams) -> (String, Vec<SqlParam>) {
+    let owner_search_clause = build_exists_like_clause(
+        "taxonomy_bindings tb JOIN taxonomy_terms tt ON tt.id = tb.term_id",
+        &[
+            "tb.resource_type = 'application'",
+            "tb.resource_id = applications.id",
+            "tb.is_deleted = 0",
+            "tt.is_deleted = 0",
+            "tt.field_key = 'owner'",
+        ],
+        "tt.display_name",
+    );
 
-    if let Some(search) = params
-        .search
-        .as_ref()
-        .map(|s| s.trim())
-        .filter(|s| !s.is_empty())
-    {
-        let like_value = format!("%{}%", search);
-        conditions.push(
-            "(applications.name LIKE ? \
-              OR applications.address LIKE ? \
-              OR applications.tech_stack LIKE ? \
-              OR applications.git_repo LIKE ? \
-              OR EXISTS ( \
-                    SELECT 1 \
-                    FROM taxonomy_bindings tb \
-                    JOIN taxonomy_terms tt ON tt.id = tb.term_id \
-                    WHERE tb.resource_type = 'application' \
-                    AND tb.resource_id = applications.id \
-                      AND tb.is_deleted = 0 \
-                      AND tt.is_deleted = 0 \
-                      AND tt.field_key = 'owner' \
-                      AND tt.display_name LIKE ? \
-                 ))"
-            .to_string(),
-        );
-        for _ in 0..5 {
-            sql_params.push(Box::new(like_value.clone()));
-        }
-    }
-
-    if let Some(filters) = &params.filters {
-        for (column, key) in [
-            ("applications.type", "type"),
-            ("applications.env", "env"),
-            ("applications.status", "status"),
-            ("applications.deploy_mode", "deploy_mode"),
-        ] {
-            if let Some(value) = filters.get(key) {
-                let values = parse_filter_values(value);
-                if values.is_empty() {
-                    continue;
-                }
-                if values.len() == 1 {
-                    conditions.push(format!("{} = ?", column));
-                    sql_params.push(Box::new(values[0].clone()));
-                } else {
-                    let placeholders = vec!["?"; values.len()].join(", ");
-                    conditions.push(format!("{} IN ({})", column, placeholders));
-                    for item in values {
-                        sql_params.push(Box::new(item));
-                    }
-                }
-            }
-        }
-
-        if let Some(owner_filter) = filters.get("owner") {
-            let owners = parse_filter_values(owner_filter);
-            if !owners.is_empty() {
-                if let Some(clause) = build_taxonomy_exists_filter(
-                    "application",
-                    FIELD_OWNER,
-                    "applications.id",
-                    &owners,
-                ) {
-                    conditions.push(clause);
-                    for owner in owners {
-                        sql_params.push(Box::new(owner));
-                    }
-                }
-            }
-        }
-    }
-
-    (format!("WHERE {}", conditions.join(" AND ")), sql_params)
+    build_resource_where_clause(
+        &["applications.is_deleted = 0"],
+        params,
+        &[
+            "applications.name",
+            "applications.address",
+            "applications.tech_stack",
+            "applications.git_repo",
+        ],
+        &[owner_search_clause],
+        &[
+            ("type", "applications.type"),
+            ("env", "applications.env"),
+            ("status", "applications.status"),
+            ("deploy_mode", "applications.deploy_mode"),
+        ],
+        &[("owner", "application", FIELD_OWNER, "applications.id")],
+    )
 }
 
 #[tauri::command]
@@ -231,20 +184,17 @@ pub fn list_applications(
     params: QueryParams,
 ) -> AppResult<PagedResult<Application>> {
     let command = "list_applications";
-    let conn = pool
-        .get()
-        .map_err(|e| AppError::db_unavailable(command, format!("Pool error: {}", e)))?;
+    let conn = get_conn(pool.inner(), command)?;
 
     let (where_clause, sql_params) = build_applications_where_clause(&params);
-    let count_sql = format!("SELECT COUNT(*) FROM applications {}", where_clause);
-    let count_refs: Vec<&dyn rusqlite::types::ToSql> =
-        sql_params.iter().map(|p| p.as_ref()).collect();
-    let total: u64 = conn
-        .query_row(&count_sql, count_refs.as_slice(), |row| {
-            row.get::<_, i64>(0)
-        })
-        .map(|count| count as u64)
-        .map_err(|e| AppError::from_db_error(command, "查询应用数量", e))?;
+    let total = count_query(
+        command,
+        "查询应用数量",
+        &conn,
+        "applications",
+        &where_clause,
+        &sql_params,
+    )?;
 
     let page = params.page();
     let page_size = params.page_size();
@@ -288,9 +238,7 @@ pub fn list_applications(
 #[tauri::command]
 pub fn get_application(pool: State<DbPool>, id: String) -> AppResult<Application> {
     let command = "get_application";
-    let conn = pool
-        .get()
-        .map_err(|e| AppError::db_unavailable(command, format!("Pool error: {}", e)))?;
+    let conn = get_conn(pool.inner(), command)?;
 
     let sql = format!(
         "SELECT {} FROM applications WHERE id = ?1 AND is_deleted = 0",
@@ -318,31 +266,17 @@ fn save_application_inner(
     let tech_stack_terms = parse_tech_stack_terms(normalized_data.tech_stack.as_deref());
     validate_application(&normalized_data).map_err(|e| AppError::validation(command, e))?;
     let now = chrono::Utc::now().to_rfc3339();
-
-    let is_new = normalized_data.id.is_empty() || {
-        let count: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM applications WHERE id = ?1 AND is_deleted = 0",
-                rusqlite::params![normalized_data.id],
-                |row| row.get(0),
-            )
-            .unwrap_or(0);
-        count == 0
-    };
+    let (persisted_id, is_new) =
+        resolve_upsert_state(command, conn, "applications", &normalized_data.id)?;
 
     with_transaction(conn, command, |conn| {
         if is_new {
-            let persisted_id = if normalized_data.id.is_empty() {
-                uuid::Uuid::new_v4().to_string()
-            } else {
-                normalized_data.id.clone()
-            };
             conn.execute(
                 "INSERT INTO applications (id, name, type, address, port, tech_stack, deploy_mode,
                                            env, git_repo, business_application_id, status, description, is_deleted, deleted_at, created_at, updated_at)
                  VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,0,NULL,?13,?13)",
                 rusqlite::params![
-                    persisted_id,
+                    &persisted_id,
                     normalized_data.name,
                     normalized_data.app_type,
                     normalized_data.address,
@@ -376,15 +310,14 @@ fn save_application_inner(
                 &now,
             )
             .map_err(|e| AppError::from_db_error(command, "同步技术栈词条", e))?;
-            insert_audit_log(
+            write_audit_log_entry(
+                command,
                 conn,
                 "create",
                 "application",
                 &persisted_id,
                 Some(&normalized_data.name),
-                None,
-            )
-            .map_err(|e| AppError::from_db_error(command, "写入审计日志", e))?;
+            )?;
             Ok(persisted_id)
         } else {
             conn.execute(
@@ -426,15 +359,14 @@ fn save_application_inner(
                 &now,
             )
             .map_err(|e| AppError::from_db_error(command, "同步技术栈词条", e))?;
-            insert_audit_log(
+            write_audit_log_entry(
+                command,
                 conn,
                 "update",
                 "application",
                 &normalized_data.id,
                 Some(&normalized_data.name),
-                None,
-            )
-            .map_err(|e| AppError::from_db_error(command, "写入审计日志", e))?;
+            )?;
             Ok(normalized_data.id.clone())
         }
     })
@@ -443,18 +375,14 @@ fn save_application_inner(
 #[tauri::command]
 pub fn save_application(pool: State<DbPool>, data: Application) -> AppResult<String> {
     let command = "save_application";
-    let conn = pool
-        .get()
-        .map_err(|e| AppError::db_unavailable(command, format!("Pool error: {}", e)))?;
+    let conn = get_conn(pool.inner(), command)?;
     save_application_inner(command, &conn, data)
 }
 
 #[tauri::command]
 pub fn delete_application(pool: State<DbPool>, id: String) -> AppResult<()> {
     let command = "delete_application";
-    let conn = pool
-        .get()
-        .map_err(|e| AppError::db_unavailable(command, format!("Pool error: {}", e)))?;
+    let conn = get_conn(pool.inner(), command)?;
 
     let name: Option<String> = conn
         .query_row(
@@ -466,12 +394,17 @@ pub fn delete_application(pool: State<DbPool>, id: String) -> AppResult<()> {
     let now = chrono::Utc::now().to_rfc3339();
 
     with_transaction(&conn, command, |conn| {
-        delete_by_id(conn, "applications", &id)
-            .map_err(|e| AppError::from_db_error(command, "删除应用", e))?;
+        delete_with_audit(
+            command,
+            "删除应用",
+            conn,
+            "applications",
+            "application",
+            &id,
+            name.as_deref(),
+        )?;
         delete_resource_terms(conn, "application", &id, &now)
             .map_err(|e| AppError::from_db_error(command, "删除应用词条绑定", e))?;
-        insert_audit_log(conn, "delete", "application", &id, name.as_deref(), None)
-            .map_err(|e| AppError::from_db_error(command, "写入审计日志", e))?;
         Ok(())
     })
 }

@@ -12,17 +12,19 @@ const editorState = vi.hoisted(() => ({
 
 vi.mock("@/api/middlewares", () => ({
   listMiddlewares: vi.fn(async () => ({
-    data: [{
-      id: "mw-1",
-      name: "redis-main",
-      category: "cache",
-      type: "Redis",
-      address: "10.0.0.8",
-      port: 6379,
-      env: "prod",
-      created_at: "",
-      updated_at: "",
-    }],
+    data: [
+      {
+        id: "mw-1",
+        name: "redis-main",
+        category: "cache",
+        type: "Redis",
+        address: "10.0.0.8",
+        port: 6379,
+        env: "prod",
+        created_at: "",
+        updated_at: "",
+      },
+    ],
     total: 1,
     page: 1,
     page_size: 20,
@@ -75,9 +77,9 @@ const ElTableColumnStub = defineComponent({
           h(
             "div",
             { key: `${props.prop}-${index}` },
-            slots.default ? slots.default({ row, $index: index }) : String(row[props.prop] ?? "")
-          )
-        )
+            slots.default ? slots.default({ row, $index: index }) : String(row[props.prop] ?? ""),
+          ),
+        ),
       );
   },
 });
@@ -105,10 +107,14 @@ const MiddlewareEditorDialogStub = defineComponent({
       editorState.mode = props.mode;
       editorState.initialDraft = props.initialDraft as Record<string, unknown>;
       return h("div", { "data-testid": "middleware-editor-dialog" }, [
-        h("button", {
-          "data-testid": "emit-editor-saved",
-          onClick: () => emit("saved", { id: "mw-1", mode: props.mode }),
-        }, "emit-editor-saved"),
+        h(
+          "button",
+          {
+            "data-testid": "emit-editor-saved",
+            onClick: () => emit("saved", { id: "mw-1", mode: props.mode }),
+          },
+          "emit-editor-saved",
+        ),
       ]);
     };
   },
@@ -186,7 +192,7 @@ describe("MiddlewaresView", () => {
     expect(editorState.visible).toBe(true);
     expect(editorState.mode).toBe("copy");
     expect(editorState.initialDraft.id).not.toBe("mw-1");
-    expect(String(editorState.initialDraft.name || "")).toContain("副本-");
+    expect(String(editorState.initialDraft.name || "")).toContain("副本 ");
   });
 
   it("refreshes list after editor emits saved", async () => {

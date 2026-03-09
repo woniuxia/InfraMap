@@ -8,7 +8,7 @@ import type {
   TopologyNode,
 } from "@/types";
 
-export type TopologyEdgeType = TopologyEdge["edge_type"];
+export type TopologyEdgeType = TopologyEdge["edgeType"];
 
 export interface TopologyFilterState {
   env: TopologyEnv;
@@ -35,7 +35,8 @@ export const DEFAULT_TOPOLOGY_FILTER: TopologyFilterState = {
 export const EDGE_RENDER_LIMIT = 260;
 export const EXTERNAL_NODE_PREFIX = "external:";
 export const EXTERNAL_ZONE_COMBO_ID = "external-zone";
-const UUID_LIKE_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const UUID_LIKE_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const HOST_GENERATED_ID_PATTERN = /^host-\d{8,}-[0-9a-f]{6,}$/i;
 
 function countKinds(items: string[]): TopologyKindCount[] {
@@ -49,11 +50,17 @@ function countKinds(items: string[]): TopologyKindCount[] {
 }
 
 function isExternalByExtra(extra: Record<string, unknown> | undefined): boolean {
-  return extra?.is_external === true || extra?.is_external === "true";
+  return extra?.isExternal === true || extra?.isExternal === "true";
 }
 
-export function isExternalTopologyNode(node: Pick<TopologyNode, "id" | "is_external" | "extra">): boolean {
-  return node.is_external === true || node.id.startsWith(EXTERNAL_NODE_PREFIX) || isExternalByExtra(node.extra);
+export function isExternalTopologyNode(
+  node: Pick<TopologyNode, "id" | "isExternal" | "extra">,
+): boolean {
+  return (
+    node.isExternal === true ||
+    node.id.startsWith(EXTERNAL_NODE_PREFIX) ||
+    isExternalByExtra(node.extra)
+  );
 }
 
 export function isExternalNodeId(nodeId: string): boolean {
@@ -75,22 +82,19 @@ function sortNodes(nodes: TopologyNode[]): TopologyNode[] {
   });
 }
 
-function createExternalNode(
-  nodeId: string,
-  sourceNode: TopologyNode | undefined,
-): TopologyNode {
+function createExternalNode(nodeId: string, sourceNode: TopologyNode | undefined): TopologyNode {
   if (sourceNode) {
     return {
       ...sourceNode,
       id: toExternalNodeId(sourceNode.id),
-      host_id: undefined,
+      hostId: undefined,
       name: `${sourceNode.name} (${TOPOLOGY_ENV_LABELS[sourceNode.env]})`,
-      is_external: true,
-      external_ref_id: sourceNode.id,
+      isExternal: true,
+      externalRefId: sourceNode.id,
       extra: {
         ...(sourceNode.extra || {}),
-        is_external: true,
-        external_ref_id: sourceNode.id,
+        isExternal: true,
+        externalRefId: sourceNode.id,
         external_env: sourceNode.env,
       },
     };
@@ -99,15 +103,15 @@ function createExternalNode(
   return {
     id: toExternalNodeId(nodeId),
     name: `外部节点 ${nodeId}`,
-    node_type: "application",
+    nodeType: "application",
     env: "test",
-    group_kind: "application_service",
+    groupKind: "application_service",
     importance: 0.5,
-    is_external: true,
-    external_ref_id: nodeId,
+    isExternal: true,
+    externalRefId: nodeId,
     extra: {
-      is_external: true,
-      external_ref_id: nodeId,
+      isExternal: true,
+      externalRefId: nodeId,
       external_env: "unknown",
     },
   };
@@ -120,10 +124,12 @@ function trimDetachedExternalNodes(nodes: TopologyNode[], edges: TopologyEdge[])
     linkedNodeIds.add(edge.target);
   }
 
-  return sortNodes(nodes.filter((node) => {
-    if (!isExternalTopologyNode(node)) return true;
-    return linkedNodeIds.has(node.id);
-  }));
+  return sortNodes(
+    nodes.filter((node) => {
+      if (!isExternalTopologyNode(node)) return true;
+      return linkedNodeIds.has(node.id);
+    }),
+  );
 }
 
 function buildLanes(
@@ -133,14 +139,14 @@ function buildLanes(
   const laneMap = new Map(sourceLanes.map((lane) => [lane.id, lane]));
   return TOPOLOGY_ENV_ORDER.map((env, order) => {
     const sameEnvNodes = nodes.filter((node) => node.env === env);
-    const appCount = sameEnvNodes.filter((node) => node.group_kind === "application_service").length;
+    const appCount = sameEnvNodes.filter((node) => node.groupKind === "application_service").length;
     const lane = laneMap.get(env);
     return {
       id: env,
       label: lane?.label || TOPOLOGY_ENV_LABELS[env],
       order: lane?.order ?? order,
-      node_count: sameEnvNodes.length,
-      app_count: appCount,
+      nodeCount: sameEnvNodes.length,
+      appCount: appCount,
     };
   });
 }
@@ -152,35 +158,39 @@ export function computeLegendStats(
 ): TopologyLegendStats {
   const envCounts = TOPOLOGY_ENV_ORDER.map((env) => {
     const inEnv = nodes.filter((node) => node.env === env);
-    const appCount = inEnv.filter((node) => node.group_kind === "application_service").length;
+    const appCount = inEnv.filter((node) => node.groupKind === "application_service").length;
     return {
       env,
       count: inEnv.length,
-      app_count: appCount,
+      appCount: appCount,
     };
   });
 
-  const nodeTypeCounts = countKinds(nodes.map((node) => node.node_type));
+  const nodeTypeCounts = countKinds(nodes.map((node) => node.nodeType));
 
   const edgeTypeMap = new Map<string, number>();
   for (const edge of edges) {
-    edgeTypeMap.set(edge.edge_type, (edgeTypeMap.get(edge.edge_type) || 0) + Math.max(1, edge.strength));
+    edgeTypeMap.set(
+      edge.edgeType,
+      (edgeTypeMap.get(edge.edgeType) || 0) + Math.max(1, edge.strength),
+    );
   }
   const edgeTypeCounts = Array.from(edgeTypeMap.entries())
     .map(([kind, count]) => ({ kind, count }))
     .sort((a, b) => a.kind.localeCompare(b.kind));
 
   const externalNodeCount = nodes.filter((node) => isExternalTopologyNode(node)).length;
-  const crossEnvEdgeCount = edges.filter((edge) => edge.cross_env).length;
+  const crossEnvEdgeCount = edges.filter((edge) => edge.crossEnv).length;
 
   return {
-    env_counts: envCounts,
-    node_type_counts: nodeTypeCounts,
-    edge_type_counts: edgeTypeCounts,
-    application_service_count: nodes.filter((node) => node.group_kind === "application_service").length,
-    current_env: currentEnv,
-    external_node_count: externalNodeCount,
-    cross_env_edge_count: crossEnvEdgeCount,
+    envCounts: envCounts,
+    nodeTypeCounts: nodeTypeCounts,
+    edgeTypeCounts: edgeTypeCounts,
+    applicationServiceCount: nodes.filter((node) => node.groupKind === "application_service")
+      .length,
+    currentEnv: currentEnv,
+    externalNodeCount: externalNodeCount,
+    crossEnvEdgeCount: crossEnvEdgeCount,
   };
 }
 
@@ -219,7 +229,7 @@ export function filterTopologyGraph(
       ...edge,
       source: nextSource,
       target: nextTarget,
-      cross_env: edge.cross_env || isExternalNodeId(nextSource) || isExternalNodeId(nextTarget),
+      crossEnv: edge.crossEnv || isExternalNodeId(nextSource) || isExternalNodeId(nextTarget),
     });
   }
 
@@ -227,21 +237,21 @@ export function filterTopologyGraph(
   const edgeTypeSet = new Set(filter.edgeTypes);
 
   let visibleNodes = transformedNodes.filter((node) => {
-    if (nodeKindSet.size > 0 && !nodeKindSet.has(node.group_kind)) return false;
+    if (nodeKindSet.size > 0 && !nodeKindSet.has(node.groupKind)) return false;
     return true;
   });
   let visibleNodeIds = new Set(visibleNodes.map((node) => node.id));
 
   let visibleEdges = transformedEdges.filter((edge) => {
     if (!visibleNodeIds.has(edge.source) || !visibleNodeIds.has(edge.target)) return false;
-    if (edgeTypeSet.size > 0 && !edgeTypeSet.has(edge.edge_type)) return false;
+    if (edgeTypeSet.size > 0 && !edgeTypeSet.has(edge.edgeType)) return false;
     return true;
   });
 
   if (!filter.showAllEdges && visibleEdges.length > EDGE_RENDER_LIMIT) {
     visibleEdges = [...visibleEdges]
       .sort((left, right) => {
-        if (left.cross_env !== right.cross_env) return left.cross_env ? -1 : 1;
+        if (left.crossEnv !== right.crossEnv) return left.crossEnv ? -1 : 1;
         if (left.strength !== right.strength) return right.strength - left.strength;
         return left.id.localeCompare(right.id);
       })
@@ -250,7 +260,9 @@ export function filterTopologyGraph(
 
   visibleNodes = trimDetachedExternalNodes(visibleNodes, visibleEdges);
   visibleNodeIds = new Set(visibleNodes.map((node) => node.id));
-  visibleEdges = visibleEdges.filter((edge) => visibleNodeIds.has(edge.source) && visibleNodeIds.has(edge.target));
+  visibleEdges = visibleEdges.filter(
+    (edge) => visibleNodeIds.has(edge.source) && visibleNodeIds.has(edge.target),
+  );
 
   const legendStats = computeLegendStats(visibleNodes, visibleEdges, filter.env);
   const lanes = buildLanes(graph.lanes, visibleNodes);
@@ -259,8 +271,8 @@ export function filterTopologyGraph(
     lanes,
     nodes: visibleNodes,
     edges: visibleEdges,
-    legend_stats: legendStats,
-    layout_hints: graph.layout_hints,
+    legendStats: legendStats,
+    layoutHints: graph.layoutHints,
   };
 }
 
@@ -288,15 +300,16 @@ function asNonEmptyString(value: unknown): string | null {
 
 function pickHostName(nodes: TopologyNode[]): string | null {
   for (const node of nodes) {
-    const direct = asNonEmptyString(node.host_name);
+    const direct = asNonEmptyString(node.hostName);
     if (direct) return direct;
 
     const extra = node.extra;
     if (!extra) continue;
-    const candidate = asNonEmptyString(extra.host_name)
-      || asNonEmptyString(extra.host_hostname)
-      || asNonEmptyString(extra.hostname)
-      || asNonEmptyString(extra.host_display);
+    const candidate =
+      asNonEmptyString(extra.hostName) ||
+      asNonEmptyString(extra.host_hostname) ||
+      asNonEmptyString(extra.hostname) ||
+      asNonEmptyString(extra.host_display);
     if (candidate) return candidate;
   }
   return null;
@@ -304,12 +317,12 @@ function pickHostName(nodes: TopologyNode[]): string | null {
 
 function pickHostIpDisplay(nodes: TopologyNode[]): string | null {
   for (const node of nodes) {
-    const direct = asNonEmptyString(node.host_ip_display);
+    const direct = asNonEmptyString(node.hostIpDisplay);
     if (direct) return direct;
 
     const extra = node.extra;
     if (!extra) continue;
-    const candidate = asNonEmptyString(extra.host_ip_display) || asNonEmptyString(extra.ip_display);
+    const candidate = asNonEmptyString(extra.hostIpDisplay) || asNonEmptyString(extra.ip_display);
     if (candidate) return candidate;
   }
   return null;
@@ -326,7 +339,10 @@ function formatHostIpSummary(ipDisplay: string | null): string | null {
   return `${items[0]} +${items.length - 1}`;
 }
 
-export function formatHostDisplayName(hostName: string | null, hostIpDisplay: string | null): string | null {
+export function formatHostDisplayName(
+  hostName: string | null,
+  hostIpDisplay: string | null,
+): string | null {
   const ipSummary = formatHostIpSummary(hostIpDisplay);
   if (hostName && ipSummary) return `${hostName} · ${ipSummary}`;
   if (hostName) return hostName;
@@ -338,7 +354,7 @@ export function formatHostComboLabel(hostId: string, hostNodes: TopologyNode[]):
   const hostName = pickHostName(hostNodes);
   const hostIpDisplay = pickHostIpDisplay(hostNodes);
   const displayName = formatHostDisplayName(hostName, hostIpDisplay);
-  const baseLabel = displayName
-    || (isOpaqueIdentifier(hostId) ? `主机 #${hostId.slice(-6)}` : hostId);
+  const baseLabel =
+    displayName || (isOpaqueIdentifier(hostId) ? `主机 #${hostId.slice(-6)}` : hostId);
   return compactLabel(baseLabel, 22);
 }

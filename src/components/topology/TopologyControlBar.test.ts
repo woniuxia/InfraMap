@@ -4,36 +4,38 @@ import type { TopologyLegendStats, TopologyNode } from "@/types";
 import type { TopologyFilterState } from "@/components/topology/topologyGraph.utils";
 import TopologyControlBar from "@/components/topology/TopologyControlBar.vue";
 
-function createNode(partial: Partial<TopologyNode> & Pick<TopologyNode, "id" | "name">): TopologyNode {
+function createNode(
+  partial: Partial<TopologyNode> & Pick<TopologyNode, "id" | "name">,
+): TopologyNode {
   return {
     id: partial.id,
     name: partial.name,
-    node_type: partial.node_type ?? "application",
+    nodeType: partial.nodeType ?? "application",
     env: partial.env ?? "prod",
-    group_kind: partial.group_kind ?? "application_service",
+    groupKind: partial.groupKind ?? "application_service",
     importance: partial.importance ?? 1,
     extra: partial.extra,
   };
 }
 
 const statsFixture: TopologyLegendStats = {
-  env_counts: [
-    { env: "prod", count: 3, app_count: 2 },
-    { env: "test", count: 1, app_count: 1 },
-    { env: "dev", count: 0, app_count: 0 },
+  envCounts: [
+    { env: "prod", count: 3, appCount: 2 },
+    { env: "test", count: 1, appCount: 1 },
+    { env: "dev", count: 0, appCount: 0 },
   ],
-  node_type_counts: [
+  nodeTypeCounts: [
     { kind: "application", count: 2 },
     { kind: "middleware", count: 1 },
   ],
-  edge_type_counts: [
+  edgeTypeCounts: [
     { kind: "http_call", count: 2 },
     { kind: "tcp", count: 1 },
   ],
-  application_service_count: 2,
-  current_env: "prod",
-  external_node_count: 1,
-  cross_env_edge_count: 1,
+  applicationServiceCount: 2,
+  currentEnv: "prod",
+  externalNodeCount: 1,
+  crossEnvEdgeCount: 1,
 };
 
 const filterFixture: TopologyFilterState = {
@@ -49,8 +51,14 @@ function mountControlBar(
 ) {
   const nodes = [
     createNode({ id: "n-1", name: "订单服务", extra: { address: "10.0.0.11" } }),
-    createNode({ id: "n-2", name: "订单网关", node_type: "nginx", group_kind: "nginx", extra: { ip: "10.0.0.21" } }),
-    createNode({ id: "n-3", name: "Redis", node_type: "middleware", group_kind: "middleware" }),
+    createNode({
+      id: "n-2",
+      name: "订单网关",
+      nodeType: "nginx",
+      groupKind: "nginx",
+      extra: { ip: "10.0.0.21" },
+    }),
+    createNode({ id: "n-3", name: "Redis", nodeType: "middleware", groupKind: "middleware" }),
   ];
 
   return mount(TopologyControlBar, {
@@ -80,12 +88,18 @@ describe("TopologyControlBar", () => {
     expect(wrapper.emitted("search")).toBeFalsy();
 
     vi.advanceTimersByTime(1);
-    const firstPayload = wrapper.emitted("search")?.[0]?.[0] as { matchIds: string[]; focusId?: string };
+    const firstPayload = wrapper.emitted("search")?.[0]?.[0] as {
+      matchIds: string[];
+      focusId?: string;
+    };
     expect(firstPayload.matchIds).toEqual(["n-1", "n-2"]);
     expect(firstPayload.focusId).toBe("n-1");
 
     await input.trigger("keydown.enter");
-    const secondPayload = wrapper.emitted("search")?.[1]?.[0] as { matchIds: string[]; focusId?: string };
+    const secondPayload = wrapper.emitted("search")?.[1]?.[0] as {
+      matchIds: string[];
+      focusId?: string;
+    };
     expect(secondPayload.matchIds).toEqual(["n-1", "n-2"]);
     expect(secondPayload.focusId).toBe("n-2");
 

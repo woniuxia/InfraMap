@@ -44,13 +44,13 @@ export interface DensityEdgeInput {
   source: string;
   target: string;
   strength: number;
-  cross_env: boolean;
+  crossEnv: boolean;
 }
 
 function scoreEdge(edge: DensityEdgeInput, nodeImportance: Map<string, number>): number {
   const sourceImportance = nodeImportance.get(edge.source) || 0;
   const targetImportance = nodeImportance.get(edge.target) || 0;
-  const crossEnvWeight = edge.cross_env ? 220 : 0;
+  const crossEnvWeight = edge.crossEnv ? 220 : 0;
   return crossEnvWeight + edge.strength * 18 + sourceImportance * 6 + targetImportance * 6;
 }
 
@@ -74,7 +74,7 @@ export function selectVisibleEdgeIds(
   const rankedEdges = [...edges].sort((left, right) => {
     const scoreDiff = scoreEdge(right, nodeImportance) - scoreEdge(left, nodeImportance);
     if (scoreDiff !== 0) return scoreDiff;
-    if (left.cross_env !== right.cross_env) return left.cross_env ? -1 : 1;
+    if (left.crossEnv !== right.crossEnv) return left.crossEnv ? -1 : 1;
     if (left.strength !== right.strength) return right.strength - left.strength;
     return left.id.localeCompare(right.id);
   });
@@ -85,9 +85,10 @@ export function selectVisibleEdgeIds(
   for (const edge of rankedEdges) {
     const sourceDegree = nodeDegree.get(edge.source) || 0;
     const targetDegree = nodeDegree.get(edge.target) || 0;
-    const mustKeep = edge.cross_env || edge.strength >= Math.max(3, options.minEdgeStrength + 1);
+    const mustKeep = edge.crossEnv || edge.strength >= Math.max(3, options.minEdgeStrength + 1);
     const weakEdge = edge.strength < options.minEdgeStrength;
-    const exceedsDegreeCap = sourceDegree >= options.nodeEdgeCap || targetDegree >= options.nodeEdgeCap;
+    const exceedsDegreeCap =
+      sourceDegree >= options.nodeEdgeCap || targetDegree >= options.nodeEdgeCap;
 
     if (!mustKeep && weakEdge) continue;
     if (!mustKeep && exceedsDegreeCap) continue;
@@ -116,6 +117,6 @@ export function normalizeEdgesForDensity(edges: TopologyEdge[]): DensityEdgeInpu
     source: edge.source,
     target: edge.target,
     strength: edge.strength,
-    cross_env: edge.cross_env,
+    crossEnv: edge.crossEnv,
   }));
 }

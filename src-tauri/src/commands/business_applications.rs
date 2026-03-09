@@ -3,8 +3,9 @@ use tauri::State;
 
 use crate::commands::taxonomy::{build_taxonomy_exists_filter, parse_filter_values, FIELD_OWNER};
 use crate::db::audit::insert_audit_log;
-use crate::db::crud::{count_query, delete_by_id};
-use crate::db::DbPool;
+use crate::db::crud::{count_query, delete_by_id, resolve_upsert_state, write_audit_log_entry};
+use crate::db::transaction::with_transaction;
+use crate::db::{get_conn, DbPool};
 use crate::error::{AppError, AppResult};
 use crate::models::application::Application;
 use crate::models::business_application::BusinessApplication;
@@ -251,32 +252,16 @@ fn save_business_application_inner(
     validate_business_application(&data).map_err(|e| AppError::validation(command, e))?;
 
     let now = chrono::Utc::now().to_rfc3339();
-    let is_new = data.id.is_empty() || {
-        let count: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM business_applications WHERE id = ?1 AND is_deleted = 0",
-                rusqlite::params![data.id],
-                |row| row.get(0),
-            )
-            .unwrap_or(0);
-        count == 0
-    };
+    let (persisted_id, is_new) =
+        resolve_upsert_state(command, conn, "business_applications", &data.id)?;
 
-    conn.execute_batch("BEGIN TRANSACTION;")
-        .map_err(|e| AppError::from_db_error(command, "开启事务", e))?;
-
-    let result: AppResult<String> = (|| {
+    with_transaction(conn, command, |conn| {
         if is_new {
-            let id = if data.id.is_empty() {
-                uuid::Uuid::new_v4().to_string()
-            } else {
-                data.id.clone()
-            };
             conn.execute(
                 "INSERT INTO business_applications (id, name, code, description, env, status, is_deleted, deleted_at, created_at, updated_at)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, NULL, ?7, ?7)",
                 rusqlite::params![
-                    id,
+                    &persisted_id,
                     data.name,
                     data.code,
                     data.description,
@@ -286,16 +271,15 @@ fn save_business_application_inner(
                 ],
             )
             .map_err(|e| AppError::from_db_error(command, "创建业务应用", e))?;
-            insert_audit_log(
+            write_audit_log_entry(
+                command,
                 conn,
                 "create",
                 "business_application",
-                &id,
+                &persisted_id,
                 Some(&data.name),
-                None,
-            )
-            .map_err(|e| AppError::from_db_error(command, "写入审计日志", e))?;
-            Ok(id)
+            )?;
+            Ok(persisted_id.clone())
         } else {
             conn.execute(
                 "UPDATE business_applications
@@ -312,30 +296,17 @@ fn save_business_application_inner(
                 ],
             )
             .map_err(|e| AppError::from_db_error(command, "更新业务应用", e))?;
-            insert_audit_log(
+            write_audit_log_entry(
+                command,
                 conn,
                 "update",
                 "business_application",
                 &data.id,
                 Some(&data.name),
-                None,
-            )
-            .map_err(|e| AppError::from_db_error(command, "写入审计日志", e))?;
+            )?;
             Ok(data.id.clone())
         }
-    })();
-
-    match result {
-        Ok(id) => {
-            conn.execute_batch("COMMIT;")
-                .map_err(|e| AppError::from_db_error(command, "提交事务", e))?;
-            Ok(id)
-        }
-        Err(error) => {
-            let _ = conn.execute_batch("ROLLBACK;");
-            Err(error)
-        }
-    }
+    })
 }
 
 fn attach_services_to_business_application_inner(
@@ -366,10 +337,7 @@ fn attach_services_to_business_application_inner(
     }
 
     let now = chrono::Utc::now().to_rfc3339();
-    conn.execute_batch("BEGIN TRANSACTION;")
-        .map_err(|e| AppError::from_db_error(command, "开启事务", e))?;
-
-    let result: AppResult<AttachServicesResult> = (|| {
+    with_transaction(conn, command, |conn| {
         let mut attached_count = 0u64;
         let mut skipped_count = 0u64;
 
@@ -432,19 +400,7 @@ fn attach_services_to_business_application_inner(
             attached_count,
             skipped_count,
         })
-    })();
-
-    match result {
-        Ok(summary) => {
-            conn.execute_batch("COMMIT;")
-                .map_err(|e| AppError::from_db_error(command, "提交事务", e))?;
-            Ok(summary)
-        }
-        Err(error) => {
-            let _ = conn.execute_batch("ROLLBACK;");
-            Err(error)
-        }
-    }
+    })
 }
 
 fn normalize_application_ids(application_ids: &[String]) -> Vec<String> {
@@ -559,10 +515,7 @@ fn replace_services_by_business_application_inner(
     let unchanged_count = current_ids.intersection(&target_set).count() as u64;
 
     let now = chrono::Utc::now().to_rfc3339();
-    conn.execute_batch("BEGIN TRANSACTION;")
-        .map_err(|e| AppError::from_db_error(command, "开启事务", e))?;
-
-    let result: AppResult<ReplaceServicesResult> = (|| {
+    with_transaction(conn, command, |conn| {
         for application_id in &detach_ids {
             conn.execute(
                 "UPDATE applications
@@ -612,19 +565,7 @@ fn replace_services_by_business_application_inner(
             detached_count: detach_ids.len() as u64,
             unchanged_count,
         })
-    })();
-
-    match result {
-        Ok(summary) => {
-            conn.execute_batch("COMMIT;")
-                .map_err(|e| AppError::from_db_error(command, "提交事务", e))?;
-            Ok(summary)
-        }
-        Err(error) => {
-            let _ = conn.execute_batch("ROLLBACK;");
-            Err(error)
-        }
-    }
+    })
 }
 
 fn detach_service_from_business_application_inner(
@@ -660,10 +601,7 @@ fn detach_service_from_business_application_inner(
     }
 
     let now = chrono::Utc::now().to_rfc3339();
-    conn.execute_batch("BEGIN TRANSACTION;")
-        .map_err(|e| AppError::from_db_error(command, "开启事务", e))?;
-
-    let result: AppResult<()> = (|| {
+    with_transaction(conn, command, |conn| {
         conn.execute(
             "UPDATE applications
              SET business_application_id = NULL, updated_at = ?1
@@ -684,19 +622,7 @@ fn detach_service_from_business_application_inner(
         )
         .map_err(|e| AppError::from_db_error(command, "写入审计日志", e))?;
         Ok(())
-    })();
-
-    match result {
-        Ok(()) => {
-            conn.execute_batch("COMMIT;")
-                .map_err(|e| AppError::from_db_error(command, "提交事务", e))?;
-            Ok(())
-        }
-        Err(error) => {
-            let _ = conn.execute_batch("ROLLBACK;");
-            Err(error)
-        }
-    }
+    })
 }
 
 #[tauri::command]
@@ -705,13 +631,17 @@ pub fn list_business_applications(
     params: QueryParams,
 ) -> AppResult<PagedResult<BusinessApplication>> {
     let command = "list_business_applications";
-    let conn = pool
-        .get()
-        .map_err(|e| AppError::db_unavailable(command, format!("Pool error: {}", e)))?;
+    let conn = get_conn(pool.inner(), command)?;
 
     let (where_clause, sql_params) = build_business_applications_where_clause(&params);
-    let total = count_query(&conn, "business_applications", &where_clause, &sql_params)
-        .map_err(|e| AppError::from_db_error(command, "查询业务应用数量", e))?;
+    let total = count_query(
+        command,
+        "查询业务应用数量",
+        &conn,
+        "business_applications",
+        &where_clause,
+        &sql_params,
+    )?;
 
     let page = params.page();
     let page_size = params.page_size();
@@ -751,9 +681,7 @@ pub fn list_business_applications(
 #[tauri::command]
 pub fn get_business_application(pool: State<DbPool>, id: String) -> AppResult<BusinessApplication> {
     let command = "get_business_application";
-    let conn = pool
-        .get()
-        .map_err(|e| AppError::db_unavailable(command, format!("Pool error: {}", e)))?;
+    let conn = get_conn(pool.inner(), command)?;
     let sql = format!(
         "SELECT {} FROM business_applications WHERE id = ?1 AND is_deleted = 0",
         SELECT_BUSINESS_APPLICATION_COLUMNS
@@ -775,18 +703,14 @@ pub fn save_business_application(
     data: BusinessApplication,
 ) -> AppResult<String> {
     let command = "save_business_application";
-    let conn = pool
-        .get()
-        .map_err(|e| AppError::db_unavailable(command, format!("Pool error: {}", e)))?;
+    let conn = get_conn(pool.inner(), command)?;
     save_business_application_inner(command, &conn, data)
 }
 
 #[tauri::command]
 pub fn delete_business_application(pool: State<DbPool>, id: String) -> AppResult<()> {
     let command = "delete_business_application";
-    let conn = pool
-        .get()
-        .map_err(|e| AppError::db_unavailable(command, format!("Pool error: {}", e)))?;
+    let conn = get_conn(pool.inner(), command)?;
     let now = chrono::Utc::now().to_rfc3339();
     let name: Option<String> = conn
         .query_row(
@@ -796,12 +720,8 @@ pub fn delete_business_application(pool: State<DbPool>, id: String) -> AppResult
         )
         .ok();
 
-    conn.execute_batch("BEGIN TRANSACTION;")
-        .map_err(|e| AppError::from_db_error(command, "开启事务", e))?;
-
-    let result: AppResult<()> = (|| {
-        delete_by_id(&conn, "business_applications", &id)
-            .map_err(|e| AppError::from_db_error(command, "删除业务应用", e))?;
+    with_transaction(&conn, command, |conn| {
+        delete_by_id(command, "删除业务应用", &conn, "business_applications", &id)?;
         conn.execute(
             "UPDATE applications
              SET business_application_id = NULL, updated_at = ?1
@@ -809,29 +729,16 @@ pub fn delete_business_application(pool: State<DbPool>, id: String) -> AppResult
             rusqlite::params![now, id],
         )
         .map_err(|e| AppError::from_db_error(command, "解除应用归属", e))?;
-        insert_audit_log(
-            &conn,
+        write_audit_log_entry(
+            command,
+            conn,
             "delete",
             "business_application",
             &id,
             name.as_deref(),
-            None,
-        )
-        .map_err(|e| AppError::from_db_error(command, "写入审计日志", e))?;
+        )?;
         Ok(())
-    })();
-
-    match result {
-        Ok(()) => {
-            conn.execute_batch("COMMIT;")
-                .map_err(|e| AppError::from_db_error(command, "提交事务", e))?;
-            Ok(())
-        }
-        Err(error) => {
-            let _ = conn.execute_batch("ROLLBACK;");
-            Err(error)
-        }
-    }
+    })
 }
 
 #[tauri::command]
@@ -840,9 +747,7 @@ pub fn list_unassigned_application_services(
     params: QueryParams,
 ) -> AppResult<PagedResult<Application>> {
     let command = "list_unassigned_application_services";
-    let conn = pool
-        .get()
-        .map_err(|e| AppError::db_unavailable(command, format!("Pool error: {}", e)))?;
+    let conn = get_conn(pool.inner(), command)?;
 
     let (where_clause, sql_params) = build_unassigned_applications_where_clause(&params);
     let count_sql = format!("SELECT COUNT(*) FROM applications {}", where_clause);
@@ -891,9 +796,7 @@ pub fn attach_services_to_business_application(
     application_ids: Vec<String>,
 ) -> AppResult<AttachServicesResult> {
     let command = "attach_services_to_business_application";
-    let conn = pool
-        .get()
-        .map_err(|e| AppError::db_unavailable(command, format!("Pool error: {}", e)))?;
+    let conn = get_conn(pool.inner(), command)?;
     attach_services_to_business_application_inner(
         command,
         &conn,
@@ -909,9 +812,7 @@ pub fn detach_service_from_business_application(
     application_id: String,
 ) -> AppResult<()> {
     let command = "detach_service_from_business_application";
-    let conn = pool
-        .get()
-        .map_err(|e| AppError::db_unavailable(command, format!("Pool error: {}", e)))?;
+    let conn = get_conn(pool.inner(), command)?;
     detach_service_from_business_application_inner(
         command,
         &conn,
@@ -927,9 +828,7 @@ pub fn replace_services_by_business_application(
     application_ids: Vec<String>,
 ) -> AppResult<ReplaceServicesResult> {
     let command = "replace_services_by_business_application";
-    let conn = pool
-        .get()
-        .map_err(|e| AppError::db_unavailable(command, format!("Pool error: {}", e)))?;
+    let conn = get_conn(pool.inner(), command)?;
     replace_services_by_business_application_inner(
         command,
         &conn,
@@ -944,9 +843,7 @@ pub fn list_services_by_business_application(
     business_application_id: String,
 ) -> AppResult<BusinessApplicationServices> {
     let command = "list_services_by_business_application";
-    let conn = pool
-        .get()
-        .map_err(|e| AppError::db_unavailable(command, format!("Pool error: {}", e)))?;
+    let conn = get_conn(pool.inner(), command)?;
     list_services_by_business_application_inner(command, &conn, &business_application_id)
 }
 

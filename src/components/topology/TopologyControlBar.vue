@@ -67,16 +67,16 @@ const searchCountText = computed(() => {
 
 const currentEnvCount = computed(() => {
   const env = props.filter.env;
-  return props.stats?.env_counts.find((item) => item.env === env)?.count ?? 0;
+  return props.stats?.envCounts.find((item) => item.env === env)?.count ?? 0;
 });
 
 const currentEnvAppCount = computed(() => {
   const env = props.filter.env;
-  return props.stats?.env_counts.find((item) => item.env === env)?.app_count ?? 0;
+  return props.stats?.envCounts.find((item) => item.env === env)?.appCount ?? 0;
 });
 
-const externalNodeCount = computed(() => props.stats?.external_node_count ?? 0);
-const crossEnvEdgeCount = computed(() => props.stats?.cross_env_edge_count ?? 0);
+const externalNodeCount = computed(() => props.stats?.externalNodeCount ?? 0);
+const crossEnvEdgeCount = computed(() => props.stats?.crossEnvEdgeCount ?? 0);
 
 function normalizeNodeKind(kind: string): TopologyGroupKind | null {
   if (kind === "application") return "application_service";
@@ -86,7 +86,7 @@ function normalizeNodeKind(kind: string): TopologyGroupKind | null {
 
 const nodeItems = computed(() => {
   const countMap = new Map<TopologyGroupKind, number>();
-  for (const item of props.stats?.node_type_counts || []) {
+  for (const item of props.stats?.nodeTypeCounts || []) {
     const normalized = normalizeNodeKind(item.kind);
     if (!normalized) continue;
     countMap.set(normalized, (countMap.get(normalized) || 0) + item.count);
@@ -101,7 +101,7 @@ const nodeItems = computed(() => {
 
 const edgeItems = computed(() => {
   const countMap = new Map<TopologyEdgeType, number>();
-  for (const item of props.stats?.edge_type_counts || []) {
+  for (const item of props.stats?.edgeTypeCounts || []) {
     const typed = item.kind as TopologyEdgeType;
     if (!(typed in EDGE_LABELS)) continue;
     countMap.set(typed, (countMap.get(typed) || 0) + item.count);
@@ -131,11 +131,16 @@ function doSearch() {
   matchIds.value = props.nodes
     .filter((node) => {
       const name = node.name.toLowerCase();
-      const nodeType = node.node_type.toLowerCase();
+      const nodeType = node.nodeType.toLowerCase();
       const extra = node.extra || {};
       const address = ((extra.address as string) || "").toLowerCase();
       const ip = ((extra.ip as string) || "").toLowerCase();
-      return name.includes(keyword) || nodeType.includes(keyword) || address.includes(keyword) || ip.includes(keyword);
+      return (
+        name.includes(keyword) ||
+        nodeType.includes(keyword) ||
+        address.includes(keyword) ||
+        ip.includes(keyword)
+      );
     })
     .map((node) => node.id);
 
@@ -236,15 +241,8 @@ onBeforeUnmount(() => {
           placeholder="搜索节点名称/IP..."
           @input="handleSearchInput"
           @keydown.enter.prevent="handleSearchEnter"
-        >
-        <button
-          v-if="searchText"
-          type="button"
-          class="text-btn"
-          @click="clearSearch"
-        >
-          清空
-        </button>
+        />
+        <button v-if="searchText" type="button" class="text-btn" @click="clearSearch">清空</button>
         <span v-if="searchCountText" class="search-count">{{ searchCountText }}</span>
       </div>
 
@@ -270,16 +268,36 @@ onBeforeUnmount(() => {
           </button>
         </div>
 
-        <button data-testid="export-png" type="button" class="action-btn" @click="emit('export', 'png')">
+        <button
+          data-testid="export-png"
+          type="button"
+          class="action-btn"
+          @click="emit('export', 'png')"
+        >
           导出 PNG
         </button>
-        <button data-testid="export-svg" type="button" class="action-btn" @click="emit('export', 'svg')">
+        <button
+          data-testid="export-svg"
+          type="button"
+          class="action-btn"
+          @click="emit('export', 'svg')"
+        >
           导出 SVG
         </button>
-        <button data-testid="action-refresh" type="button" class="action-btn" @click="emit('refresh')">
+        <button
+          data-testid="action-refresh"
+          type="button"
+          class="action-btn"
+          @click="emit('refresh')"
+        >
           刷新
         </button>
-        <button data-testid="action-fullscreen" type="button" class="action-btn" @click="emit('fullscreen')">
+        <button
+          data-testid="action-fullscreen"
+          type="button"
+          class="action-btn"
+          @click="emit('fullscreen')"
+        >
           全屏
         </button>
       </div>
@@ -343,7 +361,7 @@ onBeforeUnmount(() => {
           type="checkbox"
           :checked="performanceOptimizationEnabled"
           @change="updatePerformanceOptimization"
-        >
+        />
         <span>性能优化</span>
       </label>
 
@@ -354,7 +372,7 @@ onBeforeUnmount(() => {
           :checked="filter.showAllEdges"
           :disabled="!performanceOptimizationEnabled"
           @change="updateShowAllEdges"
-        >
+        />
         <span>显示全部关系线</span>
       </label>
 
@@ -364,7 +382,7 @@ onBeforeUnmount(() => {
           type="checkbox"
           :checked="focusNeighborhoodEnabled"
           @change="updateFocusNeighborhood"
-        >
+        />
         <span>点击节点聚焦上下游</span>
       </label>
 

@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use tauri::State;
 
 use crate::db::DbPool;
-use crate::error::{AppError, AppResult};
+use crate::error::{log_runtime_warning, AppError, AppResult};
 use crate::validation::validate_enum;
 
 pub const FIELD_TAGS: &str = "tags";
@@ -654,14 +654,13 @@ fn list_terms_with_fallback(
         Ok(terms) => Ok(terms),
         Err(error) => {
             if is_taxonomy_schema_error(&error.to_string()) {
-                eprintln!(
-                    "[list_taxonomy_terms] taxonomy schema mismatch, fallback to empty list. resource_type={}, field_key={}, sort_by={}, recency_scope={}, app_type={:?}, error={}",
-                    resource_type,
-                    field_key,
-                    sort_by,
-                    recency_scope,
-                    app_type,
-                    error
+                log_runtime_warning(
+                    "list_taxonomy_terms",
+                    "taxonomy schema mismatch, fallback to empty list",
+                    format!(
+                        "resource_type={}, field_key={}, sort_by={}, recency_scope={}, app_type={:?}, error={}",
+                        resource_type, field_key, sort_by, recency_scope, app_type, error
+                    ),
                 );
                 return Ok(Vec::new());
             }

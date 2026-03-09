@@ -1,9 +1,15 @@
 import { describe, expect, it } from "vitest";
 import type { TopologyGraph, TopologyNode } from "@/types";
 import { computeLegendStats, filterTopologyGraph } from "@/components/topology/topologyGraph.utils";
-import { buildTopologyCyElements, toHostCompoundId } from "@/components/topology/topologyCytoscape.utils";
+import {
+  buildTopologyCyElements,
+  toHostCompoundId,
+} from "@/components/topology/topologyCytoscape.utils";
 
-function createNode(partial: Partial<TopologyNode> & Pick<TopologyNode, "id" | "name" | "node_type" | "env" | "group_kind">): TopologyNode {
+function createNode(
+  partial: Partial<TopologyNode> &
+    Pick<TopologyNode, "id" | "name" | "nodeType" | "env" | "groupKind">,
+): TopologyNode {
   return {
     importance: 1,
     ...partial,
@@ -15,29 +21,29 @@ function createGraphFixture(): TopologyGraph {
     createNode({
       id: "app-prod-1",
       name: "订单服务",
-      node_type: "application",
+      nodeType: "application",
       env: "prod",
-      group_kind: "application_service",
-      host_id: "host-prod-1",
+      groupKind: "application_service",
+      hostId: "host-prod-1",
       status: "running",
       extra: { address: "10.0.0.1", type: "frontend" },
     }),
     createNode({
       id: "mw-prod-1",
       name: "Redis",
-      node_type: "middleware",
+      nodeType: "middleware",
       env: "prod",
-      group_kind: "middleware",
-      host_id: "host-prod-1",
+      groupKind: "middleware",
+      hostId: "host-prod-1",
       extra: { category: "cache", type: "Redis", icon_key: "heroicons:window" },
     }),
     createNode({
       id: "app-test-1",
       name: "支付服务",
-      node_type: "application",
+      nodeType: "application",
       env: "test",
-      group_kind: "application_service",
-      host_id: "host-test-1",
+      groupKind: "application_service",
+      hostId: "host-test-1",
       status: "running",
     }),
   ];
@@ -47,35 +53,35 @@ function createGraphFixture(): TopologyGraph {
       id: "edge-1",
       source: "app-prod-1",
       target: "mw-prod-1",
-      edge_type: "cache_access" as const,
+      edgeType: "cache_access" as const,
       label: "cache",
       strength: 2,
-      cross_env: false,
+      crossEnv: false,
     },
     {
       id: "edge-2",
       source: "app-prod-1",
       target: "app-test-1",
-      edge_type: "http_call" as const,
+      edgeType: "http_call" as const,
       label: "api",
       strength: 1,
-      cross_env: true,
+      crossEnv: true,
     },
   ];
 
   return {
     lanes: [
-      { id: "prod", label: "生产", order: 0, node_count: 2, app_count: 1 },
-      { id: "test", label: "测试", order: 1, node_count: 1, app_count: 1 },
-      { id: "dev", label: "开发", order: 2, node_count: 0, app_count: 0 },
+      { id: "prod", label: "生产", order: 0, nodeCount: 2, appCount: 1 },
+      { id: "test", label: "测试", order: 1, nodeCount: 1, appCount: 1 },
+      { id: "dev", label: "开发", order: 2, nodeCount: 0, appCount: 0 },
     ],
     nodes,
     edges,
-    legend_stats: computeLegendStats(nodes, edges, "prod"),
-    layout_hints: {
-      lane_order: ["prod", "test", "dev"],
-      default_collapsed_groups: [],
-      high_density_mode: false,
+    legendStats: computeLegendStats(nodes, edges, "prod"),
+    layoutHints: {
+      laneOrder: ["prod", "test", "dev"],
+      defaultCollapsedGroups: [],
+      highDensityMode: false,
     },
   };
 }
@@ -132,7 +138,9 @@ describe("topologyCytoscape utils", () => {
     const overviewEdge = overview.find((item) => item.data?.id === "edge-1");
     const detailEdge = detail.find((item) => item.data?.id === "edge-1");
 
-    expect(Number(detailEdge?.data?.line_width)).toBeGreaterThan(Number(overviewEdge?.data?.line_width));
+    expect(Number(detailEdge?.data?.line_width)).toBeGreaterThan(
+      Number(overviewEdge?.data?.line_width),
+    );
     expect(overviewEdge?.data?.arrow).toBe("none");
     expect(detailEdge?.data?.arrow).toBe("triangle");
   });
@@ -157,7 +165,7 @@ describe("topologyCytoscape utils", () => {
     expect(String(middlewareNode?.data?.icon_src || "")).toContain("data:image/svg+xml");
     expect(String(middlewareNode?.data?.icon_key || "")).toContain("redis");
     expect(String(middlewareNode?.data?.icon_key || "")).not.toBe("heroicons:window");
-    expect(edge?.data?.source_node_type).toBe("application");
+    expect(edge?.data?.source_nodeType).toBe("application");
     expect(edge?.data?.source_app_type_key).toBe("frontend");
   });
 });

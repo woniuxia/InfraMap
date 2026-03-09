@@ -9,7 +9,10 @@ import {
   isOpaqueIdentifier,
 } from "@/components/topology/topologyGraph.utils";
 
-function createNode(partial: Partial<TopologyNode> & Pick<TopologyNode, "id" | "name" | "node_type" | "env" | "group_kind">): TopologyNode {
+function createNode(
+  partial: Partial<TopologyNode> &
+    Pick<TopologyNode, "id" | "name" | "nodeType" | "env" | "groupKind">,
+): TopologyNode {
   return {
     importance: 1,
     ...partial,
@@ -21,38 +24,38 @@ function createGraphFixture(): TopologyGraph {
     createNode({
       id: "app-prod-1",
       name: "订单服务",
-      node_type: "application",
+      nodeType: "application",
       env: "prod",
-      group_kind: "application_service",
-      host_id: "host-prod-1",
+      groupKind: "application_service",
+      hostId: "host-prod-1",
       status: "running",
       extra: { address: "10.0.0.1" },
     }),
     createNode({
       id: "mw-prod-1",
       name: "Redis",
-      node_type: "middleware",
+      nodeType: "middleware",
       env: "prod",
-      group_kind: "middleware",
-      host_id: "host-prod-1",
+      groupKind: "middleware",
+      hostId: "host-prod-1",
       extra: { category: "cache" },
     }),
     createNode({
       id: "app-test-1",
       name: "支付服务",
-      node_type: "application",
+      nodeType: "application",
       env: "test",
-      group_kind: "application_service",
-      host_id: "host-test-1",
+      groupKind: "application_service",
+      hostId: "host-test-1",
       status: "running",
       extra: { address: "10.0.1.1" },
     }),
     createNode({
       id: "ng-dev-1",
       name: "Nginx-Dev",
-      node_type: "nginx",
+      nodeType: "nginx",
       env: "dev",
-      group_kind: "nginx",
+      groupKind: "nginx",
       status: "running",
       extra: { endpoint_count: 2, first_endpoint: "10.0.2.8:8080", address: "10.0.2.8:8080" },
     }),
@@ -63,53 +66,53 @@ function createGraphFixture(): TopologyGraph {
       id: "edge-1",
       source: "app-prod-1",
       target: "mw-prod-1",
-      edge_type: "cache_access" as const,
+      edgeType: "cache_access" as const,
       label: "cache",
       strength: 2,
-      cross_env: false,
+      crossEnv: false,
     },
     {
       id: "edge-2",
       source: "app-prod-1",
       target: "app-test-1",
-      edge_type: "http_call" as const,
+      edgeType: "http_call" as const,
       label: "api",
       strength: 1,
-      cross_env: true,
+      crossEnv: true,
     },
     {
       id: "edge-3",
       source: "ng-dev-1",
       target: "app-prod-1",
-      edge_type: "tcp" as const,
+      edgeType: "tcp" as const,
       label: "ingress",
       strength: 1,
-      cross_env: true,
+      crossEnv: true,
     },
     {
       id: "edge-4",
       source: "app-test-1",
       target: "ng-dev-1",
-      edge_type: "grpc_call" as const,
+      edgeType: "grpc_call" as const,
       label: "skip",
       strength: 1,
-      cross_env: true,
+      crossEnv: true,
     },
   ];
 
   return {
     lanes: [
-      { id: "prod", label: "生产", order: 0, node_count: 2, app_count: 1 },
-      { id: "test", label: "测试", order: 1, node_count: 1, app_count: 1 },
-      { id: "dev", label: "开发", order: 2, node_count: 1, app_count: 0 },
+      { id: "prod", label: "生产", order: 0, nodeCount: 2, appCount: 1 },
+      { id: "test", label: "测试", order: 1, nodeCount: 1, appCount: 1 },
+      { id: "dev", label: "开发", order: 2, nodeCount: 1, appCount: 0 },
     ],
     nodes,
     edges,
-    legend_stats: computeLegendStats(nodes, edges, "prod"),
-    layout_hints: {
-      lane_order: ["prod", "test", "dev"],
-      default_collapsed_groups: ["middleware", "nginx"],
-      high_density_mode: false,
+    legendStats: computeLegendStats(nodes, edges, "prod"),
+    layoutHints: {
+      laneOrder: ["prod", "test", "dev"],
+      defaultCollapsedGroups: ["middleware", "nginx"],
+      highDensityMode: false,
     },
   };
 }
@@ -145,9 +148,9 @@ describe("topologyGraph utils", () => {
     expect(edge2?.target).toBe("external:app-test-1");
     expect(edge3?.source).toBe("external:ng-dev-1");
 
-    expect(filtered!.legend_stats.current_env).toBe("prod");
-    expect(filtered!.legend_stats.external_node_count).toBe(2);
-    expect(filtered!.legend_stats.cross_env_edge_count).toBe(2);
+    expect(filtered!.legendStats.currentEnv).toBe("prod");
+    expect(filtered!.legendStats.externalNodeCount).toBe(2);
+    expect(filtered!.legendStats.crossEnvEdgeCount).toBe(2);
   });
 
   it("should apply node and edge filters on transformed single-env graph", () => {
@@ -170,42 +173,50 @@ describe("topologyGraph utils", () => {
     const mainNode = createNode({
       id: "app-prod-main",
       name: "main",
-      node_type: "application",
+      nodeType: "application",
       env: "prod",
-      group_kind: "application_service",
+      groupKind: "application_service",
     });
 
-    const extraNodes = Array.from({ length: 320 }, (_, index) => createNode({
-      id: `app-test-${index}`,
-      name: `test-${index}`,
-      node_type: "application",
-      env: "test",
-      group_kind: "application_service",
-    }));
+    const extraNodes = Array.from({ length: 320 }, (_, index) =>
+      createNode({
+        id: `app-test-${index}`,
+        name: `test-${index}`,
+        nodeType: "application",
+        env: "test",
+        groupKind: "application_service",
+      }),
+    );
 
     const edges = extraNodes.map((node, index) => ({
       id: `edge-${index}`,
       source: "app-prod-main",
       target: node.id,
-      edge_type: "http_call" as const,
+      edgeType: "http_call" as const,
       label: "burst",
       strength: index % 4,
-      cross_env: true,
+      crossEnv: true,
     }));
 
     const graph: TopologyGraph = {
       lanes: [
-        { id: "prod", label: "生产", order: 0, node_count: 1, app_count: 1 },
-        { id: "test", label: "测试", order: 1, node_count: extraNodes.length, app_count: extraNodes.length },
-        { id: "dev", label: "开发", order: 2, node_count: 0, app_count: 0 },
+        { id: "prod", label: "生产", order: 0, nodeCount: 1, appCount: 1 },
+        {
+          id: "test",
+          label: "测试",
+          order: 1,
+          nodeCount: extraNodes.length,
+          appCount: extraNodes.length,
+        },
+        { id: "dev", label: "开发", order: 2, nodeCount: 0, appCount: 0 },
       ],
       nodes: [mainNode, ...extraNodes],
       edges,
-      legend_stats: computeLegendStats([mainNode, ...extraNodes], edges, "prod"),
-      layout_hints: {
-        lane_order: ["prod", "test", "dev"],
-        default_collapsed_groups: [],
-        high_density_mode: true,
+      legendStats: computeLegendStats([mainNode, ...extraNodes], edges, "prod"),
+      layoutHints: {
+        laneOrder: ["prod", "test", "dev"],
+        defaultCollapsedGroups: [],
+        highDensityMode: true,
       },
     };
 
@@ -244,12 +255,12 @@ describe("topologyGraph utils", () => {
       createNode({
         id: "app-1",
         name: "app",
-        node_type: "application",
+        nodeType: "application",
         env: "prod",
-        group_kind: "application_service",
-        host_id: "host-opaque-id",
-        host_name: "payment-host",
-        host_ip_display: "10.6.1.8",
+        groupKind: "application_service",
+        hostId: "host-opaque-id",
+        hostName: "payment-host",
+        hostIpDisplay: "10.6.1.8",
       }),
     ]);
     expect(label).toBe("payment-host · 10.6.1…");

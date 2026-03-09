@@ -1,0 +1,7 @@
+node_modules
+dist
+coverage
+.worktrees
+src-tauri/target
+src/auto-imports.d.ts
+src/components.d.ts

@@ -6,7 +6,7 @@ interface DensityWorkerRequest {
   requestId: number;
   density: ZoomDensity;
   nodes: { id: string; importance: number }[];
-  edges: { id: string; source: string; target: string; strength: number; cross_env: boolean }[];
+  edges: { id: string; source: string; target: string; strength: number; crossEnv: boolean }[];
 }
 
 interface DensityWorkerResponse {
@@ -25,4 +25,3 @@ workerGlobal.onmessage = (event: MessageEvent<DensityWorkerRequest>) => {
   };
   workerGlobal.postMessage(response);
 };
-

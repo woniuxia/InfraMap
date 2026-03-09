@@ -400,8 +400,14 @@ pub fn list_call_relations(
     ];
     let (where_clause, sql_params) = build_where_clause(&params, search_columns, filter_columns);
 
-    let total = count_query(&conn, "call_relations", &where_clause, &sql_params)
-        .map_err(|e| AppError::from_db_error(command, "查询调用关系数量", e))?;
+    let total = count_query(
+        command,
+        "查询调用关系数量",
+        &conn,
+        "call_relations",
+        &where_clause,
+        &sql_params,
+    )?;
 
     let page = params.page();
     let page_size = params.page_size();

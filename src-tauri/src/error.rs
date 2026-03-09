@@ -1,4 +1,15 @@
 use serde::Serialize;
+use std::fmt::{Display, Formatter};
+use std::io::{self, Write};
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RuntimeLogEntry<'a> {
+    level: &'a str,
+    scope: &'a str,
+    message: &'a str,
+    details: Option<String>,
+}
 
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
@@ -192,6 +203,47 @@ impl AppError {
         Self::internal(command, message)
     }
 }
+
+fn emit_runtime_log(level: &str, scope: &str, message: &str, details: Option<String>) {
+    let entry = RuntimeLogEntry {
+        level,
+        scope,
+        message,
+        details,
+    };
+
+    let serialized = serde_json::to_string(&entry).unwrap_or_else(|error| {
+        format!(
+            "{{\"level\":\"{}\",\"scope\":\"{}\",\"message\":\"{}\",\"details\":\"serialize runtime log failed: {}\"}}",
+            level, scope, message, error
+        )
+    });
+
+    let mut stderr = io::stderr().lock();
+    let _ = writeln!(stderr, "{}", serialized);
+}
+
+pub fn log_runtime_warning(scope: &str, message: &str, details: impl ToString) {
+    emit_runtime_log("warn", scope, message, Some(details.to_string()));
+}
+
+pub fn log_runtime_error(scope: &str, message: &str, details: impl ToString) {
+    emit_runtime_log("error", scope, message, Some(details.to_string()));
+}
+
+impl Display for AppError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} [{}]", self.message, self.command)?;
+
+        if let Some(details) = &self.details {
+            write!(f, ": {}", details)?;
+        }
+
+        Ok(())
+    }
+}
+
+impl std::error::Error for AppError {}
 
 #[cfg(test)]
 mod tests {

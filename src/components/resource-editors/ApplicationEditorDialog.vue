@@ -1,28 +1,27 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { ElMessage } from "element-plus";
-import type { Application, BusinessApplication } from "@/types";
+import type { Application, BusinessApplication, EditorMode } from "@/types";
 import type { TaxonomyAppType } from "@/api/taxonomy";
 import { saveApplication } from "@/api/applications";
 import { listBusinessApplications } from "@/api/business-applications";
 import { listApplicationOwnerTerms, listApplicationTechStackTerms } from "@/api/taxonomy";
 import { replaceResourceCallRelations } from "@/api/call-relations";
 import { saveDeployment } from "@/api/deployments";
+import { DEPLOY_MODE_OPTIONS, ENV_OPTIONS, STATUS_OPTIONS } from "@/constants/options";
 import { buildTechStackSuggestions, parseTechStack, techStackToText } from "@/utils/techStack";
 import CallRelationsEditor from "@/components/CallRelationsEditor.vue";
 import DeploymentPanel from "@/components/DeploymentPanel.vue";
 
-type ApplicationEditorMode = "create" | "edit" | "copy";
-
 const props = defineProps<{
   modelValue: boolean;
-  mode: ApplicationEditorMode;
+  mode: EditorMode;
   initialDraft: Partial<Application>;
 }>();
 
 const emit = defineEmits<{
   (e: "update:modelValue", value: boolean): void;
-  (e: "saved", payload: { id: string; mode: ApplicationEditorMode }): void;
+  (e: "saved", payload: { id: string; mode: EditorMode }): void;
 }>();
 
 interface DraftDeploymentItem {
@@ -57,16 +56,19 @@ const ownerOptions = ref<string[]>([]);
 const businessApplicationOptions = ref<BusinessApplication[]>([]);
 const callRelationsEditorRef = ref<InstanceType<typeof CallRelationsEditor> | null>(null);
 const deploymentPanelRef = ref<DeploymentPanelExposed | null>(null);
+const deployModeOptions = DEPLOY_MODE_OPTIONS;
 
 const techStackSuggestions = computed(() =>
   buildTechStackSuggestions(
     topTechStackOptions.value.map((item) => ({ tech_stack: item })),
-    techStackList.value
-  )
+    techStackList.value,
+  ),
 );
-const ownerSuggestions = computed(() => normalizeOwners([...ownerOptions.value, ...ownerList.value]));
+const ownerSuggestions = computed(() =>
+  normalizeOwners([...ownerOptions.value, ...ownerList.value]),
+);
 const selectedBusinessApplicationId = computed(() =>
-  normalizeBusinessApplicationId(editingApp.value.business_application_id)
+  normalizeBusinessApplicationId(editingApp.value.business_application_id),
 );
 const allBusinessApplicationOptions = computed<BusinessApplication[]>(() => {
   const activeOptions = businessApplicationOptions.value.filter((item) => item.status === "active");
@@ -83,10 +85,7 @@ const allBusinessApplicationOptions = computed<BusinessApplication[]>(() => {
     created_at: "",
     updated_at: "",
   };
-  return [
-    ...activeOptions,
-    fallbackInactiveOption,
-  ];
+  return [...activeOptions, fallbackInactiveOption];
 });
 const businessApplicationSelectOptions = computed(() => {
   const selectedId = selectedBusinessApplicationId.value;
@@ -94,7 +93,9 @@ const businessApplicationSelectOptions = computed(() => {
   if (!appEnv) {
     return allBusinessApplicationOptions.value;
   }
-  return allBusinessApplicationOptions.value.filter((item) => item.id === selectedId || item.env === appEnv);
+  return allBusinessApplicationOptions.value.filter(
+    (item) => item.id === selectedId || item.env === appEnv,
+  );
 });
 const selectedBusinessApplicationEnvMismatch = computed(() => {
   const selectedId = selectedBusinessApplicationId.value;
@@ -123,9 +124,7 @@ function cloneDraft(draft: Partial<Application>): Partial<Application> {
 }
 
 function normalizeOwners(owners?: string[]) {
-  const values = [...(owners ?? [])]
-    .map((item) => item.trim())
-    .filter((item) => item.length > 0);
+  const values = [...(owners ?? [])].map((item) => item.trim()).filter((item) => item.length > 0);
   return Array.from(new Set(values));
 }
 
@@ -196,7 +195,8 @@ function handleBusinessApplicationChange(value: string | number | undefined | nu
     return;
   }
   const selected = allBusinessApplicationOptions.value.find((item) => item.id === nextId);
-  editingApp.value.business_application_name = selected?.name?.trim() || editingApp.value.business_application_name;
+  editingApp.value.business_application_name =
+    selected?.name?.trim() || editingApp.value.business_application_name;
 }
 
 async function fetchBusinessApplicationOptions() {
@@ -240,8 +240,12 @@ async function handleSave() {
 
   const wasEditing = isEditing.value;
   const owners = normalizeOwners(ownerList.value);
-  const businessApplicationId = normalizeBusinessApplicationId(editingApp.value.business_application_id);
-  const draftDeployments = !wasEditing ? deploymentPanelRef.value?.getDraftDeployments?.() ?? [] : [];
+  const businessApplicationId = normalizeBusinessApplicationId(
+    editingApp.value.business_application_id,
+  );
+  const draftDeployments = !wasEditing
+    ? (deploymentPanelRef.value?.getDraftDeployments?.() ?? [])
+    : [];
   const payload: Partial<Application> = {
     id: "",
     created_at: "",
@@ -274,8 +278,8 @@ async function handleSave() {
               resource_type: "application",
               host_id: item.host_id,
               port: item.port,
-            })
-          )
+            }),
+          ),
         );
       } catch {
         ElMessage.warning("应用已保存，部署关系保存失败，请在部署关系中重试。");
@@ -298,7 +302,7 @@ watch(
       hydrateFromDraft();
     }
   },
-  { immediate: true }
+  { immediate: true },
 );
 
 watch(
@@ -308,25 +312,23 @@ watch(
       hydrateFromDraft();
     }
   },
-  { deep: true }
+  { deep: true },
 );
 </script>
 
 <template>
-  <el-dialog
-    v-model="visible"
-    :title="dialogTitle"
-    width="700px"
-    align-center
-    destroy-on-close
-  >
+  <el-dialog v-model="visible" :title="dialogTitle" width="700px" align-center destroy-on-close>
     <el-form :model="editingApp" label-width="96px">
       <el-divider content-position="left">基础信息</el-divider>
       <el-form-item label="服务名称" required>
         <el-input v-model="editingApp.name" placeholder="请输入服务名称" />
       </el-form-item>
       <el-form-item label="类型" required>
-        <el-select v-model="editingApp.type" class="w-full" @change="(v) => handleTypeChange(v as Application['type'])">
+        <el-select
+          v-model="editingApp.type"
+          class="w-full"
+          @change="(v) => handleTypeChange(v as Application['type'])"
+        >
           <el-option label="前端" value="frontend" />
           <el-option label="后端" value="backend" />
           <el-option label="网关" value="gateway" />
@@ -336,7 +338,10 @@ watch(
         </el-select>
       </el-form-item>
       <el-form-item label="访问地址">
-        <el-input v-model="editingApp.address" placeholder="如 api.example.com、https://app.example.com 或 192.168.1.100" />
+        <el-input
+          v-model="editingApp.address"
+          placeholder="如 api.example.com、https://app.example.com 或 192.168.1.100"
+        />
       </el-form-item>
       <el-form-item label="端口">
         <el-input-number v-model="editingApp.port" :min="1" :max="65535" class="w-full" />
@@ -359,20 +364,28 @@ watch(
         </el-select>
       </el-form-item>
       <el-form-item label="部署方式">
-        <el-select v-model="editingApp.deploy_mode" clearable placeholder="请选择部署方式" class="w-full">
-          <el-option label="物理机" value="physical" />
-          <el-option label="虚拟机" value="vm" />
-          <el-option label="Docker" value="docker" />
-          <el-option label="Kubernetes" value="k8s" />
-          <el-option label="Serverless" value="serverless" />
-          <el-option label="其他" value="other" />
+        <el-select
+          v-model="editingApp.deploy_mode"
+          clearable
+          placeholder="请选择部署方式"
+          class="w-full"
+        >
+          <el-option
+            v-for="item in deployModeOptions"
+            :key="item.value"
+            :label="item.label"
+            :value="item.value"
+          />
         </el-select>
       </el-form-item>
       <el-form-item label="环境" required>
         <el-select v-model="editingApp.env" class="w-full">
-          <el-option label="生产" value="prod" />
-          <el-option label="开发" value="dev" />
-          <el-option label="测试" value="test" />
+          <el-option
+            v-for="item in ENV_OPTIONS"
+            :key="item.value"
+            :label="item.label"
+            :value="item.value"
+          />
         </el-select>
       </el-form-item>
       <el-form-item label="Git仓库">
@@ -419,13 +432,22 @@ watch(
       <el-divider content-position="left">运维信息</el-divider>
       <el-form-item label="状态" required>
         <el-select v-model="editingApp.status" class="w-full">
-          <el-option label="运行中" value="running" />
-          <el-option label="已停止" value="stopped" />
-          <el-option label="维护中" value="maintenance" />
+          <el-option
+            v-for="item in STATUS_OPTIONS"
+            :key="item.value"
+            :label="item.label"
+            :value="item.value"
+          />
         </el-select>
       </el-form-item>
       <el-form-item label="描述">
-        <el-input v-model="editingApp.description" type="textarea" :rows="3" maxlength="300" show-word-limit />
+        <el-input
+          v-model="editingApp.description"
+          type="textarea"
+          :rows="3"
+          maxlength="300"
+          show-word-limit
+        />
       </el-form-item>
     </el-form>
 

@@ -17,6 +17,12 @@ import {
   saveResourceTerms,
 } from "@/api/taxonomy";
 import { useResourceList } from "@/composables/useResourceList";
+import {
+  BUSINESS_APPLICATION_STATUS_OPTIONS,
+  ENV_OPTIONS,
+  getBusinessApplicationStatusLabel,
+  getEnvLabel,
+} from "@/constants/options";
 import SearchToolbar from "@/components/filters/SearchToolbar.vue";
 
 const {
@@ -36,14 +42,20 @@ const {
 });
 
 const searchText = ref("");
-const listFilters = ref<{ status: string[]; env: string[]; owner: string[] }>({ status: [], env: [], owner: [] });
+const listFilters = ref<{ status: string[]; env: string[]; owner: string[] }>({
+  status: [],
+  env: [],
+  owner: [],
+});
 interface ServiceCellItem {
   id: string;
   name: string;
   addressText: string;
 }
 
-const serviceSummaryMap = ref<Record<string, { frontend: ServiceCellItem[]; backend: ServiceCellItem[] }>>({});
+const serviceSummaryMap = ref<
+  Record<string, { frontend: ServiceCellItem[]; backend: ServiceCellItem[] }>
+>({});
 let serviceSummaryToken = 0;
 
 const drawerVisible = ref(false);
@@ -57,16 +69,9 @@ const selectedServiceIds = ref<string[]>([]);
 const ownerList = ref<string[]>([]);
 const ownerOptions = ref<string[]>([]);
 
-const envOptions = [
-  { label: "生产", value: "prod" },
-  { label: "开发", value: "dev" },
-  { label: "测试", value: "test" },
-];
-const statusOptions = [
-  { label: "激活", value: "active" },
-  { label: "停用", value: "inactive" },
-];
-const ownerFilterOptions = computed(() => ownerOptions.value.map((item) => ({ label: item, value: item })));
+const ownerFilterOptions = computed(() =>
+  ownerOptions.value.map((item) => ({ label: item, value: item })),
+);
 const toolbarFields = computed<SearchFieldConfig[]>(() => [
   {
     key: "status",
@@ -74,7 +79,7 @@ const toolbarFields = computed<SearchFieldConfig[]>(() => [
     label: "状态",
     type: "multi-select",
     width: "md",
-    options: statusOptions,
+    options: [...BUSINESS_APPLICATION_STATUS_OPTIONS],
   },
   {
     key: "env",
@@ -82,7 +87,7 @@ const toolbarFields = computed<SearchFieldConfig[]>(() => [
     label: "环境",
     type: "multi-select",
     width: "sm",
-    options: envOptions,
+    options: [...ENV_OPTIONS],
   },
   {
     key: "owner",
@@ -99,49 +104,41 @@ const editableServiceOptions = computed(() => {
   if (!editingBusiness.value.env) return serviceOptions.value;
   const businessEnv = editingBusiness.value.env;
   return serviceOptions.value.filter(
-    (item) => item.env === businessEnv || selectedServiceIdSet.value.has(item.id)
+    (item) => item.env === businessEnv || selectedServiceIdSet.value.has(item.id),
   );
 });
-const frontendServiceOptions = computed(() => editableServiceOptions.value.filter((item) => item.type === "frontend"));
-const backendServiceOptions = computed(() => editableServiceOptions.value.filter((item) => item.type !== "frontend"));
+const frontendServiceOptions = computed(() =>
+  editableServiceOptions.value.filter((item) => item.type === "frontend"),
+);
+const backendServiceOptions = computed(() =>
+  editableServiceOptions.value.filter((item) => item.type !== "frontend"),
+);
 const selectedServiceSummary = computed(() => `已选择 ${selectedServiceIds.value.length} 个服务`);
-const ownerSuggestions = computed(() => normalizeOwners([...ownerOptions.value, ...ownerList.value]));
+const ownerSuggestions = computed(() =>
+  normalizeOwners([...ownerOptions.value, ...ownerList.value]),
+);
 
 function handleToolbarQuery(payload: SearchToolbarQueryPayload) {
   handleQuery(payload);
 }
 
-function envLabel(env?: string) {
-  if (!env) return "-";
-  return ({ prod: "生产", dev: "开发", test: "测试" } as Record<string, string>)[env] || env;
-}
-
-function statusLabel(status?: string) {
-  if (!status) return "-";
-  return ({ active: "激活", inactive: "停用" } as Record<string, string>)[status] || status;
-}
-
 function serviceTypeLabel(type: string) {
   return (
-    ({
-      frontend: "前端",
-      backend: "后端",
-      gateway: "网关",
-      batch_job: "批处理",
-      microservice: "微服务",
-      other: "其他",
-    } as Record<string, string>)[type] || type
+    (
+      {
+        frontend: "前端",
+        backend: "后端",
+        gateway: "网关",
+        batch_job: "批处理",
+        microservice: "微服务",
+        other: "其他",
+      } as Record<string, string>
+    )[type] || type
   );
 }
 
 function normalizeOwners(values: string[]) {
-  return Array.from(
-    new Set(
-      values
-        .map((item) => item.trim())
-        .filter((item) => item.length > 0)
-    )
-  );
+  return Array.from(new Set(values.map((item) => item.trim()).filter((item) => item.length > 0)));
 }
 
 function handleOwnerChange(values: string[]) {
@@ -187,7 +184,7 @@ async function loadServiceSummaries(rows: BusinessApplication[]) {
       } catch {
         return [row.id, { frontend: [], backend: [] }] as const;
       }
-    })
+    }),
   );
 
   if (currentToken !== serviceSummaryToken) return;
@@ -363,7 +360,7 @@ async function handleSave() {
     selectedServiceIds.value = normalizedIds;
     const replaceResult = await replaceServicesByBusinessApplication(id, normalizedIds);
     ElMessage.success(
-      `${editingBeforeSave ? "更新成功" : "创建成功"}，新增挂载 ${replaceResult.attached_count} 个，解绑 ${replaceResult.detached_count} 个`
+      `${editingBeforeSave ? "更新成功" : "创建成功"}，新增挂载 ${replaceResult.attached_count} 个，解绑 ${replaceResult.detached_count} 个`,
     );
     drawerVisible.value = false;
     await fetchData();
@@ -385,7 +382,7 @@ watch(
   (rows) => {
     loadServiceSummaries(rows);
   },
-  { immediate: true }
+  { immediate: true },
 );
 
 onMounted(async () => {
@@ -409,18 +406,17 @@ onMounted(async () => {
         </template>
       </SearchToolbar>
 
-      <el-table
-        :data="data"
-        v-loading="loading"
-        border
-        stripe
-        row-key="id"
-      >
+      <el-table :data="data" v-loading="loading" border stripe row-key="id">
         <el-table-column prop="name" label="业务应用" min-width="140" />
         <el-table-column label="负责人" min-width="160" align="center">
           <template #default="{ row }">
             <div v-if="ownersForRow(row).length > 0" class="owner-tags">
-              <el-tag v-for="owner in ownersForRow(row)" :key="`${row.id}-${owner}`" size="small" effect="plain">
+              <el-tag
+                v-for="owner in ownersForRow(row)"
+                :key="`${row.id}-${owner}`"
+                size="small"
+                effect="plain"
+              >
                 {{ owner }}
               </el-tag>
             </div>
@@ -428,10 +424,12 @@ onMounted(async () => {
           </template>
         </el-table-column>
         <el-table-column label="环境" width="80" align="center">
-          <template #default="{ row }">{{ envLabel(row.env) }}</template>
+          <template #default="{ row }">{{ getEnvLabel(row.env) }}</template>
         </el-table-column>
         <el-table-column label="状态" width="80" align="center">
-          <template #default="{ row }">{{ statusLabel(row.status) }}</template>
+          <template #default="{ row }">
+            {{ getBusinessApplicationStatusLabel(row.status) }}
+          </template>
         </el-table-column>
         <el-table-column label="前端服务" min-width="260">
           <template #default="{ row }">
@@ -458,7 +456,9 @@ onMounted(async () => {
         <el-table-column label="操作" width="150" align="center" fixed="right">
           <template #default="{ row }">
             <el-button text type="primary" size="small" @click.stop="openEdit(row)">编辑</el-button>
-            <el-button text type="danger" size="small" @click.stop="handleDeleteBusiness(row)">删除</el-button>
+            <el-button text type="danger" size="small" @click.stop="handleDeleteBusiness(row)">
+              删除
+            </el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -476,7 +476,11 @@ onMounted(async () => {
       </div>
     </div>
 
-    <el-dialog v-model="drawerVisible" :title="isEditing ? '编辑业务应用' : '新增业务应用'" width="520px">
+    <el-dialog
+      v-model="drawerVisible"
+      :title="isEditing ? '编辑业务应用' : '新增业务应用'"
+      width="520px"
+    >
       <el-form :model="editingBusiness" label-width="96px">
         <el-form-item label="应用名称" required>
           <el-input v-model="editingBusiness.name" placeholder="请输入业务应用名称" />
@@ -507,17 +511,32 @@ onMounted(async () => {
             placeholder="可选"
             @change="handleBusinessEnvChange"
           >
-            <el-option v-for="item in envOptions" :key="item.value" :label="item.label" :value="item.value" />
+            <el-option
+              v-for="item in ENV_OPTIONS"
+              :key="item.value"
+              :label="item.label"
+              :value="item.value"
+            />
           </el-select>
         </el-form-item>
         <el-form-item label="状态" required>
           <el-select v-model="editingBusiness.status" class="w-full">
-            <el-option label="激活" value="active" />
-            <el-option label="停用" value="inactive" />
+            <el-option
+              v-for="item in BUSINESS_APPLICATION_STATUS_OPTIONS"
+              :key="item.value"
+              :label="item.label"
+              :value="item.value"
+            />
           </el-select>
         </el-form-item>
         <el-form-item label="描述">
-          <el-input v-model="editingBusiness.description" type="textarea" :rows="3" maxlength="300" show-word-limit />
+          <el-input
+            v-model="editingBusiness.description"
+            type="textarea"
+            :rows="3"
+            maxlength="300"
+            show-word-limit
+          />
         </el-form-item>
         <el-divider content-position="left">挂载服务</el-divider>
         <el-form-item label="应用服务">
@@ -541,7 +560,8 @@ onMounted(async () => {
                 <div class="service-option">
                   <span class="service-option__name">{{ item.name }}</span>
                   <span class="service-option__meta">
-                    {{ serviceTypeLabel(item.type) }} | {{ envLabel(item.env) }} | {{ serviceAddressLabel(item) }}
+                    {{ serviceTypeLabel(item.type) }} | {{ getEnvLabel(item.env) }} |
+                    {{ serviceAddressLabel(item) }}
                   </span>
                   <span v-if="isServiceOptionLocked(item)" class="service-option__lock">
                     已归属 {{ item.business_application_name || item.business_application_id }}
@@ -560,7 +580,8 @@ onMounted(async () => {
                 <div class="service-option">
                   <span class="service-option__name">{{ item.name }}</span>
                   <span class="service-option__meta">
-                    {{ serviceTypeLabel(item.type) }} | {{ envLabel(item.env) }} | {{ serviceAddressLabel(item) }}
+                    {{ serviceTypeLabel(item.type) }} | {{ getEnvLabel(item.env) }} |
+                    {{ serviceAddressLabel(item) }}
                   </span>
                   <span v-if="isServiceOptionLocked(item)" class="service-option__lock">
                     已归属 {{ item.business_application_name || item.business_application_id }}
@@ -659,4 +680,3 @@ onMounted(async () => {
   gap: 4px;
 }
 </style>
-

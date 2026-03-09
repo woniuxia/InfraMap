@@ -4,7 +4,7 @@ import { ElMessage } from "element-plus";
 import TopologyCanvas from "@/components/topology/TopologyCanvas.vue";
 import TopologyControlBar from "@/components/topology/TopologyControlBar.vue";
 import TopologyDetailPanel from "@/components/topology/TopologyDetailPanel.vue";
-import { getTopologyEvidenceV3, getTopologyImpactV3, getTopologyPathsV3 } from "@/api/topologyV3";
+import { getTopologyEvidence, getTopologyImpact, getTopologyPaths } from "@/api/topology";
 import { getApplication } from "@/api/applications";
 import { getMiddleware } from "@/api/middlewares";
 import { getNginxConfig } from "@/api/nginx-configs";
@@ -14,14 +14,14 @@ import MiddlewareEditorDialog from "@/components/resource-editors/MiddlewareEdit
 import NginxConfigEditorDialog from "@/components/resource-editors/NginxConfigEditorDialog.vue";
 import type {
   Application,
-  ImpactResult,
   Middleware,
   NginxConfig,
-  PathResult,
+  TopologyEvidenceItem,
+  TopologyImpactResponse,
   TopologyNode,
+  TopologyPathsResponse,
+  TopologyTaskInsight,
   TopologyTaskViewMode,
-  TopologyV3EvidenceItem,
-  TopologyV3TaskInsight,
 } from "@/types";
 import {
   DEFAULT_TOPOLOGY_FILTER,
@@ -49,12 +49,14 @@ const loading = computed(() => topologyStore.loading);
 const taskInsights = computed(() => topologyStore.taskInsights || []);
 const activeFilter = ref<TopologyFilterState>({ ...DEFAULT_TOPOLOGY_FILTER });
 const performanceOptimizationEnabled = ref(false);
-const effectiveFilter = computed<TopologyFilterState>(() => (performanceOptimizationEnabled.value
-  ? activeFilter.value
-  : {
-      ...activeFilter.value,
-      showAllEdges: true,
-    }));
+const effectiveFilter = computed<TopologyFilterState>(() =>
+  performanceOptimizationEnabled.value
+    ? activeFilter.value
+    : {
+        ...activeFilter.value,
+        showAllEdges: true,
+      },
+);
 const graphData = computed(() => filterTopologyGraph(rawGraphData.value, effectiveFilter.value));
 const canvasRef = ref<InstanceType<typeof TopologyCanvas>>();
 const selectedLayout = ref<"force" | "dagre">("force");
@@ -62,8 +64,8 @@ const warnedLayoutFallbackReasons = new Set<string>();
 
 const panelMode = ref<"detail" | "path" | "impact" | null>(null);
 const selectedNode = ref<TopologyNode | null>(null);
-const pathResult = ref<PathResult | null>(null);
-const impactResult = ref<ImpactResult | null>(null);
+const pathResult = ref<TopologyPathsResponse | null>(null);
+const impactResult = ref<TopologyImpactResponse | null>(null);
 
 const pathTraceMode = ref(false);
 const pathSource = ref<string | null>(null);
@@ -82,10 +84,13 @@ const nginxEditorDraft = ref<Partial<NginxConfig>>({});
 const isFullscreen = ref(false);
 const focusNeighborhoodEnabled = ref(true);
 const containerRef = ref<HTMLDivElement>();
-const evidenceItems = ref<TopologyV3EvidenceItem[]>([]);
+const evidenceItems = ref<TopologyEvidenceItem[]>([]);
 const evidenceTotal = ref(0);
 const evidenceLoading = ref(false);
-const evidenceCache = new Map<string, { items: TopologyV3EvidenceItem[]; total: number; loadedAt: number }>();
+const evidenceCache = new Map<
+  string,
+  { items: TopologyEvidenceItem[]; total: number; loadedAt: number }
+>();
 let evidenceRequestVersion = 0;
 
 const nodeNameMap = computed(() => {
@@ -117,11 +122,11 @@ function resetEvidenceState() {
   evidenceTotal.value = 0;
 }
 
-function resolveInsightNodeIds(insight: TopologyV3TaskInsight): string[] {
+function resolveInsightNodeIds(insight: TopologyTaskInsight): string[] {
   return Array.from(new Set((insight.nodeIds || []).filter(Boolean)));
 }
 
-function insightSeverityLabel(insight: TopologyV3TaskInsight): string {
+function insightSeverityLabel(insight: TopologyTaskInsight): string {
   if (insight.severity === "critical") return "高风险";
   if (insight.severity === "warning") return "需关注";
   return "提示";
@@ -143,7 +148,7 @@ async function loadEvidenceForNode(node: TopologyNode, forceRefresh = false) {
   evidenceLoading.value = true;
 
   try {
-    const response = await getTopologyEvidenceV3({
+    const response = await getTopologyEvidence({
       nodeId: node.id,
       taskView: topologyStore.taskView,
       maxItems: 20,
@@ -292,7 +297,7 @@ async function handleEditNode() {
   closeNodeEditors();
 
   try {
-    if (node.node_type === "application") {
+    if (node.nodeType === "application") {
       const detail = await getApplication(node.id);
       applicationEditorDraft.value = {
         ...detail,
@@ -302,18 +307,20 @@ async function handleEditNode() {
       return;
     }
 
-    if (node.node_type === "middleware") {
+    if (node.nodeType === "middleware") {
       const detail = await getMiddleware(node.id);
       middlewareEditorDraft.value = { ...detail };
       middlewareEditorVisible.value = true;
       return;
     }
 
-    if (node.node_type === "nginx") {
+    if (node.nodeType === "nginx") {
       const detail = await getNginxConfig(node.id);
       nginxEditorDraft.value = {
         ...detail,
-        endpoints: Array.isArray(detail.endpoints) ? detail.endpoints.map((item) => ({ ...item })) : detail.endpoints,
+        endpoints: Array.isArray(detail.endpoints)
+          ? detail.endpoints.map((item) => ({ ...item }))
+          : detail.endpoints,
       };
       nginxEditorVisible.value = true;
     }
@@ -366,25 +373,21 @@ function startPathTrace() {
 
 async function handleFindPaths(sourceId: string, targetId: string) {
   try {
-    const result = await getTopologyPathsV3({
+    const result = await getTopologyPaths({
       sourceId,
       targetId,
       taskView: topologyStore.taskView,
       maxDepth: topologyStore.maxDepth,
     });
 
-    const paths = result.paths
-      .map((path) => path.nodeIds)
-      .filter((path) => path.length > 0);
-
     pathResult.value = {
-      paths,
-      truncated: result.truncated,
+      ...result,
+      paths: result.paths.filter((path) => path.nodeIds.length > 0),
     };
 
     panelMode.value = "path";
     if (pathResult.value.paths.length > 0) {
-      canvasRef.value?.highlightPaths(pathResult.value.paths);
+      canvasRef.value?.highlightPaths(pathResult.value.paths.map((path) => path.nodeIds));
     } else {
       ElMessage.warning("未找到连接路径");
     }
@@ -403,24 +406,13 @@ async function handleAnalyzeImpact() {
   }
 
   try {
-    const result = await getTopologyImpactV3({
+    const result = await getTopologyImpact({
       nodeId: node.id,
       taskView: topologyStore.taskView,
       maxDepth: topologyStore.maxDepth,
     });
 
-    const affectedNodes = result.affectedNodes.map((item) => ({
-      id: item.id,
-      name: item.name,
-      node_type: item.nodeType || "application",
-      depth: item.depth,
-    }));
-
-    impactResult.value = {
-      affected_nodes: affectedNodes,
-      total_count: result.totalCount,
-      max_depth: result.maxDepth,
-    };
+    impactResult.value = result;
 
     selectedNode.value = node;
     panelMode.value = "impact";
@@ -438,7 +430,7 @@ function handleSearch(payload: { matchIds: string[]; focusId?: string }) {
   canvasRef.value?.highlightSearch(payload.matchIds, payload.focusId);
 }
 
-function handleInsightClick(insight: TopologyV3TaskInsight) {
+function handleInsightClick(insight: TopologyTaskInsight) {
   const nodeIds = resolveInsightNodeIds(insight);
   if (nodeIds.length === 0) {
     ElMessage.info("该洞察暂无可高亮节点");
@@ -469,7 +461,11 @@ function handleLayoutChange(type: "force" | "dagre") {
   selectedLayout.value = type;
 }
 
-function handleLayoutResolved(payload: { requested: "force" | "dagre"; applied: "force" | "dagre"; reason?: string }) {
+function handleLayoutResolved(payload: {
+  requested: "force" | "dagre";
+  applied: "force" | "dagre";
+  reason?: string;
+}) {
   selectedLayout.value = payload.applied;
   if (payload.requested === payload.applied) return;
 
@@ -539,7 +535,7 @@ onBeforeUnmount(() => {
   <div ref="containerRef" class="topology-view" v-loading="loading" @click="closeContextMenu">
     <TopologyControlBar
       :nodes="graphData?.nodes || []"
-      :stats="graphData?.legend_stats || null"
+      :stats="graphData?.legendStats || null"
       :filter="effectiveFilter"
       :layout="selectedLayout"
       :focus-neighborhood-enabled="focusNeighborhoodEnabled"
@@ -581,7 +577,7 @@ onBeforeUnmount(() => {
           :max="MAX_DEPTH_RANGE.max"
           :value="topologyStore.maxDepth"
           @change="handleMaxDepthChange"
-        >
+        />
         <input
           id="max-depth-number"
           data-testid="max-depth-number"
@@ -591,7 +587,7 @@ onBeforeUnmount(() => {
           :max="MAX_DEPTH_RANGE.max"
           :value="topologyStore.maxDepth"
           @change="handleMaxDepthChange"
-        >
+        />
       </div>
     </div>
 
@@ -616,12 +612,16 @@ onBeforeUnmount(() => {
 
     <!-- Path trace hint -->
     <div v-if="pathTraceMode" class="path-trace-bar">
-      <span>{{ pathTraceHint || '请点击起始节点' }}</span>
+      <span>{{ pathTraceHint || "请点击起始节点" }}</span>
       <el-button
         size="small"
         type="info"
         text
-        @click="pathTraceMode = false; pathSource = null; pathTraceHint = ''"
+        @click="
+          pathTraceMode = false;
+          pathSource = null;
+          pathTraceHint = '';
+        "
       >
         取消
       </el-button>
@@ -645,7 +645,13 @@ onBeforeUnmount(() => {
 
         <!-- Empty state -->
         <div v-if="graphData && graphData.nodes.length === 0 && !loading" class="empty-overlay">
-          <el-empty :description="(rawGraphData?.nodes.length || 0) > 0 ? '当前筛选无数据，请调整顶部筛选项' : '暂无拓扑数据，请先添加资源和关系'" />
+          <el-empty
+            :description="
+              (rawGraphData?.nodes.length || 0) > 0
+                ? '当前筛选无数据，请调整顶部筛选项'
+                : '暂无拓扑数据，请先添加资源和关系'
+            "
+          />
         </div>
       </div>
 
@@ -671,9 +677,7 @@ onBeforeUnmount(() => {
         :style="{ left: contextMenuPos.x + 'px', top: contextMenuPos.y + 'px' }"
         @click.stop
       >
-        <div data-testid="context-edit" class="context-menu-item" @click="handleEditNode">
-          编辑
-        </div>
+        <div data-testid="context-edit" class="context-menu-item" @click="handleEditNode">编辑</div>
         <div data-testid="context-path-trace" class="context-menu-item" @click="startPathTrace">
           路径追踪（从此节点出发）
         </div>
