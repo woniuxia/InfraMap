@@ -12,7 +12,6 @@ vi.mock("element-plus", () => ({
 
 import {
   getTopologySnapshotV3,
-  getTopologyDrilldownV3,
   getTopologyTaskViewV3,
   getTopologyPathsV3,
   getTopologyImpactV3,
@@ -20,7 +19,6 @@ import {
   getTopologyTroubleshootReportV3,
 } from "@/api/topologyV3";
 import type {
-  TopologyV3DrilldownQuery,
   TopologyV3EvidenceQuery,
   TopologyV3ImpactQuery,
   TopologyV3PathsQuery,
@@ -36,7 +34,7 @@ describe("topology API", () => {
   });
 
   it("getTopologySnapshot should invoke get_topology_snapshot_v3", async () => {
-    const query: TopologySnapshotQuery = {
+    const query: TopologyV3SnapshotQuery = {
       env: "prod",
       taskView: "explore",
       maxDepth: 3,
@@ -63,12 +61,12 @@ describe("topology API", () => {
       return mockResult;
     });
 
-    const result = await getTopologySnapshot(query);
+    const result = await getTopologySnapshotV3(query);
     expect(result).toEqual(mockResult);
   });
 
   it("getTopologyTaskView should invoke get_topology_task_view_v3", async () => {
-    const query: TopologyTaskViewQuery = {
+    const query: TopologyV3TaskViewQuery = {
       taskView: "impact",
       env: "prod",
       maxDepth: 2,
@@ -106,12 +104,12 @@ describe("topology API", () => {
       return mockResult;
     });
 
-    const result = await getTopologyTaskView(query);
+    const result = await getTopologyTaskViewV3(query);
     expect(result).toEqual(mockResult);
   });
 
   it("getTopologyPaths should invoke get_topology_paths_v3", async () => {
-    const query: TopologyPathsQuery = {
+    const query: TopologyV3PathsQuery = {
       sourceId: "A",
       targetId: "B",
       taskView: "explore",
@@ -128,12 +126,12 @@ describe("topology API", () => {
       return mockResult;
     });
 
-    const result = await getTopologyPaths(query);
+    const result = await getTopologyPathsV3(query);
     expect(result).toEqual(mockResult);
   });
 
   it("getTopologyImpact should invoke get_topology_impact_v3", async () => {
-    const query: TopologyImpactQuery = {
+    const query: TopologyV3ImpactQuery = {
       nodeId: "C",
       taskView: "impact",
       maxDepth: 3,
@@ -149,12 +147,12 @@ describe("topology API", () => {
       return mockResult;
     });
 
-    const result = await getTopologyImpact(query);
+    const result = await getTopologyImpactV3(query);
     expect(result).toEqual(mockResult);
   });
 
   it("getTopologyEvidence should invoke get_topology_evidence_v3", async () => {
-    const query: TopologyEvidenceQuery = {
+    const query: TopologyV3EvidenceQuery = {
       nodeId: "node-1",
       taskView: "troubleshoot",
       maxItems: 20,

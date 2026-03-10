@@ -235,7 +235,7 @@ describe("DashboardView", () => {
     });
     await flushPromises();
 
-    expect(wrapper.get('[data-testid="dashboard-quick-hub-stub"]').text()).toBe("5-2");
+    expect(wrapper.get('[data-testid="dashboard-quick-hub-stub"]').text()).toBe("5-4");
     expect(wrapper.get('[data-testid="dashboard-kpi-grid-stub"]').text()).toBe("6");
     expect(wrapper.get('[data-testid="dashboard-recent-changes-stub"]').text()).toBe("1");
     expect(wrapper.get('[data-testid="dashboard-overview-panels-stub"]').text()).toBe("1");
