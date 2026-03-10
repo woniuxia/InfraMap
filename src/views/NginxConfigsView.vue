@@ -4,10 +4,14 @@ import type { EditorMode, NginxConfig, NginxEndpoint } from "@/types";
 import type { SearchFieldConfig, SearchToolbarQueryPayload } from "@/types/searchToolbar";
 import { listNginxConfigs, deleteNginxConfig } from "@/api/nginx-configs";
 import { useResourceList } from "@/composables/useResourceList";
+import { useEnvStore } from "@/stores/env";
 import { ENV_OPTIONS, STATUS_OPTIONS } from "@/constants/options";
 import { buildNginxCopyDraft } from "@/utils/resourceCopy";
+import { ElMessage } from "element-plus";
 import SearchToolbar from "@/components/filters/SearchToolbar.vue";
 import NginxConfigEditorDialog from "@/components/resource-editors/NginxConfigEditorDialog.vue";
+
+const envStore = useEnvStore();
 
 const {
   loading,
@@ -108,7 +112,7 @@ function openAdd() {
     id: "",
     endpoints: [createEmptyEndpoint()],
     status: "running",
-    env: "prod",
+    env: envStore.currentEnv,
     strategy: "roundrobin",
     created_at: "",
     updated_at: "",
@@ -135,8 +139,14 @@ function openCopy(row: NginxConfig) {
   editorVisible.value = true;
 }
 
-function handleEditorSaved() {
+function handleEditorSaved(payload: { id: string }) {
   fetchData();
+
+  const savedResource = data.value.find((r) => r.id === payload.id);
+  if (savedResource && savedResource.env !== envStore.currentEnv) {
+    const envLabel = { prod: "生产", test: "测试", dev: "开发" }[savedResource.env];
+    ElMessage.info(`资源已保存到${envLabel}环境,当前筛选下不可见`);
+  }
 }
 
 function statusTagType(status: string): "primary" | "success" | "warning" | "info" | "danger" {

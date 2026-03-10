@@ -4,6 +4,7 @@ import type { EditorMode, Middleware } from "@/types";
 import type { SearchFieldConfig, SearchToolbarQueryPayload } from "@/types/searchToolbar";
 import { listMiddlewares, deleteMiddleware } from "@/api/middlewares";
 import { useResourceList } from "@/composables/useResourceList";
+import { useEnvStore } from "@/stores/env";
 import { ENV_OPTIONS } from "@/constants/options";
 import { generateDraftId } from "@/utils/draft";
 import {
@@ -12,8 +13,11 @@ import {
   getMiddlewareIconByType,
 } from "@/utils/middlewareCatalog";
 import { buildMiddlewareCopyDraft } from "@/utils/resourceCopy";
+import { ElMessage } from "element-plus";
 import SearchToolbar from "@/components/filters/SearchToolbar.vue";
 import MiddlewareEditorDialog from "@/components/resource-editors/MiddlewareEditorDialog.vue";
+
+const envStore = useEnvStore();
 
 const {
   loading,
@@ -79,7 +83,7 @@ function handleToolbarQuery(payload: SearchToolbarQueryPayload) {
 function openAdd() {
   editorInitialDraft.value = {
     id: generateDraftId("mw"),
-    env: "prod",
+    env: envStore.currentEnv,
     category: "database",
     created_at: "",
     updated_at: "",
@@ -103,8 +107,14 @@ function openCopy(row: Middleware) {
   editorVisible.value = true;
 }
 
-function handleEditorSaved() {
+function handleEditorSaved(payload: { id: string }) {
   fetchData();
+
+  const savedResource = data.value.find((r) => r.id === payload.id);
+  if (savedResource && savedResource.env !== envStore.currentEnv) {
+    const envLabel = { prod: "生产", test: "测试", dev: "开发" }[savedResource.env];
+    ElMessage.info(`资源已保存到${envLabel}环境,当前筛选下不可见`);
+  }
 }
 
 function categoryLabel(category: string) {

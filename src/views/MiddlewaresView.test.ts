@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { defineComponent, h, inject, provide } from "vue";
 import { flushPromises, mount } from "@vue/test-utils";
+import { createPinia } from "pinia";
 import MiddlewaresView from "@/views/MiddlewaresView.vue";
 import { listMiddlewares } from "@/api/middlewares";
 
@@ -127,6 +128,7 @@ const PassThroughStub = defineComponent({
 function mountView() {
   return mount(MiddlewaresView, {
     global: {
+      plugins: [createPinia()],
       stubs: {
         SearchToolbar: SearchToolbarStub,
         ElButton: ElButtonStub,

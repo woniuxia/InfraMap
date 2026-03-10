@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { useRoute } from "vue-router";
 import { useAppStore } from "@/stores/app";
+import { useEnvStore } from "@/stores/env";
+import { ElMessage } from "element-plus";
+import type { TopologyEnv } from "@/types";
 import {
   Monitor,
   Menu as IconMenu,
@@ -15,10 +18,89 @@ import {
   Fold,
   Expand,
 } from "@element-plus/icons-vue";
-import { markRaw, type Component } from "vue";
+import { markRaw, type Component, ref, computed, onMounted, onUnmounted, nextTick } from "vue";
 
 const route = useRoute();
 const appStore = useAppStore();
+const envStore = useEnvStore();
+
+const ENV_OPTIONS: Array<{
+  value: TopologyEnv;
+  label: string;
+  type: "danger" | "warning" | "info";
+}> = [
+  { value: "prod", label: "生产", type: "danger" },
+  { value: "test", label: "测试", type: "warning" },
+  { value: "dev", label: "开发", type: "info" },
+];
+
+const envHints: Record<TopologyEnv, string> = {
+  prod: "线上正式环境",
+  test: "预发布验证",
+  dev: "开发调试",
+};
+
+const isDropdownOpen = ref(false);
+const selectorRef = ref<HTMLButtonElement | null>(null);
+const dropdownRef = ref<HTMLDivElement | null>(null);
+const dropdownPosition = ref({ top: "0px", left: "0px", width: "0px" });
+
+const currentEnvLabel = computed(() => {
+  const option = ENV_OPTIONS.find((opt) => opt.value === envStore.currentEnv);
+  return appStore.sidebarCollapsed ? option?.label.charAt(0) : option?.label;
+});
+
+function updateDropdownPosition() {
+  if (!selectorRef.value) return;
+  const rect = selectorRef.value.getBoundingClientRect();
+  dropdownPosition.value = {
+    top: `${rect.bottom + 6}px`,
+    left: `${rect.left}px`,
+    width: `${rect.width}px`,
+  };
+}
+
+function toggleDropdown() {
+  isDropdownOpen.value = !isDropdownOpen.value;
+  if (isDropdownOpen.value) {
+    nextTick(() => {
+      updateDropdownPosition();
+    });
+  }
+}
+
+function selectEnv(env: TopologyEnv) {
+  envStore.setEnv(env);
+  isDropdownOpen.value = false;
+  const envLabel = ENV_OPTIONS.find((opt) => opt.value === env)?.label || env;
+  ElMessage.success(`已切换到${envLabel}环境`);
+}
+
+function handleClickOutside(event: MouseEvent) {
+  const target = event.target as Node;
+  if (dropdownRef.value?.contains(target) || selectorRef.value?.contains(target)) {
+    return;
+  }
+  isDropdownOpen.value = false;
+}
+
+function handleResize() {
+  if (isDropdownOpen.value) {
+    updateDropdownPosition();
+  }
+}
+
+onMounted(() => {
+  document.addEventListener("click", handleClickOutside);
+  window.addEventListener("resize", handleResize);
+  window.addEventListener("scroll", handleResize, true);
+});
+
+onUnmounted(() => {
+  document.removeEventListener("click", handleClickOutside);
+  window.removeEventListener("resize", handleResize);
+  window.removeEventListener("scroll", handleResize, true);
+});
 
 const menuItems: { path: string; name: string; icon: Component }[] = [
   { path: "/", name: "仪表盘", icon: markRaw(DataAnalysis) },
@@ -42,17 +124,68 @@ const menuItems: { path: string; name: string; icon: Component }[] = [
       <span v-if="!appStore.sidebarCollapsed" class="logo-text">InfraMap</span>
       <span v-else class="logo-icon">IM</span>
     </div>
+    <div class="env-selector-wrapper">
+      <button
+        class="env-selector"
+        :class="[`env-${envStore.currentEnv}`, { 'is-collapsed': appStore.sidebarCollapsed }]"
+        @click="toggleDropdown"
+        ref="selectorRef"
+      >
+        <span class="env-indicator"></span>
+        <span class="env-label">{{ currentEnvLabel }}</span>
+        <svg class="env-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+          <path d="M6 9l6 6 6-6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+      </button>
+      <Teleport to="body">
+        <Transition name="env-dropdown">
+          <div
+            v-if="isDropdownOpen"
+            class="env-dropdown-portal"
+            :style="dropdownPosition"
+            ref="dropdownRef"
+          >
+            <div class="env-dropdown-header">
+              <span>选择环境</span>
+            </div>
+            <div class="env-options">
+              <button
+                v-for="option in ENV_OPTIONS"
+                :key="option.value"
+                class="env-option"
+                :class="{ 'is-active': envStore.currentEnv === option.value }"
+                @click="selectEnv(option.value)"
+              >
+                <span class="env-option-indicator" :class="`env-${option.value}`"></span>
+                <span class="env-option-label">{{ option.label }}</span>
+                <span class="env-option-hint">{{ envHints[option.value] }}</span>
+                <svg
+                  v-if="envStore.currentEnv === option.value"
+                  class="env-check"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                >
+                  <path
+                    d="M20 6L9 17l-5-5"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                </svg>
+              </button>
+            </div>
+          </div>
+        </Transition>
+      </Teleport>
+    </div>
     <el-menu
       :default-active="route.path"
       :collapse="appStore.sidebarCollapsed"
       :collapse-transition="false"
       router
     >
-      <el-menu-item
-        v-for="item in menuItems"
-        :key="item.path"
-        :index="item.path"
-      >
+      <el-menu-item v-for="item in menuItems" :key="item.path" :index="item.path">
         <el-icon><component :is="item.icon" /></el-icon>
         <template #title>{{ item.name }}</template>
       </el-menu-item>
@@ -77,6 +210,7 @@ const menuItems: { path: string; name: string; icon: Component }[] = [
 }
 .sidebar-header {
   height: 56px;
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -126,5 +260,294 @@ const menuItems: { path: string; name: string; icon: Component }[] = [
   display: flex;
   justify-content: center;
   border-top: 1px solid var(--im-border-light);
+}
+
+// ===== 环境选择器 - 工业精致风格 =====
+.env-selector-wrapper {
+  padding: 12px;
+  border-bottom: 1px solid var(--im-border-light);
+  background: linear-gradient(180deg, var(--im-surface-1) 0%, var(--im-surface-0) 100%);
+  display: flex;
+  justify-content: center;
+}
+
+.env-selector {
+  position: relative;
+  width: 100%;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  border: none;
+  border-radius: 10px;
+  background: var(--im-surface-0);
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  outline: none;
+
+  // 微光边框效果
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.06),
+    0 1px 2px rgba(0, 0, 0, 0.04),
+    inset 0 1px 0 rgba(255, 255, 255, 0.8);
+
+  &:hover {
+    transform: translateY(-1px);
+    box-shadow:
+      0 0 0 1px rgba(0, 0, 0, 0.08),
+      0 4px 12px rgba(0, 0, 0, 0.08),
+      inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  }
+
+  &:active {
+    transform: translateY(0);
+  }
+
+  // 收缩状态
+  &.is-collapsed {
+    width: 40px;
+    padding: 0;
+    justify-content: center;
+
+    .env-label {
+      display: none;
+    }
+
+    .env-chevron {
+      display: none;
+    }
+
+    .env-indicator {
+      position: static;
+      transform: none;
+    }
+  }
+}
+
+// 环境指示器 - 脉动效果
+.env-indicator {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  position: relative;
+
+  &::before {
+    content: "";
+    position: absolute;
+    inset: -4px;
+    border-radius: 50%;
+    animation: pulse 2s ease-out infinite;
+  }
+}
+
+@keyframes pulse {
+  0% {
+    transform: scale(0.5);
+    opacity: 0.6;
+  }
+  50% {
+    opacity: 0.3;
+  }
+  100% {
+    transform: scale(2);
+    opacity: 0;
+  }
+}
+
+.env-prod .env-indicator {
+  background: linear-gradient(135deg, #ef4444, #dc2626);
+  box-shadow:
+    0 0 0 1px rgba(239, 68, 68, 0.3),
+    0 0 8px rgba(239, 68, 68, 0.4);
+
+  &::before {
+    background: rgba(239, 68, 68, 0.4);
+  }
+}
+
+.env-test .env-indicator {
+  background: linear-gradient(135deg, #f59e0b, #d97706);
+  box-shadow:
+    0 0 0 1px rgba(245, 158, 11, 0.3),
+    0 0 8px rgba(245, 158, 11, 0.4);
+
+  &::before {
+    background: rgba(245, 158, 11, 0.4);
+  }
+}
+
+.env-dev .env-indicator {
+  background: linear-gradient(135deg, #3b82f6, #2563eb);
+  box-shadow:
+    0 0 0 1px rgba(59, 130, 246, 0.3),
+    0 0 8px rgba(59, 130, 246, 0.4);
+
+  &::before {
+    background: rgba(59, 130, 246, 0.4);
+  }
+}
+
+.env-label {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  color: var(--im-text-primary);
+  text-align: center;
+}
+
+.env-chevron {
+  width: 16px;
+  height: 16px;
+  color: var(--im-text-tertiary);
+  flex-shrink: 0;
+}
+
+// ===== 下拉菜单 - Portal 样式 =====
+.env-dropdown-portal {
+  position: fixed;
+  z-index: 9999;
+  background: var(--im-surface-0);
+  border-radius: 12px;
+  padding: 6px;
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.04),
+    0 20px 50px rgba(0, 0, 0, 0.15),
+    0 8px 20px rgba(0, 0, 0, 0.08);
+  backdrop-filter: blur(12px);
+  min-width: 180px;
+}
+
+.env-dropdown-header {
+  padding: 8px 12px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--im-text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  border-bottom: 1px solid var(--im-border-light);
+  margin-bottom: 4px;
+}
+
+.env-options {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.env-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.15s ease;
+  position: relative;
+
+  &:hover {
+    background: var(--im-surface-1);
+  }
+
+  &:active {
+    transform: scale(0.98);
+  }
+
+  &.is-active {
+    background: var(--im-accent-dim);
+  }
+}
+
+.env-option-indicator {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+
+  &.env-prod {
+    background: linear-gradient(135deg, #ef4444, #dc2626);
+    box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.2);
+  }
+
+  &.env-test {
+    background: linear-gradient(135deg, #f59e0b, #d97706);
+    box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.2);
+  }
+
+  &.env-dev {
+    background: linear-gradient(135deg, #3b82f6, #2563eb);
+    box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.2);
+  }
+}
+
+.env-option-label {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--im-text-primary);
+}
+
+.env-option-hint {
+  font-size: 11px;
+  color: var(--im-text-tertiary);
+  opacity: 0;
+  transform: translateX(-4px);
+  transition: all 0.2s ease;
+}
+
+.env-option:hover .env-option-hint {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.env-check {
+  width: 14px;
+  height: 14px;
+  color: var(--im-accent);
+}
+
+// 动画
+.env-dropdown-enter-active,
+.env-dropdown-leave-active {
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.env-dropdown-enter-from,
+.env-dropdown-leave-to {
+  opacity: 0;
+  transform: scale(0.96) translateY(-8px);
+}
+
+// 暗色模式适配
+:root[data-theme="dark"] {
+  .env-selector {
+    background: rgba(255, 255, 255, 0.03);
+    box-shadow:
+      0 0 0 1px rgba(255, 255, 255, 0.06),
+      0 1px 2px rgba(0, 0, 0, 0.2),
+      inset 0 1px 0 rgba(255, 255, 255, 0.04);
+
+    &:hover {
+      background: rgba(255, 255, 255, 0.05);
+      box-shadow:
+        0 0 0 1px rgba(255, 255, 255, 0.08),
+        0 4px 12px rgba(0, 0, 0, 0.3),
+        inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    }
+  }
+
+  .env-dropdown-portal {
+    background: rgba(30, 30, 30, 0.95);
+    box-shadow:
+      0 0 0 1px rgba(255, 255, 255, 0.06),
+      0 20px 50px rgba(0, 0, 0, 0.4),
+      0 8px 20px rgba(0, 0, 0, 0.2);
+  }
 }
 </style>

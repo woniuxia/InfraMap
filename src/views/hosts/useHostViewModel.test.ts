@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createPinia, setActivePinia } from "pinia";
 import { __clearMockHandlers, __setMockHandler } from "@/__mocks__/tauri";
 import type { Host } from "@/types";
 import { useHostViewModel } from "@/views/hosts/useHostViewModel";
@@ -60,6 +61,7 @@ function setupTaxonomyOrderHandlers() {
 
 describe("useHostViewModel", () => {
   beforeEach(() => {
+    setActivePinia(createPinia());
     __clearMockHandlers();
     vi.clearAllMocks();
     setupMockHandlers();
@@ -145,13 +147,15 @@ describe("useHostViewModel", () => {
     await viewModel.openAdd();
 
     const osField = viewModel.toolbarFields.value.find((field) => field.key === "os_type");
-    expect((osField?.options ?? []).map((option) => option.value)).toEqual(["Ubuntu 22.04", "CentOS 7"]);
-    expect(viewModel.formOsSuggestionOptions.value.slice(0, 2).map((option) => option.value)).toEqual([
+    expect((osField?.options ?? []).map((option) => option.value)).toEqual([
       "Ubuntu 22.04",
       "CentOS 7",
     ]);
     expect(
-      viewModel.formOsSuggestionOptions.value.findIndex((option) => option.value === "CentOS 8")
+      viewModel.formOsSuggestionOptions.value.slice(0, 2).map((option) => option.value),
+    ).toEqual(["Ubuntu 22.04", "CentOS 7"]);
+    expect(
+      viewModel.formOsSuggestionOptions.value.findIndex((option) => option.value === "CentOS 8"),
     ).toBeGreaterThan(1);
   });
 
@@ -172,7 +176,7 @@ describe("useHostViewModel", () => {
     await viewModel.openEdit(
       createHost({
         os_type: "Custom Linux 1.0",
-      })
+      }),
     );
 
     const optionValues = viewModel.formOsSuggestionOptions.value.map((option) => option.value);

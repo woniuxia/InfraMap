@@ -12,6 +12,7 @@ import {
 } from "@/api/taxonomy";
 import { bindHostIp, listHostIpBindings, unbindHostIp } from "@/api/host-ip-bindings";
 import { useResourceList } from "@/composables/useResourceList";
+import { useEnvStore } from "@/stores/env";
 import { ENV_OPTIONS, STATUS_OPTIONS } from "@/constants/options";
 import { buildHostCopyDraft } from "@/utils/resourceCopy";
 import {
@@ -64,6 +65,7 @@ const DEFAULT_HOST_OS_OPTIONS = [
 ];
 
 export function useHostViewModel() {
+  const envStore = useEnvStore();
   const {
     loading,
     data,
@@ -336,7 +338,7 @@ export function useHostViewModel() {
     return {
       id: "",
       status: "running",
-      env: "prod",
+      env: envStore.currentEnv,
       hostname: "",
       ...DEFAULT_HOST_HARDWARE,
     };

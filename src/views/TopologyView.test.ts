@@ -1,6 +1,7 @@
 import { defineComponent, h } from "vue";
 import { flushPromises, mount } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createPinia } from "pinia";
 import TopologyView from "@/views/TopologyView.vue";
 import type { TopologyGraph, TopologyV3TroubleshootReport } from "@/types";
 
@@ -474,6 +475,7 @@ function mountView(options?: {
 
   return mount(TopologyView, {
     global: {
+      plugins: [createPinia()],
       stubs: {
         TopologyControlBar: TopologyControlBarStub,
         TopologyToolbar: TopologyToolbarStub,

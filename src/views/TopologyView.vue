@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount } from "vue";
+import { ref, computed, onMounted, onBeforeUnmount, watch } from "vue";
 import { ElMessage } from "element-plus";
 import TopologyCanvas from "@/components/topology/TopologyCanvas.vue";
 import TopologyControlBar from "@/components/topology/TopologyControlBar.vue";
@@ -13,6 +13,7 @@ import { getApplication } from "@/api/applications";
 import { getMiddleware } from "@/api/middlewares";
 import { getNginxConfig } from "@/api/nginx-configs";
 import { useTopologyStore } from "@/stores/topology";
+import { useEnvStore } from "@/stores/env";
 import ApplicationEditorDialog from "@/components/resource-editors/ApplicationEditorDialog.vue";
 import MiddlewareEditorDialog from "@/components/resource-editors/MiddlewareEditorDialog.vue";
 import NginxConfigEditorDialog from "@/components/resource-editors/NginxConfigEditorDialog.vue";
@@ -35,6 +36,7 @@ import {
 } from "@/components/topology/topologyGraph.utils";
 
 const topologyStore = useTopologyStore();
+const envStore = useEnvStore();
 const PERFORMANCE_OPT_STORAGE_KEY = "inframap.topology.performanceOptimizationEnabled";
 const MAX_DEPTH_RANGE = {
   min: 1,
@@ -51,7 +53,10 @@ const TASK_VIEW_OPTIONS: Array<{ value: TopologyTaskViewMode; label: string }> =
 const rawGraphData = computed(() => topologyStore.graphData);
 const loading = computed(() => topologyStore.loading);
 const taskInsights = computed(() => topologyStore.taskInsights || []);
-const activeFilter = ref<TopologyFilterState>({ ...DEFAULT_TOPOLOGY_FILTER });
+const activeFilter = ref<TopologyFilterState>({
+  ...DEFAULT_TOPOLOGY_FILTER,
+  env: envStore.currentEnv,
+});
 const performanceOptimizationEnabled = ref(false);
 const effectiveFilter = computed<TopologyFilterState>(() =>
   performanceOptimizationEnabled.value
@@ -577,6 +582,25 @@ function toggleFullscreen() {
 function handleFullscreenChange() {
   isFullscreen.value = !!document.fullscreenElement;
 }
+
+// 双向同步全局环境与拓扑图过滤器
+watch(
+  () => envStore.currentEnv,
+  (newEnv) => {
+    if (activeFilter.value.env !== newEnv) {
+      activeFilter.value.env = newEnv;
+    }
+  },
+);
+
+watch(
+  () => activeFilter.value.env,
+  (newEnv) => {
+    if (envStore.currentEnv !== newEnv) {
+      envStore.setEnv(newEnv);
+    }
+  },
+);
 
 onMounted(() => {
   performanceOptimizationEnabled.value = readPerformanceOptimizationPreference();

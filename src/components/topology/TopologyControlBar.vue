@@ -1,12 +1,10 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import {
-  TOPOLOGY_ENV_LABELS,
-  TOPOLOGY_ENV_ORDER,
   type TopologyEdgeType,
   type TopologyFilterState,
 } from "@/components/topology/topologyGraph.utils";
-import type { TopologyEnv, TopologyGroupKind, TopologyLegendStats, TopologyNode } from "@/types";
+import type { TopologyGroupKind, TopologyLegendStats, TopologyNode } from "@/types";
 
 const props = defineProps<{
   nodes: TopologyNode[];
@@ -172,11 +170,6 @@ function clearSearch() {
   doSearch();
 }
 
-function switchEnv(env: TopologyEnv) {
-  if (env === props.filter.env) return;
-  emit("filter-change", { env });
-}
-
 function toggleNodeKind(kind: TopologyGroupKind) {
   const set = new Set(props.filter.nodeKinds);
   if (set.has(kind)) {
@@ -304,23 +297,6 @@ onBeforeUnmount(() => {
     </div>
 
     <div class="control-row control-row-secondary">
-      <div class="group">
-        <span class="group-title">环境</span>
-        <div class="chip-group">
-          <button
-            v-for="env in TOPOLOGY_ENV_ORDER"
-            :key="env"
-            :data-testid="`env-${env}`"
-            type="button"
-            class="chip-btn"
-            :class="{ active: filter.env === env }"
-            @click="switchEnv(env)"
-          >
-            {{ TOPOLOGY_ENV_LABELS[env] }}
-          </button>
-        </div>
-      </div>
-
       <div class="group">
         <span class="group-title">节点类型</span>
         <div class="chip-group">

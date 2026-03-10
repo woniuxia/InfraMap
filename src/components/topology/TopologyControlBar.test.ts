@@ -106,20 +106,17 @@ describe("TopologyControlBar", () => {
     vi.useRealTimers();
   });
 
-  it("emits filter changes for env, node type, edge type and showAllEdges", async () => {
+  it("emits filter changes for node type, edge type and showAllEdges", async () => {
     const wrapper = mountControlBar();
 
-    await wrapper.get('[data-testid="env-test"]').trigger("click");
-    expect(wrapper.emitted("filter-change")?.[0]?.[0]).toEqual({ env: "test" });
-
     await wrapper.get('[data-testid="node-kind-middleware"]').trigger("click");
-    expect(wrapper.emitted("filter-change")?.[1]?.[0]).toEqual({ nodeKinds: ["middleware"] });
+    expect(wrapper.emitted("filter-change")?.[0]?.[0]).toEqual({ nodeKinds: ["middleware"] });
 
     await wrapper.get('[data-testid="edge-kind-tcp"]').trigger("click");
-    expect(wrapper.emitted("filter-change")?.[2]?.[0]).toEqual({ edgeTypes: ["tcp"] });
+    expect(wrapper.emitted("filter-change")?.[1]?.[0]).toEqual({ edgeTypes: ["tcp"] });
 
     await wrapper.get('[data-testid="show-all-edges"]').setValue(true);
-    expect(wrapper.emitted("filter-change")?.[3]?.[0]).toEqual({ showAllEdges: true });
+    expect(wrapper.emitted("filter-change")?.[2]?.[0]).toEqual({ showAllEdges: true });
   });
 
   it("emits performance optimization change and disables showAllEdges when optimization is off", async () => {

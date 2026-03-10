@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { defineComponent, h, inject, provide } from "vue";
 import { flushPromises, mount } from "@vue/test-utils";
+import { createPinia } from "pinia";
 import BusinessApplicationsView from "@/views/BusinessApplicationsView.vue";
 import {
   listBusinessApplications,
@@ -261,6 +262,7 @@ const ElTableColumnStub = defineComponent({
 function mountView() {
   return mount(BusinessApplicationsView, {
     global: {
+      plugins: [createPinia()],
       stubs: {
         SearchToolbar: SearchToolbarStub,
         ElButton: ElButtonStub,

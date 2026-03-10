@@ -138,7 +138,7 @@ function handleExport(type: "png" | "svg") {
 
       <el-divider direction="vertical" />
 
-      <el-select v-model="selectedEnv" size="small" class="w-96">
+      <el-select v-model="selectedEnv" size="small" class="w-96" fit-input-width>
         <el-option
           v-for="opt in envOptions"
           :key="opt.value"

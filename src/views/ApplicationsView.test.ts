@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { defineComponent, h, inject, provide } from "vue";
 import { flushPromises, mount } from "@vue/test-utils";
+import { createPinia } from "pinia";
 import ApplicationsView from "@/views/ApplicationsView.vue";
 import { listApplications } from "@/api/applications";
 
@@ -12,17 +13,19 @@ const editorState = vi.hoisted(() => ({
 
 vi.mock("@/api/applications", () => ({
   listApplications: vi.fn(async () => ({
-    data: [{
-      id: "app-1",
-      name: "订单服务",
-      type: "backend",
-      address: "10.0.0.11",
-      port: 8080,
-      env: "prod",
-      status: "running",
-      created_at: "",
-      updated_at: "",
-    }],
+    data: [
+      {
+        id: "app-1",
+        name: "订单服务",
+        type: "backend",
+        address: "10.0.0.11",
+        port: 8080,
+        env: "prod",
+        status: "running",
+        created_at: "",
+        updated_at: "",
+      },
+    ],
     total: 1,
     page: 1,
     page_size: 20,
@@ -75,9 +78,9 @@ const ElTableColumnStub = defineComponent({
           h(
             "div",
             { key: `${props.prop}-${index}` },
-            slots.default ? slots.default({ row, $index: index }) : String(row[props.prop] ?? "")
-          )
-        )
+            slots.default ? slots.default({ row, $index: index }) : String(row[props.prop] ?? ""),
+          ),
+        ),
       );
   },
 });
@@ -111,7 +114,7 @@ const ApplicationEditorDialogStub = defineComponent({
             "data-testid": "emit-editor-saved",
             onClick: () => emit("saved", { id: "app-1", mode: props.mode }),
           },
-          "emit-editor-saved"
+          "emit-editor-saved",
         ),
       ]);
     };
@@ -125,6 +128,7 @@ const PassThroughStub = defineComponent({
 function mountView() {
   return mount(ApplicationsView, {
     global: {
+      plugins: [createPinia()],
       stubs: {
         SearchToolbar: SearchToolbarStub,
         ElButton: ElButtonStub,
@@ -182,15 +186,17 @@ describe("ApplicationsView", () => {
 
   it("does not render owner tags when owners are missing", async () => {
     vi.mocked(listApplications).mockResolvedValueOnce({
-      data: [{
-        id: "app-empty-owners",
-        name: "empty-owners-app",
-        type: "backend",
-        env: "prod",
-        status: "running",
-        created_at: "",
-        updated_at: "",
-      }],
+      data: [
+        {
+          id: "app-empty-owners",
+          name: "empty-owners-app",
+          type: "backend",
+          env: "prod",
+          status: "running",
+          created_at: "",
+          updated_at: "",
+        },
+      ],
       total: 1,
       page: 1,
       page_size: 20,
@@ -204,16 +210,18 @@ describe("ApplicationsView", () => {
 
   it("opens edit editor with owners preserved", async () => {
     vi.mocked(listApplications).mockResolvedValueOnce({
-      data: [{
-        id: "app-edit-owners",
-        name: "edit-owners-app",
-        type: "backend",
-        env: "prod",
-        status: "running",
-        owners: ["alice", "bob"],
-        created_at: "",
-        updated_at: "",
-      }],
+      data: [
+        {
+          id: "app-edit-owners",
+          name: "edit-owners-app",
+          type: "backend",
+          env: "prod",
+          status: "running",
+          owners: ["alice", "bob"],
+          created_at: "",
+          updated_at: "",
+        },
+      ],
       total: 1,
       page: 1,
       page_size: 20,

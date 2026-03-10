@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { defineComponent } from "vue";
 import { mount } from "@vue/test-utils";
+import { createPinia } from "pinia";
 import ApplicationsView from "@/views/ApplicationsView.vue";
 import NginxConfigsView from "@/views/NginxConfigsView.vue";
 
@@ -56,9 +57,7 @@ interface ToolbarFieldItem {
   section?: "basic" | "advanced";
 }
 
-function getToolbarFields(
-  wrapper: ReturnType<typeof mount>
-): ToolbarFieldItem[] {
+function getToolbarFields(wrapper: ReturnType<typeof mount>): ToolbarFieldItem[] {
   const toolbar = wrapper.findComponent(SearchToolbarStub);
   expect(toolbar.exists()).toBe(true);
   return toolbar.props("fields") as ToolbarFieldItem[];
@@ -68,6 +67,7 @@ describe("search toolbar field placement", () => {
   it("keeps deploy mode in basic filters for applications", () => {
     const wrapper = mount(ApplicationsView, {
       global: {
+        plugins: [createPinia()],
         stubs: {
           SearchToolbar: SearchToolbarStub,
           ElButton: PassThroughStub,
@@ -81,15 +81,15 @@ describe("search toolbar field placement", () => {
           ElDivider: PassThroughStub,
           ElInput: PassThroughStub,
           ElInputNumber: PassThroughStub,
-        ElSelect: PassThroughStub,
-        ElOption: PassThroughStub,
-        CallRelationsEditor: PassThroughStub,
-        DeploymentPanel: PassThroughStub,
-        ApplicationEditorDialog: PassThroughStub,
-      },
-      directives: {
-        loading: () => undefined,
-      },
+          ElSelect: PassThroughStub,
+          ElOption: PassThroughStub,
+          CallRelationsEditor: PassThroughStub,
+          DeploymentPanel: PassThroughStub,
+          ApplicationEditorDialog: PassThroughStub,
+        },
+        directives: {
+          loading: () => undefined,
+        },
       },
     });
 
@@ -102,6 +102,7 @@ describe("search toolbar field placement", () => {
   it("keeps strategy in basic filters for nginx configs", () => {
     const wrapper = mount(NginxConfigsView, {
       global: {
+        plugins: [createPinia()],
         stubs: {
           SearchToolbar: SearchToolbarStub,
           ElButton: PassThroughStub,
@@ -115,15 +116,15 @@ describe("search toolbar field placement", () => {
           ElDivider: PassThroughStub,
           ElInput: PassThroughStub,
           ElInputNumber: PassThroughStub,
-        ElSelect: PassThroughStub,
-        ElOption: PassThroughStub,
-        CallRelationsEditor: PassThroughStub,
-        DeploymentPanel: PassThroughStub,
-        NginxConfigEditorDialog: PassThroughStub,
-      },
-      directives: {
-        loading: () => undefined,
-      },
+          ElSelect: PassThroughStub,
+          ElOption: PassThroughStub,
+          CallRelationsEditor: PassThroughStub,
+          DeploymentPanel: PassThroughStub,
+          NginxConfigEditorDialog: PassThroughStub,
+        },
+        directives: {
+          loading: () => undefined,
+        },
       },
     });
 
