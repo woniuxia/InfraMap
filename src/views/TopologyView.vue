@@ -4,7 +4,11 @@ import { ElMessage } from "element-plus";
 import TopologyCanvas from "@/components/topology/TopologyCanvas.vue";
 import TopologyControlBar from "@/components/topology/TopologyControlBar.vue";
 import TopologyDetailPanel from "@/components/topology/TopologyDetailPanel.vue";
-import { getTopologyImpactV3, getTopologyPathsV3, getTopologyTroubleshootReportV3 } from "@/api/topologyV3";
+import {
+  getTopologyImpactV3,
+  getTopologyPathsV3,
+  getTopologyTroubleshootReportV3,
+} from "@/api/topologyV3";
 import { getApplication } from "@/api/applications";
 import { getMiddleware } from "@/api/middlewares";
 import { getNginxConfig } from "@/api/nginx-configs";
@@ -49,12 +53,14 @@ const loading = computed(() => topologyStore.loading);
 const taskInsights = computed(() => topologyStore.taskInsights || []);
 const activeFilter = ref<TopologyFilterState>({ ...DEFAULT_TOPOLOGY_FILTER });
 const performanceOptimizationEnabled = ref(false);
-const effectiveFilter = computed<TopologyFilterState>(() => (performanceOptimizationEnabled.value
-  ? activeFilter.value
-  : {
-      ...activeFilter.value,
-      showAllEdges: true,
-    }));
+const effectiveFilter = computed<TopologyFilterState>(() =>
+  performanceOptimizationEnabled.value
+    ? activeFilter.value
+    : {
+        ...activeFilter.value,
+        showAllEdges: true,
+      },
+);
 const graphData = computed(() => filterTopologyGraph(rawGraphData.value, effectiveFilter.value));
 const canvasRef = ref<InstanceType<typeof TopologyCanvas>>();
 const selectedLayout = ref<"force" | "dagre">("force");
@@ -87,7 +93,10 @@ const nginxEditorDraft = ref<Partial<NginxConfig>>({});
 const isFullscreen = ref(false);
 const focusNeighborhoodEnabled = ref(true);
 const containerRef = ref<HTMLDivElement>();
-const troubleshootCache = new Map<string, { report: TopologyV3TroubleshootReport; loadedAt: number }>();
+const troubleshootCache = new Map<
+  string,
+  { report: TopologyV3TroubleshootReport; loadedAt: number }
+>();
 let troubleshootRequestVersion = 0;
 
 const nodeNameMap = computed(() => {
@@ -302,9 +311,10 @@ function resolveEnvLabel(env: string) {
 }
 
 async function handleEditNode(targetNode?: TopologyNode | Event | null) {
-  const node = targetNode && typeof targetNode === "object" && "id" in targetNode
-    ? targetNode as TopologyNode
-    : contextMenuNode.value;
+  const node =
+    targetNode && typeof targetNode === "object" && "id" in targetNode
+      ? (targetNode as TopologyNode)
+      : contextMenuNode.value;
   closeContextMenu();
   if (!node) return;
   if (isExternalNode(node)) {
@@ -315,7 +325,7 @@ async function handleEditNode(targetNode?: TopologyNode | Event | null) {
   closeNodeEditors();
 
   try {
-    if (node.node_type === "application") {
+    if (node.nodeType === "application") {
       const detail = await getApplication(node.id);
       applicationEditorDraft.value = {
         ...detail,
@@ -325,18 +335,20 @@ async function handleEditNode(targetNode?: TopologyNode | Event | null) {
       return;
     }
 
-    if (node.node_type === "middleware") {
+    if (node.nodeType === "middleware") {
       const detail = await getMiddleware(node.id);
       middlewareEditorDraft.value = { ...detail };
       middlewareEditorVisible.value = true;
       return;
     }
 
-    if (node.node_type === "nginx") {
+    if (node.nodeType === "nginx") {
       const detail = await getNginxConfig(node.id);
       nginxEditorDraft.value = {
         ...detail,
-        endpoints: Array.isArray(detail.endpoints) ? detail.endpoints.map((item) => ({ ...item })) : detail.endpoints,
+        endpoints: Array.isArray(detail.endpoints)
+          ? detail.endpoints.map((item) => ({ ...item }))
+          : detail.endpoints,
       };
       nginxEditorVisible.value = true;
     }
@@ -489,7 +501,11 @@ function handleLayoutChange(type: "force" | "dagre") {
   selectedLayout.value = type;
 }
 
-function handleLayoutResolved(payload: { requested: "force" | "dagre"; applied: "force" | "dagre"; reason?: string }) {
+function handleLayoutResolved(payload: {
+  requested: "force" | "dagre";
+  applied: "force" | "dagre";
+  reason?: string;
+}) {
   selectedLayout.value = payload.applied;
   if (payload.requested === payload.applied) return;
 
@@ -619,7 +635,7 @@ onBeforeUnmount(() => {
           :max="MAX_DEPTH_RANGE.max"
           :value="topologyStore.maxDepth"
           @change="handleMaxDepthChange"
-        >
+        />
         <input
           id="max-depth-number"
           data-testid="max-depth-number"
@@ -629,20 +645,21 @@ onBeforeUnmount(() => {
           :max="MAX_DEPTH_RANGE.max"
           :value="topologyStore.maxDepth"
           @change="handleMaxDepthChange"
-        >
+        />
       </div>
     </div>
 
     <div v-if="topologyStore.taskView === 'troubleshoot'" class="troubleshoot-bar">
-      <span class="troubleshoot-label">
-        当前节点：{{ selectedNode?.name || '未选择' }}
-      </span>
+      <span class="troubleshoot-label">当前节点：{{ selectedNode?.name || "未选择" }}</span>
       <div class="troubleshoot-actions">
         <button
           type="button"
           class="troubleshoot-btn"
           :disabled="!selectedNode"
-          @click="activePanelTab = 'evidence'; panelVisible = !!selectedNode"
+          @click="
+            activePanelTab = 'evidence';
+            panelVisible = !!selectedNode;
+          "
         >
           查看证据
         </button>
@@ -686,12 +703,16 @@ onBeforeUnmount(() => {
 
     <!-- Path trace hint -->
     <div v-if="pathTraceMode" class="path-trace-bar">
-      <span>{{ pathTraceHint || '请点击起始节点' }}</span>
+      <span>{{ pathTraceHint || "请点击起始节点" }}</span>
       <el-button
         size="small"
         type="info"
         text
-        @click="pathTraceMode = false; pathSource = null; pathTraceHint = ''"
+        @click="
+          pathTraceMode = false;
+          pathSource = null;
+          pathTraceHint = '';
+        "
       >
         取消
       </el-button>
@@ -715,7 +736,13 @@ onBeforeUnmount(() => {
 
         <!-- Empty state -->
         <div v-if="graphData && graphData.nodes.length === 0 && !loading" class="empty-overlay">
-          <el-empty :description="(rawGraphData?.nodes.length || 0) > 0 ? '当前筛选无数据，请调整顶部筛选项' : '暂无拓扑数据，请先添加资源和关系'" />
+          <el-empty
+            :description="
+              (rawGraphData?.nodes.length || 0) > 0
+                ? '当前筛选无数据，请调整顶部筛选项'
+                : '暂无拓扑数据，请先添加资源和关系'
+            "
+          />
         </div>
       </div>
 
@@ -745,9 +772,7 @@ onBeforeUnmount(() => {
         :style="{ left: contextMenuPos.x + 'px', top: contextMenuPos.y + 'px' }"
         @click.stop
       >
-        <div data-testid="context-edit" class="context-menu-item" @click="handleEditNode">
-          编辑
-        </div>
+        <div data-testid="context-edit" class="context-menu-item" @click="handleEditNode">编辑</div>
         <div data-testid="context-path-trace" class="context-menu-item" @click="startPathTrace">
           路径追踪（从此节点出发）
         </div>

@@ -23,7 +23,10 @@
       "Bash(cd E:/Projects/InfraMap && npx vitest run 2>&1)",
       "Bash(cd /e/Projects/InfraMap/src-tauri && cargo test 2>&1)",
       "Bash(ls:*)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(wc:*)",
+      "Bash(test:*)",
+      "Bash(cd \"E:/Projects/InfraMap\" && npx tsc --noEmit 2>&1)"
     ]
   }
 }

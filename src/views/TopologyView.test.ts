@@ -23,7 +23,12 @@ const {
   storeState: {
     taskView: "explore",
     maxDepth: 3,
-    taskInsights: [] as Array<{ kind: string; title: string; severity?: "info" | "warning" | "critical"; nodeIds?: string[] }>,
+    taskInsights: [] as Array<{
+      kind: string;
+      title: string;
+      severity?: "info" | "warning" | "critical";
+      nodeIds?: string[];
+    }>,
   },
   fetchGraphMock: vi.fn(async () => null),
   setTaskViewMock: vi.fn(),
@@ -37,29 +42,31 @@ const {
     totalCount: 0,
     maxDepth: 0,
   })),
-  getTopologyTroubleshootReportV3Mock: vi.fn(async (): Promise<TopologyV3TroubleshootReport> => ({
-    node: {
-      id: "node-1",
-      name: "订单服务",
-      nodeType: "application",
-      env: "prod",
-      status: "running",
-    },
-    summary: {
-      inboundEdgeCount: 1,
-      outboundEdgeCount: 2,
-      deploymentCount: 1,
-      recentAuditCount: 0,
-      statusSeverity: "info",
-    },
-    upstream: [],
-    downstream: [],
-    evidence: {
-      items: [],
-      total: 0,
-    },
-    insights: [],
-  })),
+  getTopologyTroubleshootReportV3Mock: vi.fn(
+    async (): Promise<TopologyV3TroubleshootReport> => ({
+      node: {
+        id: "node-1",
+        name: "订单服务",
+        nodeType: "application",
+        env: "prod",
+        status: "running",
+      },
+      summary: {
+        inboundEdgeCount: 1,
+        outboundEdgeCount: 2,
+        deploymentCount: 1,
+        recentAuditCount: 0,
+        statusSeverity: "info",
+      },
+      upstream: [],
+      downstream: [],
+      evidence: {
+        items: [],
+        total: 0,
+      },
+      insights: [],
+    }),
+  ),
   getApplicationMock: vi.fn(async () => ({
     id: "node-1",
     name: "订单服务",
@@ -112,9 +119,9 @@ const graphFixture: TopologyGraph = {
     {
       id: "node-1",
       name: "订单服务",
-      node_type: "application",
+      nodeType: "application",
       env: "prod",
-      group_kind: "application_service",
+      groupKind: "application_service",
       importance: 1,
       extra: {
         address: "10.0.0.11",
@@ -123,9 +130,9 @@ const graphFixture: TopologyGraph = {
     {
       id: "node-2",
       name: "inventory-service",
-      node_type: "application",
+      nodeType: "application",
       env: "prod",
-      group_kind: "application_service",
+      groupKind: "application_service",
       importance: 1,
       extra: {
         address: "10.0.0.12",
@@ -301,71 +308,75 @@ const TopologyCanvasStub = defineComponent({
     });
 
     return () =>
-      h("div", {
-        "data-testid": "topology-canvas",
-        "data-layout": props.layout,
-        "data-perf-opt": props.performanceOptimizationEnabled ? "on" : "off",
-      }, [
-        h(
-          "button",
-          {
-            "data-testid": "emit-node-click",
-            onClick: (event: MouseEvent) => {
-              event.stopPropagation();
-              emit("node-click", sampleNode);
+      h(
+        "div",
+        {
+          "data-testid": "topology-canvas",
+          "data-layout": props.layout,
+          "data-perf-opt": props.performanceOptimizationEnabled ? "on" : "off",
+        },
+        [
+          h(
+            "button",
+            {
+              "data-testid": "emit-node-click",
+              onClick: (event: MouseEvent) => {
+                event.stopPropagation();
+                emit("node-click", sampleNode);
+              },
             },
-          },
-          "emit-node-click",
-        ),
-        h(
-          "button",
-          {
-            "data-testid": "emit-node-click-2",
-            onClick: (event: MouseEvent) => {
-              event.stopPropagation();
-              emit("node-click", secondaryNode);
+            "emit-node-click",
+          ),
+          h(
+            "button",
+            {
+              "data-testid": "emit-node-click-2",
+              onClick: (event: MouseEvent) => {
+                event.stopPropagation();
+                emit("node-click", secondaryNode);
+              },
             },
-          },
-          "emit-node-click-2",
-        ),
-        h(
-          "button",
-          {
-            "data-testid": "emit-node-contextmenu",
-            onClick: (event: MouseEvent) => {
-              event.stopPropagation();
-              emit("node-contextmenu", { node: sampleNode, x: 120, y: 160 });
+            "emit-node-click-2",
+          ),
+          h(
+            "button",
+            {
+              "data-testid": "emit-node-contextmenu",
+              onClick: (event: MouseEvent) => {
+                event.stopPropagation();
+                emit("node-contextmenu", { node: sampleNode, x: 120, y: 160 });
+              },
             },
-          },
-          "emit-node-contextmenu",
-        ),
-        h(
-          "button",
-          {
-            "data-testid": "emit-canvas-blank-click",
-            onClick: (event: MouseEvent) => {
-              event.stopPropagation();
-              emit("canvas-blank-click");
+            "emit-node-contextmenu",
+          ),
+          h(
+            "button",
+            {
+              "data-testid": "emit-canvas-blank-click",
+              onClick: (event: MouseEvent) => {
+                event.stopPropagation();
+                emit("canvas-blank-click");
+              },
             },
-          },
-          "emit-canvas-blank-click",
-        ),
-        h(
-          "button",
-          {
-            "data-testid": "emit-layout-resolved-fallback",
-            onClick: (event: MouseEvent) => {
-              event.stopPropagation();
-              emit("layout-resolved", {
-                requested: "dagre",
-                applied: "force",
-                reason: "graph-density",
-              });
+            "emit-canvas-blank-click",
+          ),
+          h(
+            "button",
+            {
+              "data-testid": "emit-layout-resolved-fallback",
+              onClick: (event: MouseEvent) => {
+                event.stopPropagation();
+                emit("layout-resolved", {
+                  requested: "dagre",
+                  applied: "force",
+                  reason: "graph-density",
+                });
+              },
             },
-          },
-          "emit-layout-resolved-fallback",
-        ),
-      ]);
+            "emit-layout-resolved-fallback",
+          ),
+        ],
+      );
   },
 });
 
@@ -436,7 +447,12 @@ const NginxConfigEditorDialogStub = defineComponent({
 });
 
 function mountView(options?: {
-  taskInsights?: Array<{ kind: string; title: string; severity?: "info" | "warning" | "critical"; nodeIds?: string[] }>;
+  taskInsights?: Array<{
+    kind: string;
+    title: string;
+    severity?: "info" | "warning" | "critical";
+    nodeIds?: string[];
+  }>;
 }) {
   storeState.taskView = "explore";
   storeState.maxDepth = 3;
@@ -666,12 +682,14 @@ describe("TopologyView", () => {
 
   it("highlights related nodes when task insight chip is clicked", async () => {
     const wrapper = mountView({
-      taskInsights: [{
-        kind: "dependency",
-        title: "依赖关系摘要",
-        severity: "warning",
-        nodeIds: ["node-1"],
-      }],
+      taskInsights: [
+        {
+          kind: "dependency",
+          title: "依赖关系摘要",
+          severity: "warning",
+          nodeIds: ["node-1"],
+        },
+      ],
     });
     await flushPromises();
 
@@ -682,7 +700,7 @@ describe("TopologyView", () => {
       taskView: "explore",
       evidenceLimit: 20,
     });
-    expect(wrapper.get('[data-testid="detail-panel"]').attributes('data-tab')).toBe('evidence');
+    expect(wrapper.get('[data-testid="detail-panel"]').attributes("data-tab")).toBe("evidence");
   });
 
   it("requests troubleshoot report when opening node detail panel", async () => {
@@ -697,9 +715,9 @@ describe("TopologyView", () => {
       taskView: "explore",
       evidenceLimit: 20,
     });
-    expect(wrapper.get('[data-testid="detail-panel"]').attributes('data-visible')).toBe('on');
-    expect(wrapper.get('[data-testid="detail-panel"]').attributes('data-tab')).toBe('overview');
-    expect(wrapper.get('[data-testid="panel-summary-inbound"]').text()).toBe('1');
+    expect(wrapper.get('[data-testid="detail-panel"]').attributes("data-visible")).toBe("on");
+    expect(wrapper.get('[data-testid="detail-panel"]').attributes("data-tab")).toBe("overview");
+    expect(wrapper.get('[data-testid="panel-summary-inbound"]').text()).toBe("1");
   });
 
   it("ignores stale troubleshoot responses when switching nodes quickly", async () => {
@@ -748,12 +766,11 @@ describe("TopologyView", () => {
     await flushPromises();
 
     expect(getTopologyTroubleshootReportV3Mock).toHaveBeenCalledWith({
-      nodeId: 'node-1',
-      taskView: 'impact',
+      nodeId: "node-1",
+      taskView: "impact",
       evidenceLimit: 20,
     });
   });
-
 
   it("clears stale troubleshoot summary while a new node report is loading", async () => {
     const wrapper = mountView();

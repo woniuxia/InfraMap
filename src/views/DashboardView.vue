@@ -10,6 +10,7 @@ import type { DashboardKpiCard, DashboardQuickAction } from "@/components/dashbo
 import { useDashboardOverview } from "@/composables/useDashboardOverview";
 import {
   Connection,
+  DataAnalysis,
   Files,
   Monitor,
   Refresh,

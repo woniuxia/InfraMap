@@ -21,6 +21,7 @@ mod v018_host_taxonomy_backfill;
 mod v019_application_name_env_type_index;
 mod v020_nginx_endpoints;
 mod v021_application_owner_taxonomy_cleanup;
+mod v022_system_jobs;
 
 pub const MIGRATIONS: &[(i32, &str)] = &[
     (1, v001_initial_schema::SQL),
@@ -44,4 +45,5 @@ pub const MIGRATIONS: &[(i32, &str)] = &[
     (19, v019_application_name_env_type_index::SQL),
     (20, v020_nginx_endpoints::SQL),
     (21, v021_application_owner_taxonomy_cleanup::SQL),
+    (22, v022_system_jobs::SQL),
 ];
