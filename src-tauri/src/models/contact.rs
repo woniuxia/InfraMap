@@ -5,6 +5,7 @@ pub struct Contact {
     #[serde(default)]
     pub id: String,
     pub name: String,
+    pub company: Option<String>,
     pub phone: Option<String>,
     pub email: Option<String>,
     pub remark: Option<String>,

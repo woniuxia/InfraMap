@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { useRoute } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import { useAppStore } from "@/stores/app";
 import { useEnvStore } from "@/stores/env";
 import { ElMessage } from "element-plus";
@@ -18,10 +18,12 @@ import {
   Fold,
   Expand,
   User,
+  More,
 } from "@element-plus/icons-vue";
 import { markRaw, type Component, ref, computed, onMounted, onUnmounted, nextTick } from "vue";
 
 const route = useRoute();
+const router = useRouter();
 const appStore = useAppStore();
 const envStore = useEnvStore();
 
@@ -103,21 +105,51 @@ onUnmounted(() => {
   window.removeEventListener("scroll", handleResize, true);
 });
 
-const menuItems: { path: string; name: string; icon: Component }[] = [
+// 主菜单 7 项
+const mainMenuItems: { path: string; name: string; icon: Component }[] = [
   { path: "/", name: "仪表盘", icon: markRaw(DataAnalysis) },
-  { path: "/ip-addresses", name: "IP地址", icon: markRaw(Connection) },
   { path: "/hosts", name: "服务器", icon: markRaw(Monitor) },
   { path: "/business-applications", name: "业务应用", icon: markRaw(Collection) },
   { path: "/applications", name: "应用服务", icon: markRaw(IconMenu) },
   { path: "/middlewares", name: "中间件", icon: markRaw(Connection) },
   { path: "/nginx-configs", name: "网关", icon: markRaw(SetUp) },
-  { path: "/contacts", name: "联系人", icon: markRaw(User) },
-  { path: "/import-workbench", name: "批量录入", icon: markRaw(UploadFilled) },
-  { path: "/jobs", name: "任务中心", icon: markRaw(Files) },
-  { path: "/integrity-center", name: "数据健康", icon: markRaw(DataAnalysis) },
   { path: "/topology", name: "拓扑图", icon: markRaw(Share) },
-  { path: "/settings", name: "系统设置", icon: markRaw(Setting) },
 ];
+
+// "更多"子菜单分组
+interface MenuGroup {
+  title: string;
+  items: { path: string; name: string; icon: Component }[];
+}
+
+const moreMenuGroups: MenuGroup[] = [
+  {
+    title: "资源管理",
+    items: [
+      { path: "/ip-addresses", name: "IP地址", icon: markRaw(Connection) },
+      { path: "/contacts", name: "联系人", icon: markRaw(User) },
+    ],
+  },
+  {
+    title: "工具箱",
+    items: [
+      { path: "/import-workbench", name: "批量录入", icon: markRaw(UploadFilled) },
+      { path: "/jobs", name: "任务中心", icon: markRaw(Files) },
+      { path: "/integrity-center", name: "数据健康", icon: markRaw(DataAnalysis) },
+    ],
+  },
+];
+
+// 底部独立项
+const settingsItem = { path: "/settings", name: "系统设置", icon: markRaw(Setting) };
+
+// 判断系统设置是否激活
+const isSettingsActive = computed(() => route.path === settingsItem.path);
+
+// 导航到系统设置
+function navigateToSettings() {
+  router.push(settingsItem.path);
+}
 </script>
 
 <template>
@@ -192,19 +224,50 @@ const menuItems: { path: string; name: string; icon: Component }[] = [
       :collapse="appStore.sidebarCollapsed"
       :collapse-transition="false"
       router
+      class="main-menu"
     >
-      <el-menu-item v-for="item in menuItems" :key="item.path" :index="item.path">
+      <!-- 主菜单 7 项 -->
+      <el-menu-item v-for="item in mainMenuItems" :key="item.path" :index="item.path">
         <el-icon><component :is="item.icon" /></el-icon>
         <template #title>{{ item.name }}</template>
       </el-menu-item>
+
+      <!-- "更多" 子菜单 -->
+      <el-sub-menu index="more" popper-class="sidebar-submenu-popper">
+        <template #title>
+          <el-icon><More /></el-icon>
+          <span>更多</span>
+        </template>
+
+        <el-menu-item-group v-for="group in moreMenuGroups" :key="group.title" :title="group.title">
+          <el-menu-item v-for="item in group.items" :key="item.path" :index="item.path">
+            <el-icon><component :is="item.icon" /></el-icon>
+            <template #title>{{ item.name }}</template>
+          </el-menu-item>
+        </el-menu-item-group>
+      </el-sub-menu>
     </el-menu>
-    <div class="sidebar-footer">
-      <el-button text @click="appStore.toggleSidebar">
-        <el-icon size="18">
-          <Fold v-if="!appStore.sidebarCollapsed" />
-          <Expand v-else />
-        </el-icon>
-      </el-button>
+
+    <!-- 底部区域：系统设置 + 折叠按钮 -->
+    <div class="sidebar-bottom">
+      <div
+        class="settings-item"
+        :class="{ 'is-active': isSettingsActive, 'is-collapsed': appStore.sidebarCollapsed }"
+        @click="navigateToSettings"
+      >
+        <el-icon><Setting /></el-icon>
+        <span v-show="!appStore.sidebarCollapsed" class="settings-text">
+          {{ settingsItem.name }}
+        </span>
+      </div>
+      <div class="sidebar-footer">
+        <el-button text @click="appStore.toggleSidebar">
+          <el-icon size="18">
+            <Fold v-if="!appStore.sidebarCollapsed" />
+            <Expand v-else />
+          </el-icon>
+        </el-button>
+      </div>
     </div>
   </div>
 </template>
@@ -235,9 +298,10 @@ const menuItems: { path: string; name: string; icon: Component }[] = [
   font-weight: 700;
   color: var(--im-accent);
 }
-.el-menu {
+.main-menu {
   flex: 1;
   border-right: none;
+  overflow-y: auto;
 
   :deep(.el-menu-item) {
     margin: 2px 8px;
@@ -249,25 +313,112 @@ const menuItems: { path: string; name: string; icon: Component }[] = [
     background: var(--im-accent-dim);
     color: var(--im-accent);
     position: relative;
+
+    &::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 3px;
+      height: 16px;
+      border-radius: 0 2px 2px 0;
+      background: var(--im-accent);
+    }
   }
 
-  :deep(.el-menu-item.is-active::before) {
-    content: "";
-    position: absolute;
-    left: 0;
-    top: 50%;
-    transform: translateY(-50%);
-    width: 3px;
-    height: 16px;
-    border-radius: 0 2px 2px 0;
-    background: var(--im-accent);
+  // 子菜单标题样式
+  :deep(.el-sub-menu__title) {
+    margin: 2px 8px;
+    border-radius: var(--im-radius-sm);
   }
 }
+
+// 底部区域容器
+.sidebar-bottom {
+  border-top: 1px solid var(--im-border-light);
+  background: var(--im-surface-0);
+  flex-shrink: 0;
+}
+
+// 系统设置独立项样式
+.settings-item {
+  display: flex;
+  align-items: center;
+  height: 48px;
+  padding: 0 16px;
+  margin: 4px 8px;
+  border-radius: var(--im-radius-sm);
+  cursor: pointer;
+  transition: all var(--im-duration-base) var(--im-ease-standard);
+  color: var(--im-text-primary);
+
+  &:hover {
+    background: var(--im-surface-1);
+  }
+
+  &.is-active {
+    background: var(--im-accent-dim);
+    color: var(--im-accent);
+    position: relative;
+
+    &::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 3px;
+      height: 16px;
+      border-radius: 0 2px 2px 0;
+      background: var(--im-accent);
+    }
+  }
+
+  &.is-collapsed {
+    justify-content: center;
+    padding: 0;
+    margin: 4px auto;
+    width: 48px;
+  }
+
+  .el-icon {
+    font-size: 18px;
+    margin-right: 12px;
+    flex-shrink: 0;
+  }
+
+  &.is-collapsed .el-icon {
+    margin-right: 0;
+  }
+}
+
+.settings-text {
+  font-size: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .sidebar-footer {
   padding: 8px;
   display: flex;
   justify-content: center;
   border-top: 1px solid var(--im-border-light);
+}
+
+// 子菜单弹出层样式
+:deep(.sidebar-submenu-popper) {
+  .el-menu-item-group__title {
+    font-size: 12px;
+    color: var(--im-text-tertiary);
+    padding: 8px 16px;
+  }
+
+  .el-menu-item {
+    height: 40px;
+    line-height: 40px;
+  }
 }
 
 // ===== 环境选择器 - 工业精致风格 =====

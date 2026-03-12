@@ -109,6 +109,9 @@ pub fn validate_contact(contact: &Contact) -> Result<(), String> {
     validate_required(&contact.name, "name")?;
     validate_string_length(contact.name.trim(), 1, 100, "name")?;
 
+    if let Some(company) = contact.company.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+        validate_string_length(company, 0, 100, "company")?;
+    }
     if let Some(phone) = contact.phone.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
         validate_string_length(phone, 1, 50, "phone")?;
     }

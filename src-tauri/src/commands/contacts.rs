@@ -10,21 +10,22 @@ fn row_to_contact(row: &rusqlite::Row) -> rusqlite::Result<Contact> {
     Ok(Contact {
         id: row.get(0)?,
         name: row.get(1)?,
-        phone: row.get(2)?,
-        email: row.get(3)?,
-        remark: row.get(4)?,
-        created_at: row.get(5)?,
-        updated_at: row.get(6)?,
+        company: row.get(2)?,
+        phone: row.get(3)?,
+        email: row.get(4)?,
+        remark: row.get(5)?,
+        created_at: row.get(6)?,
+        updated_at: row.get(7)?,
     })
 }
 
-const SELECT_COLUMNS: &str = "c.id, c.name, c.phone, c.email, c.remark, c.created_at, c.updated_at";
+const SELECT_COLUMNS: &str = "c.id, c.name, c.company, c.phone, c.email, c.remark, c.created_at, c.updated_at";
 
 fn build_contacts_where_clause(params: &QueryParams) -> (String, Vec<SqlParam>) {
     build_resource_where_clause(
         &["c.is_deleted = 0"],
         params,
-        &["c.name", "c.phone", "c.email", "c.remark"],
+        &["c.name", "c.company", "c.phone", "c.email", "c.remark"],
         &[],
         &[],
         &[],
@@ -102,19 +103,20 @@ impl_save_command!(
     |data, persisted_id, now, _command| {
         prepare: {
             let name = data.name.trim().to_string();
+            let company = data.company.as_deref().map(str::trim).filter(|v| !v.is_empty()).map(|v| v.to_string());
             let phone = data.phone.as_deref().map(str::trim).filter(|v| !v.is_empty()).map(|v| v.to_string());
             let email = data.email.as_deref().map(str::trim).filter(|v| !v.is_empty()).map(|v| v.to_string());
             let remark = data.remark.as_deref().map(str::trim).filter(|v| !v.is_empty()).map(|v| v.to_string());
         },
         insert: (
-            "INSERT INTO contacts (id, name, phone, email, remark, is_deleted, deleted_at, created_at, updated_at)
-             VALUES (?1,?2,?3,?4,?5,0,NULL,?6,?6)",
-            [&persisted_id, &name, phone, email, remark, now]
+            "INSERT INTO contacts (id, name, company, phone, email, remark, is_deleted, deleted_at, created_at, updated_at)
+             VALUES (?1,?2,?3,?4,?5,?6,0,NULL,?7,?7)",
+            [&persisted_id, &name, company, phone, email, remark, now]
         ),
         update: (
-            "UPDATE contacts SET name=?1, phone=?2, email=?3, remark=?4, updated_at=?5
-             WHERE id=?6 AND is_deleted=0",
-            [&name, phone, email, remark, now, data.id]
+            "UPDATE contacts SET name=?1, company=?2, phone=?3, email=?4, remark=?5, updated_at=?6
+             WHERE id=?7 AND is_deleted=0",
+            [&name, company, phone, email, remark, now, data.id]
         ),
         display_name: name,
     },

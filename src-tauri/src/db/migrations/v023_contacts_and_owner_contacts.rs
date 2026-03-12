@@ -2,6 +2,7 @@ pub const SQL: &str = r#"
         CREATE TABLE IF NOT EXISTS contacts (
             id TEXT PRIMARY KEY,
             name TEXT NOT NULL,
+            company TEXT,
             phone TEXT,
             email TEXT,
             remark TEXT,
@@ -12,6 +13,7 @@ pub const SQL: &str = r#"
         );
 
         CREATE INDEX IF NOT EXISTS idx_contacts_name ON contacts(name) WHERE is_deleted = 0;
+        CREATE INDEX IF NOT EXISTS idx_contacts_company ON contacts(company) WHERE is_deleted = 0;
         CREATE INDEX IF NOT EXISTS idx_contacts_phone ON contacts(phone) WHERE is_deleted = 0;
         CREATE INDEX IF NOT EXISTS idx_contacts_email ON contacts(email) WHERE is_deleted = 0;
 
