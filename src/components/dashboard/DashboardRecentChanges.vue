@@ -48,7 +48,7 @@ function resourceTypeLabel(type: string) {
         host: "服务器",
         application: "应用",
         middleware: "中间件",
-        nginx: "负载均衡",
+        nginx: "网关",
         deployment: "部署关系",
         dependency: "依赖关系",
       } as Record<string, string>

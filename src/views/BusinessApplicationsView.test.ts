@@ -11,11 +11,7 @@ import {
   deleteBusinessApplication,
 } from "@/api/business-applications";
 import { listApplications } from "@/api/applications";
-import {
-  listBusinessApplicationOwnerTerms,
-  listResourceTerms,
-  saveResourceTerms,
-} from "@/api/taxonomy";
+import { listContacts } from "@/api/contacts";
 
 const {
   businessEnvOptions,
@@ -64,6 +60,7 @@ vi.mock("@/api/business-applications", () => ({
         id: "ba-1",
         name: "支付中心",
         owners: ["alice", "bob"],
+        owner_contact_ids: ["contact-alice", "contact-bob"],
         env: "prod",
         status: "active",
         created_at: "",
@@ -112,10 +109,18 @@ vi.mock("@/api/applications", () => ({
   })),
 }));
 
-vi.mock("@/api/taxonomy", () => ({
-  listBusinessApplicationOwnerTerms: vi.fn(async () => ["alice", "bob"]),
-  listResourceTerms: vi.fn(async () => ["alice", "bob"]),
-  saveResourceTerms: vi.fn(async () => undefined),
+vi.mock("@/api/contacts", () => ({
+  listContacts: vi.fn(async () => ({
+    data: [
+      { id: "contact-alice", name: "alice", created_at: "", updated_at: "" },
+      { id: "contact-bob", name: "bob", created_at: "", updated_at: "" },
+    ],
+    total: 2,
+    page: 1,
+    page_size: 500,
+  })),
+  getContact: vi.fn(async (id: string) => ({ id, name: id, created_at: "", updated_at: "" })),
+  saveContact: vi.fn(async () => "contact-new"),
 }));
 
 vi.mock("@/constants/options", () => ({
@@ -324,18 +329,13 @@ describe("BusinessApplicationsView", () => {
     await saveButton!.trigger("click");
     await flushPromises();
 
-    const savePayload = vi.mocked(saveBusinessApplication).mock.calls[0]?.[0] ?? {};
-    expect(Object.prototype.hasOwnProperty.call(savePayload, "owner")).toBe(false);
+    const savePayload =
+      (vi.mocked(saveBusinessApplication).mock.calls[0]?.[0] as Record<string, unknown>) ?? {};
+    expect(Object.prototype.hasOwnProperty.call(savePayload, "owners")).toBe(false);
+    expect(savePayload["owner_contact_ids"]).toEqual([]);
     expect(listApplications).toHaveBeenCalled();
     expect(saveBusinessApplication).toHaveBeenCalled();
-    expect(saveResourceTerms).toHaveBeenCalledWith({
-      resource_type: "business_application",
-      resource_id: "ba-1",
-      field_key: "owner",
-      values: [],
-    });
-    expect(listBusinessApplicationOwnerTerms).toHaveBeenCalled();
-    expect(listResourceTerms).not.toHaveBeenCalled();
+    expect(listContacts).toHaveBeenCalled();
     expect(replaceServicesByBusinessApplication).toHaveBeenCalledWith("ba-1", []);
     expect(listBusinessApplications).toHaveBeenCalled();
     expect(listServicesByBusinessApplication).toHaveBeenCalledWith("ba-1");
@@ -352,7 +352,6 @@ describe("BusinessApplicationsView", () => {
     expect(renderedFields).toContain('"value":"active"');
     expect(renderedFields).toContain('"label":"停用"');
     expect(renderedFields).toContain('"value":"inactive"');
-    expect(getEnvLabelMock).toHaveBeenCalledWith("prod");
     expect(getBusinessApplicationStatusLabelMock).toHaveBeenCalledWith("active");
 
     const addButton = wrapper

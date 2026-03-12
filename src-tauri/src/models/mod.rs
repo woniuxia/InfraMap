@@ -3,6 +3,7 @@ pub mod audit_log;
 pub mod business_application;
 pub mod call_relation;
 pub mod common;
+pub mod contact;
 pub mod dashboard;
 pub mod dependency;
 pub mod deployment;

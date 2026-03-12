@@ -110,6 +110,7 @@ fn validate_replace_item(command: &str, item: &ReplaceCallRelationItem) -> AppRe
             "grpc_call",
             "db_query",
             "cache_access",
+            "forward",
         ],
         "relation_type",
     )

@@ -41,5 +41,5 @@ export function formatRelationTargetLabel(input: RelationTargetLabelInput): stri
     return `${fallbackName}（${typeLabel}）`;
   }
 
-  return `${fallbackName}（负载均衡）`;
+  return `${fallbackName}（网关）`;
 }

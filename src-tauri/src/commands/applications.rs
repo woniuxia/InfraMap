@@ -2,12 +2,11 @@ use std::collections::{HashMap, HashSet};
 use tauri::State;
 
 use crate::commands::taxonomy::{
-    delete_resource_terms, parse_tech_stack_terms, save_resource_terms, FIELD_OWNER,
-    FIELD_TECH_STACK,
+    delete_resource_terms, parse_tech_stack_terms, save_resource_terms, FIELD_TECH_STACK,
 };
 use crate::db::crud::{
     build_exists_like_clause, build_resource_where_clause, count_query, delete_with_audit,
-    resolve_upsert_state, write_audit_log_entry, SqlParam,
+    parse_filter_values, resolve_upsert_state, write_audit_log_entry, SqlParam,
 };
 use crate::db::transaction::with_transaction;
 use crate::db::{get_conn, DbPool};
@@ -27,6 +26,7 @@ fn row_to_application(row: &rusqlite::Row) -> rusqlite::Result<Application> {
         deploy_mode: row.get(6)?,
         env: row.get(7)?,
         git_repo: row.get(8)?,
+        owner_contact_ids: Some(Vec::new()),
         owners: Some(Vec::new()),
         business_application_id: row.get(9)?,
         business_application_name: row.get(10)?,
@@ -82,18 +82,18 @@ where
         .collect()
 }
 
-fn normalize_owner_names(owners: Option<Vec<String>>) -> Vec<String> {
+fn normalize_owner_contact_ids(owner_contact_ids: Option<Vec<String>>) -> Vec<String> {
     let mut normalized: Vec<String> = Vec::new();
     let mut dedupe: HashSet<String> = HashSet::new();
 
-    if let Some(items) = owners {
+    if let Some(items) = owner_contact_ids {
         for item in items {
-            let owner = item.trim().to_string();
-            if owner.is_empty() {
+            let contact_id = item.trim().to_string();
+            if contact_id.is_empty() {
                 continue;
             }
-            if dedupe.insert(owner.clone()) {
-                normalized.push(owner);
+            if dedupe.insert(contact_id.clone()) {
+                normalized.push(contact_id);
             }
         }
     }
@@ -101,26 +101,24 @@ fn normalize_owner_names(owners: Option<Vec<String>>) -> Vec<String> {
     normalized
 }
 
-fn load_owner_map(
+fn load_owner_contacts_map(
     conn: &rusqlite::Connection,
     app_ids: &[String],
-) -> Result<HashMap<String, Vec<String>>, rusqlite::Error> {
+) -> Result<HashMap<String, Vec<(String, String)>>, rusqlite::Error> {
     if app_ids.is_empty() {
         return Ok(HashMap::new());
     }
 
     let placeholders = vec!["?"; app_ids.len()].join(", ");
     let sql = format!(
-        "SELECT tb.resource_id, tt.display_name
-         FROM taxonomy_bindings tb
-         JOIN taxonomy_terms tt ON tt.id = tb.term_id
-         WHERE tb.is_deleted = 0
-           AND tt.is_deleted = 0
-           AND tb.resource_type = 'application'
-           AND tt.field_key = '{}'
-           AND tb.resource_id IN ({})
-         ORDER BY tt.display_name ASC",
-        FIELD_OWNER, placeholders
+        "SELECT aoc.application_id, c.id, c.name
+         FROM application_owner_contacts aoc
+         JOIN contacts c ON c.id = aoc.contact_id
+         WHERE aoc.is_deleted = 0
+           AND c.is_deleted = 0
+           AND aoc.application_id IN ({})
+         ORDER BY c.name COLLATE NOCASE ASC, c.id ASC",
+        placeholders
     );
 
     let param_refs: Vec<&dyn rusqlite::types::ToSql> = app_ids
@@ -129,36 +127,67 @@ fn load_owner_map(
         .collect();
     let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map(param_refs.as_slice(), |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+        ))
     })?;
 
-    let mut map: HashMap<String, Vec<String>> = HashMap::new();
+    let mut map: HashMap<String, Vec<(String, String)>> = HashMap::new();
     for row in rows {
-        let (app_id, owner_name) = row?;
-        map.entry(app_id).or_default().push(owner_name);
+        let (app_id, contact_id, contact_name) = row?;
+        map.entry(app_id)
+            .or_default()
+            .push((contact_id, contact_name));
     }
 
     Ok(map)
 }
 
-fn merge_owner_fields(app: &mut Application, owner_map: &HashMap<String, Vec<String>>) {
-    app.owners = Some(owner_map.get(&app.id).cloned().unwrap_or_default());
+fn merge_owner_fields(
+    app: &mut Application,
+    owner_map: &HashMap<String, Vec<(String, String)>>,
+) {
+    if let Some(items) = owner_map.get(&app.id) {
+        app.owner_contact_ids = Some(items.iter().map(|(id, _)| id.clone()).collect());
+        app.owners = Some(items.iter().map(|(_, name)| name.clone()).collect());
+    } else {
+        app.owner_contact_ids = Some(Vec::new());
+        app.owners = Some(Vec::new());
+    }
 }
 
 fn build_applications_where_clause(params: &QueryParams) -> (String, Vec<SqlParam>) {
-    let owner_search_clause = build_exists_like_clause(
-        "taxonomy_bindings tb JOIN taxonomy_terms tt ON tt.id = tb.term_id",
+    let owner_name_search_clause = build_exists_like_clause(
+        "application_owner_contacts aoc JOIN contacts c ON c.id = aoc.contact_id",
         &[
-            "tb.resource_type = 'application'",
-            "tb.resource_id = applications.id",
-            "tb.is_deleted = 0",
-            "tt.is_deleted = 0",
-            "tt.field_key = 'owner'",
+            "aoc.application_id = applications.id",
+            "aoc.is_deleted = 0",
+            "c.is_deleted = 0",
         ],
-        "tt.display_name",
+        "c.name",
+    );
+    let owner_phone_search_clause = build_exists_like_clause(
+        "application_owner_contacts aoc JOIN contacts c ON c.id = aoc.contact_id",
+        &[
+            "aoc.application_id = applications.id",
+            "aoc.is_deleted = 0",
+            "c.is_deleted = 0",
+        ],
+        "c.phone",
+    );
+    let owner_email_search_clause = build_exists_like_clause(
+        "application_owner_contacts aoc JOIN contacts c ON c.id = aoc.contact_id",
+        &[
+            "aoc.application_id = applications.id",
+            "aoc.is_deleted = 0",
+            "c.is_deleted = 0",
+        ],
+        "c.email",
     );
 
-    build_resource_where_clause(
+    let (mut where_clause, mut sql_params) = build_resource_where_clause(
         &["applications.is_deleted = 0"],
         params,
         &[
@@ -167,15 +196,45 @@ fn build_applications_where_clause(params: &QueryParams) -> (String, Vec<SqlPara
             "applications.tech_stack",
             "applications.git_repo",
         ],
-        &[owner_search_clause],
+        &[
+            owner_name_search_clause,
+            owner_phone_search_clause,
+            owner_email_search_clause,
+        ],
         &[
             ("type", "applications.type"),
             ("env", "applications.env"),
             ("status", "applications.status"),
             ("deploy_mode", "applications.deploy_mode"),
         ],
-        &[("owner", "application", FIELD_OWNER, "applications.id")],
-    )
+        &[],
+    );
+
+    if let Some(filters) = params.filters.as_ref() {
+        if let Some(owner_filter) = filters.get("owner") {
+            let owner_contact_ids = parse_filter_values(owner_filter);
+            if !owner_contact_ids.is_empty() {
+                let placeholders = vec!["?"; owner_contact_ids.len()].join(", ");
+                where_clause.push_str(&format!(
+                    " AND EXISTS (
+                        SELECT 1
+                        FROM application_owner_contacts aoc
+                        JOIN contacts c ON c.id = aoc.contact_id
+                        WHERE aoc.application_id = applications.id
+                          AND aoc.is_deleted = 0
+                          AND c.is_deleted = 0
+                          AND aoc.contact_id IN ({})
+                    )",
+                    placeholders
+                ));
+                for contact_id in owner_contact_ids {
+                    sql_params.push(Box::new(contact_id));
+                }
+            }
+        }
+    }
+
+    (where_clause, sql_params)
 }
 
 #[tauri::command]
@@ -221,7 +280,7 @@ pub fn list_applications(
         .map_err(|e| AppError::from_db_error(command, "读取应用列表", e))?;
 
     let app_ids: Vec<String> = data.iter().map(|app| app.id.clone()).collect();
-    let owner_map = load_owner_map(&conn, &app_ids)
+    let owner_map = load_owner_contacts_map(&conn, &app_ids)
         .map_err(|e| AppError::from_db_error(command, "读取应用负责人", e))?;
     for app in &mut data {
         merge_owner_fields(app, &owner_map);
@@ -248,10 +307,73 @@ pub fn get_application(pool: State<DbPool>, id: String) -> AppResult<Application
         .query_row(&sql, rusqlite::params![id], row_to_application)
         .map_err(|e| AppError::not_found(command, "应用不存在或已删除。", Some(e.to_string())))?;
 
-    let owner_map = load_owner_map(&conn, &[app.id.clone()])
+    let owner_map = load_owner_contacts_map(&conn, &[app.id.clone()])
         .map_err(|e| AppError::from_db_error(command, "读取应用负责人", e))?;
     merge_owner_fields(&mut app, &owner_map);
     Ok(app)
+}
+
+fn sync_application_owner_contacts(
+    command: &str,
+    conn: &rusqlite::Connection,
+    application_id: &str,
+    owner_contact_ids: &[String],
+    now: &str,
+) -> AppResult<()> {
+    // 这里使用物理删除的方式同步绑定关系：实现简单、可重复执行，且与 host_ip_bindings 的处理方式一致。
+    conn.execute(
+        "DELETE FROM application_owner_contacts WHERE application_id = ?1",
+        rusqlite::params![application_id],
+    )
+    .map_err(|e| AppError::from_db_error(command, "清理应用负责人绑定", e))?;
+
+    if owner_contact_ids.is_empty() {
+        return Ok(());
+    }
+
+    // 防御式校验：要求所有 contact_id 均存在且未删除，避免写入脏数据。
+    let placeholders = vec!["?"; owner_contact_ids.len()].join(", ");
+    let sql = format!(
+        "SELECT id FROM contacts WHERE is_deleted = 0 AND id IN ({})",
+        placeholders
+    );
+    let mut stmt = conn
+        .prepare(&sql)
+        .map_err(|e| AppError::from_db_error(command, "查询联系人", e))?;
+    let rows = stmt
+        .query_map(
+            rusqlite::params_from_iter(owner_contact_ids.iter()),
+            |row| row.get::<_, String>(0),
+        )
+        .map_err(|e| AppError::from_db_error(command, "读取联系人", e))?;
+
+    let mut existing: HashSet<String> = HashSet::new();
+    for row in rows {
+        existing.insert(row.map_err(|e| AppError::from_db_error(command, "读取联系人", e))?);
+    }
+
+    let missing: Vec<String> = owner_contact_ids
+        .iter()
+        .filter(|id| !existing.contains(*id))
+        .cloned()
+        .collect();
+    if !missing.is_empty() {
+        return Err(AppError::validation(
+            command,
+            format!("负责人联系人不存在或已删除: {}", missing.join(", ")),
+        ));
+    }
+
+    for contact_id in owner_contact_ids {
+        conn.execute(
+            "INSERT INTO application_owner_contacts (id, application_id, contact_id, is_deleted, deleted_at, created_at, updated_at)
+             VALUES (?1, ?2, ?3, 0, NULL, ?4, ?4)",
+            rusqlite::params![uuid::Uuid::new_v4().to_string(), application_id, contact_id, now],
+        )
+        .map_err(|e| AppError::from_db_error(command, "创建应用负责人绑定", e))?;
+    }
+
+    Ok(())
 }
 
 fn save_application_inner(
@@ -259,10 +381,9 @@ fn save_application_inner(
     conn: &rusqlite::Connection,
     data: Application,
 ) -> AppResult<String> {
-    let normalized_owners = normalize_owner_names(data.owners.clone());
-
     let mut normalized_data = data.clone();
-    normalized_data.owners = Some(normalized_owners.clone());
+    let normalized_owner_contact_ids = normalize_owner_contact_ids(data.owner_contact_ids.clone());
+    normalized_data.owner_contact_ids = Some(normalized_owner_contact_ids.clone());
     let tech_stack_terms = parse_tech_stack_terms(normalized_data.tech_stack.as_deref());
     validate_application(&normalized_data).map_err(|e| AppError::validation(command, e))?;
     let now = chrono::Utc::now().to_rfc3339();
@@ -292,15 +413,13 @@ fn save_application_inner(
                 ],
             )
             .map_err(|e| AppError::from_db_error(command, "创建应用", e))?;
-            save_resource_terms(
+            sync_application_owner_contacts(
+                command,
                 conn,
-                "application",
                 &persisted_id,
-                FIELD_OWNER,
-                &normalized_owners,
+                &normalized_owner_contact_ids,
                 &now,
-            )
-            .map_err(|e| AppError::from_db_error(command, "同步负责人词条", e))?;
+            )?;
             save_resource_terms(
                 conn,
                 "application",
@@ -341,15 +460,13 @@ fn save_application_inner(
                 ],
             )
             .map_err(|e| AppError::from_db_error(command, "更新应用", e))?;
-            save_resource_terms(
+            sync_application_owner_contacts(
+                command,
                 conn,
-                "application",
                 &normalized_data.id,
-                FIELD_OWNER,
-                &normalized_owners,
+                &normalized_owner_contact_ids,
                 &now,
-            )
-            .map_err(|e| AppError::from_db_error(command, "同步负责人词条", e))?;
+            )?;
             save_resource_terms(
                 conn,
                 "application",
@@ -403,6 +520,11 @@ pub fn delete_application(pool: State<DbPool>, id: String) -> AppResult<()> {
             &id,
             name.as_deref(),
         )?;
+        conn.execute(
+            "DELETE FROM application_owner_contacts WHERE application_id = ?1",
+            rusqlite::params![id],
+        )
+        .map_err(|e| AppError::from_db_error(command, "删除应用负责人绑定", e))?;
         delete_resource_terms(conn, "application", &id, &now)
             .map_err(|e| AppError::from_db_error(command, "删除应用词条绑定", e))?;
         Ok(())
@@ -413,7 +535,7 @@ pub fn delete_application(pool: State<DbPool>, id: String) -> AppResult<()> {
 mod tests {
     use super::{
         build_applications_where_clause, collect_top_tech_stacks, merge_owner_fields,
-        normalize_owner_names, row_to_application, save_application_inner, SELECT_COLUMNS,
+        normalize_owner_contact_ids, row_to_application, save_application_inner, SELECT_COLUMNS,
     };
     use crate::error::AppErrorCode;
     use crate::models::application::Application;
@@ -446,25 +568,25 @@ mod tests {
     }
 
     #[test]
-    fn normalize_owner_names_should_trim_deduplicate_and_drop_empty() {
-        let owners = vec![
-            " alice ".to_string(),
+    fn normalize_owner_contact_ids_should_trim_deduplicate_and_drop_empty() {
+        let owner_contact_ids = vec![
+            " c-alice ".to_string(),
             "".to_string(),
-            "bob".to_string(),
-            "alice".to_string(),
+            "c-bob".to_string(),
+            "c-alice".to_string(),
             "   ".to_string(),
-            "bob ".to_string(),
-            "carol".to_string(),
+            "c-bob ".to_string(),
+            "c-carol".to_string(),
         ];
 
-        let result = normalize_owner_names(Some(owners));
-        assert_eq!(result, vec!["alice", "bob", "carol"]);
+        let result = normalize_owner_contact_ids(Some(owner_contact_ids));
+        assert_eq!(result, vec!["c-alice", "c-bob", "c-carol"]);
     }
 
     #[test]
-    fn build_applications_where_clause_should_use_taxonomy_owner_filter_only() {
+    fn build_applications_where_clause_should_support_owner_contact_filter_and_search() {
         let mut filters = HashMap::new();
-        filters.insert("owner".to_string(), r#"["alice","bob"]"#.to_string());
+        filters.insert("owner".to_string(), r#"["c-alice","c-bob"]"#.to_string());
         let params = QueryParams {
             search: Some("alice".to_string()),
             filters: Some(filters),
@@ -473,14 +595,15 @@ mod tests {
 
         let (where_clause, sql_params) = build_applications_where_clause(&params);
         assert!(where_clause.contains("EXISTS"));
-        assert!(where_clause.contains("taxonomy_bindings"));
-        assert!(!where_clause.contains("application_owners"));
+        assert!(where_clause.contains("application_owner_contacts"));
+        assert!(where_clause.contains("contacts"));
+        assert!(!where_clause.contains("taxonomy_bindings"));
         assert!(!where_clause.contains("applications.owner"));
-        assert!(sql_params.len() >= 6);
+        assert!(sql_params.len() >= 9);
     }
 
     #[test]
-    fn merge_owner_fields_should_default_to_empty_owner_list_when_taxonomy_binding_missing() {
+    fn merge_owner_fields_should_default_to_empty_owner_lists_when_binding_missing() {
         let conn = rusqlite::Connection::open_in_memory().expect("open in-memory db");
         conn.execute_batch(
             "CREATE TABLE applications (
@@ -528,39 +651,44 @@ mod tests {
             .expect("query application row with stale owner column");
 
         merge_owner_fields(&mut app, &HashMap::new());
+        assert_eq!(app.owner_contact_ids, Some(Vec::<String>::new()));
         assert_eq!(app.owners, Some(Vec::<String>::new()));
     }
 
     #[test]
-    fn save_application_inner_should_skip_owner_bindings_when_owners_missing() {
+    fn save_application_inner_should_sync_owner_contact_bindings_when_owner_contact_ids_provided()
+    {
         let conn = setup_test_db();
+        let now = chrono::Utc::now().to_rfc3339();
+        conn.execute(
+            "INSERT INTO contacts (id, name, phone, email, remark, is_deleted, deleted_at, created_at, updated_at)
+             VALUES ('c-alice', 'alice', NULL, NULL, NULL, 0, NULL, ?1, ?1)",
+            rusqlite::params![now],
+        )
+        .expect("seed contact");
+
         let app: Application = serde_json::from_value(json!({
             "id": "",
             "name": "owners-missing",
             "type": "backend",
             "env": "prod",
-            "status": "running"
+            "status": "running",
+            "owner_contact_ids": ["c-alice"]
         }))
-        .expect("deserialize application without owners");
+        .expect("deserialize application");
 
-        let created_id =
-            save_application_inner("test", &conn, app).expect("create application without owners");
+        let created_id = save_application_inner("test", &conn, app).expect("create application");
 
         let owner_binding_count: i64 = conn
             .query_row(
                 "SELECT COUNT(*)
-                 FROM taxonomy_bindings tb
-                 JOIN taxonomy_terms tt ON tt.id = tb.term_id
-                 WHERE tb.resource_type = 'application'
-                   AND tb.resource_id = ?1
-                   AND tb.is_deleted = 0
-                   AND tt.is_deleted = 0
-                   AND tt.field_key = 'owner'",
+                 FROM application_owner_contacts
+                 WHERE application_id = ?1 AND contact_id = 'c-alice' AND is_deleted = 0",
                 rusqlite::params![created_id],
                 |row| row.get(0),
             )
-            .expect("count owner taxonomy bindings");
-        assert_eq!(owner_binding_count, 0);
+            .expect("count owner bindings");
+        assert_eq!(owner_binding_count, 1);
     }
 
     fn make_new_application(name: &str) -> Application {
@@ -574,7 +702,8 @@ mod tests {
             deploy_mode: Some("docker".into()),
             env: "prod".into(),
             git_repo: None,
-            owners: Some(vec!["alice".into()]),
+            owner_contact_ids: None,
+            owners: None,
             business_application_id: None,
             business_application_name: None,
             status: "running".into(),
@@ -611,38 +740,65 @@ mod tests {
 
         let mut updated = make_new_application("app-update-renamed");
         updated.id = created_id.clone();
-        updated.owners = Some(vec!["alice".into(), "bob".into()]);
+        updated.owner_contact_ids = None;
 
         let returned_id = save_application_inner("test", &conn, updated).expect("update");
         assert_eq!(returned_id, created_id);
     }
 
     #[test]
-    fn save_application_inner_should_not_depend_on_application_owners_table() {
+    fn save_application_inner_should_replace_owner_contacts_on_update() {
         let conn = setup_test_db();
-        conn.execute("DROP TABLE IF EXISTS application_owners", [])
-            .expect("drop application_owners");
+        let now = chrono::Utc::now().to_rfc3339();
+        conn.execute(
+            "INSERT INTO contacts (id, name, phone, email, remark, is_deleted, deleted_at, created_at, updated_at)
+             VALUES ('c-alice', 'alice', NULL, NULL, NULL, 0, NULL, ?1, ?1)",
+            rusqlite::params![now],
+        )
+        .expect("seed alice");
+        conn.execute(
+            "INSERT INTO contacts (id, name, phone, email, remark, is_deleted, deleted_at, created_at, updated_at)
+             VALUES ('c-bob', 'bob', NULL, NULL, NULL, 0, NULL, ?1, ?1)",
+            rusqlite::params![now],
+        )
+        .expect("seed bob");
 
-        let created_id =
-            save_application_inner("test", &conn, make_new_application("app-owner-source"))
-                .expect("create application without owners table");
+        let mut app = make_new_application("app-owner-source");
+        app.owner_contact_ids = Some(vec!["c-alice".into()]);
+        let created_id = save_application_inner("test", &conn, app).expect("create");
         assert!(!created_id.is_empty());
 
-        let owner_binding_count: i64 = conn
+        let first_count: i64 = conn
             .query_row(
-                "SELECT COUNT(*)
-                 FROM taxonomy_bindings tb
-                 JOIN taxonomy_terms tt ON tt.id = tb.term_id
-                 WHERE tb.resource_type = 'application'
-                   AND tb.resource_id = ?1
-                   AND tb.is_deleted = 0
-                   AND tt.is_deleted = 0
-                   AND tt.field_key = 'owner'",
+                "SELECT COUNT(*) FROM application_owner_contacts WHERE application_id = ?1 AND is_deleted = 0",
                 rusqlite::params![created_id],
                 |row| row.get(0),
             )
-            .expect("query owner taxonomy bindings");
-        assert_eq!(owner_binding_count, 1);
+            .expect("count owner bindings");
+        assert_eq!(first_count, 1);
+
+        let mut updated = make_new_application("app-owner-source");
+        updated.id = created_id.clone();
+        updated.owner_contact_ids = Some(vec!["c-bob".into()]);
+        save_application_inner("test", &conn, updated).expect("update");
+
+        let second_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM application_owner_contacts WHERE application_id = ?1 AND is_deleted = 0",
+                rusqlite::params![created_id],
+                |row| row.get(0),
+            )
+            .expect("count owner bindings after update");
+        assert_eq!(second_count, 1);
+
+        let current_owner: String = conn
+            .query_row(
+                "SELECT contact_id FROM application_owner_contacts WHERE application_id = ?1 AND is_deleted = 0 LIMIT 1",
+                rusqlite::params![created_id],
+                |row| row.get(0),
+            )
+            .expect("query current owner contact id");
+        assert_eq!(current_owner, "c-bob");
     }
 
     #[test]

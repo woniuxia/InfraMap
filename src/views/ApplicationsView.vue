@@ -5,7 +5,7 @@ import type { SearchFieldConfig, SearchToolbarQueryPayload } from "@/types/searc
 import { listApplications, deleteApplication } from "@/api/applications";
 import { useResourceList } from "@/composables/useResourceList";
 import { useEnvStore } from "@/stores/env";
-import { DEPLOY_MODE_OPTIONS, ENV_OPTIONS, STATUS_OPTIONS } from "@/constants/options";
+import { DEPLOY_MODE_OPTIONS, STATUS_OPTIONS } from "@/constants/options";
 import { generateDraftId } from "@/utils/draft";
 import { buildApplicationCopyDraft } from "@/utils/resourceCopy";
 import { ElMessage } from "element-plus";
@@ -37,7 +37,6 @@ const editorInitialDraft = ref<Partial<Application>>({});
 
 interface ApplicationListFilters {
   type: string[];
-  env: string[];
   status: string[];
   deploy_mode: string[];
 }
@@ -45,7 +44,6 @@ interface ApplicationListFilters {
 function createDefaultFilters(): ApplicationListFilters {
   return {
     type: [],
-    env: [],
     status: [],
     deploy_mode: [],
   };
@@ -61,7 +59,6 @@ const typeOptions = [
   { label: "其他", value: "other" },
 ];
 
-const envOptions = ENV_OPTIONS;
 const statusOptions = STATUS_OPTIONS;
 const deployModeOptions = DEPLOY_MODE_OPTIONS;
 
@@ -73,14 +70,6 @@ const toolbarFields: SearchFieldConfig[] = [
     type: "multi-select",
     width: "md",
     options: typeOptions,
-  },
-  {
-    key: "env",
-    queryKey: "env",
-    label: "环境",
-    type: "multi-select",
-    width: "sm",
-    options: envOptions,
   },
   {
     key: "status",
@@ -190,19 +179,6 @@ function typeLabel(type: string) {
   );
 }
 
-function envLabel(env: string) {
-  return ({ prod: "生产", dev: "开发", test: "测试" } as Record<string, string>)[env] || env;
-}
-
-function envTagType(env: string): "primary" | "success" | "warning" | "info" | "danger" {
-  const map: Record<string, "primary" | "success" | "warning" | "info" | "danger"> = {
-    prod: "danger",
-    dev: "info",
-    test: "warning",
-  };
-  return map[env] || "info";
-}
-
 onMounted(() => {
   fetchData();
 });
@@ -231,11 +207,6 @@ onMounted(() => {
       <el-table-column label="地址" min-width="180" align="center">
         <template #default="{ row }">
           {{ row.address || "-" }}{{ row.port ? ":" + row.port : "" }}
-        </template>
-      </el-table-column>
-      <el-table-column prop="env" label="环境" width="80" align="center">
-        <template #default="{ row }">
-          <el-tag :type="envTagType(row.env)" size="small">{{ envLabel(row.env) }}</el-tag>
         </template>
       </el-table-column>
       <el-table-column

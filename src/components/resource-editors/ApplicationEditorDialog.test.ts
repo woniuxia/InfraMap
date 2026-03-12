@@ -26,8 +26,23 @@ vi.mock("@/api/business-applications", () => ({
   })),
 }));
 
+vi.mock("@/api/contacts", () => ({
+  listContacts: vi.fn(async () => ({
+    data: [],
+    total: 0,
+    page: 1,
+    page_size: 50,
+  })),
+  getContact: vi.fn(async (id: string) => ({
+    id,
+    name: id,
+    created_at: "",
+    updated_at: "",
+  })),
+  saveContact: vi.fn(async () => "contact-1"),
+}));
+
 vi.mock("@/api/taxonomy", () => ({
-  listApplicationOwnerTerms: vi.fn(async () => []),
   listApplicationTechStackTerms: vi.fn(async () => []),
 }));
 
@@ -152,7 +167,7 @@ describe("ApplicationEditorDialog", () => {
     vi.clearAllMocks();
   });
 
-  it("initializes empty owners when hydrating and saving", async () => {
+  it("initializes empty owner_contact_ids when hydrating and saving", async () => {
     const wrapper = mountDialog({
       id: "draft-empty-owners",
       name: "empty-owners-app",
@@ -170,6 +185,6 @@ describe("ApplicationEditorDialog", () => {
 
     expect(vi.mocked(saveApplication)).toHaveBeenCalledTimes(1);
     const payload = vi.mocked(saveApplication).mock.calls[0][0] as Record<string, unknown>;
-    expect(payload.owners).toEqual([]);
+    expect(payload.owner_contact_ids).toEqual([]);
   });
 });

@@ -7,6 +7,8 @@ pub struct BusinessApplication {
     pub name: String,
     pub code: Option<String>,
     #[serde(default)]
+    pub owner_contact_ids: Option<Vec<String>>,
+    #[serde(default)]
     pub owners: Option<Vec<String>>,
     pub description: Option<String>,
     pub env: Option<String>,

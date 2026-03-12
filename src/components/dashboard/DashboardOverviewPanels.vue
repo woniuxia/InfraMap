@@ -59,7 +59,7 @@ function severityTagType(severity: string): "primary" | "success" | "warning" | 
             <div class="secondary-metric-value">
               {{ formatInt(totalAssets) }}
             </div>
-            <div class="secondary-metric-sub">主机 + 应用 + 中间件 + 负载均衡</div>
+            <div class="secondary-metric-sub">主机 + 应用 + 中间件 + 网关</div>
           </div>
           <div class="secondary-metric">
             <div class="secondary-metric-label">异常率</div>

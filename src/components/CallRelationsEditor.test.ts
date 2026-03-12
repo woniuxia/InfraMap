@@ -35,8 +35,12 @@ const ElTableColumnStub = defineComponent({
         "div",
         { class: "el-table-column-stub", "data-label": String(attrs.label ?? "") },
         rows.value.map((row, index) =>
-          h("div", { class: "el-table-cell-stub", "data-index": index }, slots.default?.({ row, $index: index }))
-        )
+          h(
+            "div",
+            { class: "el-table-cell-stub", "data-index": index },
+            slots.default?.({ row, $index: index }),
+          ),
+        ),
       );
   },
 });
@@ -55,7 +59,7 @@ const ElSelectStub = defineComponent({
       h(
         "div",
         { class: "el-select-stub", "data-model": String(props.modelValue ?? "") },
-        slots.default?.()
+        slots.default?.(),
       );
   },
 });
@@ -205,7 +209,7 @@ describe("CallRelationsEditor", () => {
     expect(renderedText).toContain("order-api（后端）");
     expect(renderedText).toContain("edge-gw（网关）");
     expect(renderedText).toContain("redis-main（Redis）");
-    expect(renderedText).toContain("traffic-lb（负载均衡）");
+    expect(renderedText).toContain("traffic-lb（网关）");
     expect(renderedText).not.toContain("billing-ui（前端）");
   });
 

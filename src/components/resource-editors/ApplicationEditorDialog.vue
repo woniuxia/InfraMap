@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { ElMessage } from "element-plus";
-import type { Application, BusinessApplication, EditorMode } from "@/types";
+import type { Application, BusinessApplication, Contact, EditorMode } from "@/types";
 import type { TaxonomyAppType } from "@/api/taxonomy";
 import { saveApplication } from "@/api/applications";
 import { listBusinessApplications } from "@/api/business-applications";
-import { listApplicationOwnerTerms, listApplicationTechStackTerms } from "@/api/taxonomy";
+import { getContact, listContacts, saveContact } from "@/api/contacts";
+import { listApplicationTechStackTerms } from "@/api/taxonomy";
 import { replaceResourceCallRelations } from "@/api/call-relations";
 import { saveDeployment } from "@/api/deployments";
 import { DEPLOY_MODE_OPTIONS, ENV_OPTIONS, STATUS_OPTIONS } from "@/constants/options";
@@ -51,8 +52,11 @@ const saveLoading = ref(false);
 const businessApplicationOptionsLoading = ref(false);
 const techStackList = ref<string[]>([]);
 const topTechStackOptions = ref<string[]>([]);
-const ownerList = ref<string[]>([]);
-const ownerOptions = ref<string[]>([]);
+const ownerContactIdList = ref<string[]>([]);
+const ownerContactOptionsLoading = ref(false);
+const ownerContactOptions = ref<Contact[]>([]);
+const searchedOwnerKeyword = ref("");
+const quickCreatingOwner = ref(false);
 const businessApplicationOptions = ref<BusinessApplication[]>([]);
 const callRelationsEditorRef = ref<InstanceType<typeof CallRelationsEditor> | null>(null);
 const deploymentPanelRef = ref<DeploymentPanelExposed | null>(null);
@@ -64,9 +68,10 @@ const techStackSuggestions = computed(() =>
     techStackList.value,
   ),
 );
-const ownerSuggestions = computed(() =>
-  normalizeOwners([...ownerOptions.value, ...ownerList.value]),
-);
+const canQuickCreateOwner = computed(() => {
+  const keyword = searchedOwnerKeyword.value.trim();
+  return keyword.length > 0 && ownerContactOptions.value.length === 0;
+});
 const selectedBusinessApplicationId = computed(() =>
   normalizeBusinessApplicationId(editingApp.value.business_application_id),
 );
@@ -120,20 +125,109 @@ function cloneDraft(draft: Partial<Application>): Partial<Application> {
   return {
     ...draft,
     owners: Array.isArray(draft.owners) ? [...draft.owners] : draft.owners,
+    owner_contact_ids: Array.isArray(draft.owner_contact_ids)
+      ? [...draft.owner_contact_ids]
+      : draft.owner_contact_ids,
   };
 }
 
-function normalizeOwners(owners?: string[]) {
-  const values = [...(owners ?? [])].map((item) => item.trim()).filter((item) => item.length > 0);
+function normalizeOwnerContactIds(ownerContactIds?: string[]) {
+  const values = [...(ownerContactIds ?? [])]
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
   return Array.from(new Set(values));
+}
+
+function contactOptionLabel(contact: Contact) {
+  const name = contact.name?.trim() || "-";
+  const phone = contact.phone?.trim();
+  const email = contact.email?.trim();
+  const meta = [phone, email].filter(Boolean).join(" / ");
+  return meta ? `${name}（${meta}）` : name;
 }
 
 function handleTechStackChange(values: string[]) {
   techStackList.value = buildTechStackSuggestions([], values);
 }
 
-function handleOwnerChange(values: string[]) {
-  ownerList.value = normalizeOwners(values);
+async function fetchOwnerContactOptions(keyword: string) {
+  ownerContactOptionsLoading.value = true;
+  try {
+    const result = await listContacts({
+      page: 1,
+      page_size: 50,
+      search: keyword.trim(),
+    });
+    ownerContactOptions.value = result.data;
+  } catch {
+    // error shown by tauriInvoke
+  } finally {
+    ownerContactOptionsLoading.value = false;
+  }
+}
+
+async function preloadOwnerContacts(contactIds: string[]) {
+  const normalizedIds = normalizeOwnerContactIds(contactIds);
+  if (normalizedIds.length === 0) return;
+
+  try {
+    const results = await Promise.all(
+      normalizedIds.map(async (id) => {
+        try {
+          return await getContact(id);
+        } catch {
+          return null;
+        }
+      }),
+    );
+
+    const contacts = results.filter((item): item is Contact => Boolean(item));
+    if (contacts.length > 0) {
+      ownerContactOptions.value = contacts;
+    }
+  } catch {
+    // error shown by tauriInvoke
+  }
+}
+
+function handleOwnerSearch(keyword: string) {
+  searchedOwnerKeyword.value = keyword.trim();
+  void fetchOwnerContactOptions(searchedOwnerKeyword.value);
+}
+
+function handleOwnerDropdownVisible(visible: boolean) {
+  if (!visible) return;
+  void fetchOwnerContactOptions(searchedOwnerKeyword.value);
+}
+
+async function handleQuickCreateOwner() {
+  const keyword = searchedOwnerKeyword.value.trim();
+  if (!keyword || quickCreatingOwner.value) return;
+
+  quickCreatingOwner.value = true;
+  try {
+    const contactId = await saveContact({
+      id: "",
+      name: keyword,
+    });
+    ownerContactIdList.value = normalizeOwnerContactIds([...ownerContactIdList.value, contactId]);
+    ownerContactOptions.value = [
+      {
+        id: contactId,
+        name: keyword,
+        phone: undefined,
+        email: undefined,
+        remark: undefined,
+        created_at: "",
+        updated_at: "",
+      },
+    ];
+    ElMessage.success("联系人已创建并回填");
+  } catch {
+    // error shown by tauriInvoke
+  } finally {
+    quickCreatingOwner.value = false;
+  }
 }
 
 function resolveTechStackSide(type: Application["type"] | undefined): TaxonomyAppType {
@@ -161,14 +255,6 @@ async function fetchTopTechStackOptions(type: Application["type"] | undefined) {
       app_type: resolveTechStackSide(type),
       limit: 10,
     });
-  } catch {
-    // error shown by tauriInvoke
-  }
-}
-
-async function fetchOwnerOptions() {
-  try {
-    ownerOptions.value = await listApplicationOwnerTerms(100);
   } catch {
     // error shown by tauriInvoke
   }
@@ -220,9 +306,11 @@ async function fetchBusinessApplicationOptions() {
 function hydrateFromDraft() {
   editingApp.value = cloneDraft(props.initialDraft || {});
   techStackList.value = parseTechStack(editingApp.value.tech_stack);
-  ownerList.value = normalizeOwners(editingApp.value.owners);
+  ownerContactIdList.value = normalizeOwnerContactIds(editingApp.value.owner_contact_ids);
+  searchedOwnerKeyword.value = "";
+  ownerContactOptions.value = [];
+  void preloadOwnerContacts(ownerContactIdList.value);
   void fetchTopTechStackOptions(editingApp.value.type);
-  void fetchOwnerOptions();
   void fetchBusinessApplicationOptions();
 }
 
@@ -239,21 +327,26 @@ async function handleSave() {
   }
 
   const wasEditing = isEditing.value;
-  const owners = normalizeOwners(ownerList.value);
+  const ownerContactIds = normalizeOwnerContactIds(ownerContactIdList.value);
   const businessApplicationId = normalizeBusinessApplicationId(
     editingApp.value.business_application_id,
   );
   const draftDeployments = !wasEditing
     ? (deploymentPanelRef.value?.getDraftDeployments?.() ?? [])
     : [];
+  const {
+    owners: _ignoredOwners,
+    owner_contact_ids: _ignoredContactIds,
+    ...appDraft
+  } = editingApp.value;
   const payload: Partial<Application> = {
     id: "",
     created_at: "",
     updated_at: "",
-    ...editingApp.value,
+    ...appDraft,
     business_application_id: businessApplicationId || undefined,
     business_application_name: undefined,
-    owners,
+    owner_contact_ids: ownerContactIds,
     tech_stack: techStackToText(techStackList.value),
   };
   saveLoading.value = true;
@@ -393,18 +486,42 @@ watch(
       </el-form-item>
       <el-form-item label="负责人">
         <el-select
-          v-model="ownerList"
-          class="w-full"
+          v-model="ownerContactIdList"
           multiple
           filterable
-          allow-create
-          default-first-option
-          :reserve-keyword="false"
-          placeholder="输入负责人姓名进行筛选，按回车可新增"
-          @change="(values) => handleOwnerChange(values as string[])"
+          remote
+          clearable
+          class="w-full"
+          placeholder="搜索联系人（支持姓名/电话/邮箱，多选）"
+          :loading="ownerContactOptionsLoading"
+          :remote-method="handleOwnerSearch"
+          @visible-change="handleOwnerDropdownVisible"
         >
-          <el-option v-for="item in ownerSuggestions" :key="item" :label="item" :value="item" />
+          <el-option
+            v-for="contact in ownerContactOptions"
+            :key="contact.id"
+            :label="contactOptionLabel(contact)"
+            :value="contact.id"
+          />
+          <template #empty>
+            <div class="owner-empty">
+              <template v-if="!searchedOwnerKeyword">暂无联系人</template>
+              <template v-else-if="canQuickCreateOwner">
+                <span>未找到联系人：{{ searchedOwnerKeyword }}</span>
+                <el-button
+                  type="primary"
+                  text
+                  :loading="quickCreatingOwner"
+                  @click="handleQuickCreateOwner"
+                >
+                  点击新增并回填
+                </el-button>
+              </template>
+              <template v-else>未找到匹配联系人</template>
+            </div>
+          </template>
         </el-select>
+        <div class="owner-hint">负责人基于联系人 ID 绑定，联系人姓名后续可修改。</div>
       </el-form-item>
       <el-form-item label="所属业务应用">
         <el-select
@@ -478,5 +595,21 @@ watch(
   margin-top: 6px;
   font-size: 12px;
   color: var(--im-warning);
+}
+
+.owner-hint {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--im-text-tertiary);
+}
+
+.owner-empty {
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--im-text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 </style>

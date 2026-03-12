@@ -61,13 +61,14 @@ const relationTypeOptions: Array<{ label: string; value: CallRelationType }> = [
   { label: "gRPC调用", value: "grpc_call" },
   { label: "数据库访问", value: "db_query" },
   { label: "缓存访问", value: "cache_access" },
+  { label: "请求转发", value: "forward" },
 ];
 
 const groupedTargetOptions = computed(() => {
   return [
     { label: "应用", type: "application" as const },
     { label: "中间件", type: "middleware" as const },
-    { label: "负载均衡", type: "nginx" as const },
+    { label: "网关", type: "nginx" as const },
   ].map((group) => ({
     ...group,
     options: relationTargetOptions.value.filter((item) => item.type === group.type),
@@ -211,7 +212,7 @@ function getDraftItems(): ReplaceCallRelationItem[] | null {
   }));
 
   const missingRow = normalizedRows.find(
-    (row) => row.peer_id.trim().length === 0 || row.relation_type.trim().length === 0
+    (row) => row.peer_id.trim().length === 0 || row.relation_type.trim().length === 0,
   );
   if (missingRow) {
     ElMessage.warning("调用关系存在未填写完整的行，请补全后再保存。");
@@ -241,7 +242,7 @@ watch(
   () => [props.resourceId, props.resourceType],
   () => {
     initializeEditor();
-  }
+  },
 );
 
 onMounted(() => {

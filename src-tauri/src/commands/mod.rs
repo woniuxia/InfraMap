@@ -2,6 +2,7 @@ pub mod applications;
 pub mod audit_logs;
 pub mod backup;
 pub mod business_applications;
+pub mod contacts;
 pub mod dashboard;
 pub mod dependencies;
 pub mod deployments;

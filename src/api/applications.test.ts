@@ -1,9 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { __clearMockHandlers, __setMockHandler } from "@/__mocks__/tauri";
-import {
-  listApplications,
-  saveApplication,
-} from "@/api/applications";
+import { listApplications, saveApplication } from "@/api/applications";
 
 vi.mock("element-plus", () => ({
   ElMessage: {
@@ -46,7 +43,7 @@ describe("applications API", () => {
     expect(result.total).toBe(0);
   });
 
-  it("saveApplication should pass owners array", async () => {
+  it("saveApplication should pass owner_contact_ids array", async () => {
     __setMockHandler("save_application", (_cmd, args) => {
       expect(args).toEqual({
         data: {
@@ -54,7 +51,7 @@ describe("applications API", () => {
           type: "backend",
           env: "prod",
           status: "running",
-          owners: ["alice", "bob"],
+          owner_contact_ids: ["contact-alice", "contact-bob"],
         },
       });
       return "app-123";
@@ -65,7 +62,7 @@ describe("applications API", () => {
       type: "backend",
       env: "prod",
       status: "running",
-      owners: ["alice", "bob"],
+      owner_contact_ids: ["contact-alice", "contact-bob"],
     });
     expect(result).toBe("app-123");
   });

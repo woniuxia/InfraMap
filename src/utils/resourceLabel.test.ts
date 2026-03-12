@@ -21,7 +21,7 @@ describe("resourceLabel", () => {
         resourceType: "application",
         name: "order-api",
         appType: "backend",
-      })
+      }),
     ).toBe("order-api（后端）");
 
     expect(
@@ -29,15 +29,15 @@ describe("resourceLabel", () => {
         resourceType: "middleware",
         name: "redis-main",
         middlewareType: "Redis",
-      })
+      }),
     ).toBe("redis-main（Redis）");
 
     expect(
       formatRelationTargetLabel({
         resourceType: "nginx",
         name: "edge-lb",
-      })
-    ).toBe("edge-lb（负载均衡）");
+      }),
+    ).toBe("edge-lb（网关）");
   });
 
   it("uses middleware fallback label when middleware type is empty", () => {
@@ -46,7 +46,7 @@ describe("resourceLabel", () => {
         resourceType: "middleware",
         name: "cache-cluster",
         middlewareType: "   ",
-      })
+      }),
     ).toBe("cache-cluster（中间件）");
   });
 });

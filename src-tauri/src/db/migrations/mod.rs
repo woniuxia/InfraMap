@@ -22,6 +22,7 @@ mod v019_application_name_env_type_index;
 mod v020_nginx_endpoints;
 mod v021_application_owner_taxonomy_cleanup;
 mod v022_system_jobs;
+mod v023_contacts_and_owner_contacts;
 
 pub const MIGRATIONS: &[(i32, &str)] = &[
     (1, v001_initial_schema::SQL),
@@ -46,4 +47,5 @@ pub const MIGRATIONS: &[(i32, &str)] = &[
     (20, v020_nginx_endpoints::SQL),
     (21, v021_application_owner_taxonomy_cleanup::SQL),
     (22, v022_system_jobs::SQL),
+    (23, v023_contacts_and_owner_contacts::SQL),
 ];

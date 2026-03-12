@@ -4,6 +4,7 @@ import { ElMessage } from "element-plus";
 import type { EditorMode, NginxConfig, NginxEndpoint } from "@/types";
 import { saveNginxConfig } from "@/api/nginx-configs";
 import { replaceResourceCallRelations } from "@/api/call-relations";
+import { saveDeployment } from "@/api/deployments";
 import { ENV_OPTIONS, STATUS_OPTIONS } from "@/constants/options";
 import CallRelationsEditor from "@/components/CallRelationsEditor.vue";
 import DeploymentPanel from "@/components/DeploymentPanel.vue";
@@ -25,14 +26,25 @@ const visible = computed({
 });
 const isEditing = computed(() => props.mode === "edit");
 const dialogTitle = computed(() => {
-  if (props.mode === "edit") return "编辑负载均衡";
-  if (props.mode === "copy") return "复制负载均衡";
-  return "新增负载均衡";
+  if (props.mode === "edit") return "编辑网关";
+  if (props.mode === "copy") return "复制网关";
+  return "新增网关";
 });
 
 const editingNc = ref<Partial<NginxConfig>>({});
 const saveLoading = ref(false);
 const callRelationsEditorRef = ref<InstanceType<typeof CallRelationsEditor> | null>(null);
+
+interface DraftDeploymentItem {
+  host_id: string;
+  port?: number;
+}
+
+interface DeploymentPanelExposed {
+  getDraftDeployments: () => DraftDeploymentItem[];
+}
+
+const deploymentPanelRef = ref<DeploymentPanelExposed | null>(null);
 
 function createEmptyEndpoint(): NginxEndpoint {
   return {
@@ -156,6 +168,13 @@ async function handleSave() {
     ...editingNc.value,
     endpoints,
   };
+
+  const wasEditing = isEditing.value;
+  // 获取草稿部署关系（仅在创建模式下）
+  const draftDeployments = !wasEditing
+    ? (deploymentPanelRef.value?.getDraftDeployments?.() ?? [])
+    : [];
+
   saveLoading.value = true;
   try {
     const nginxId = await saveNginxConfig(payload);
@@ -166,9 +185,27 @@ async function handleSave() {
         items: draftItems ?? [],
       });
     } catch {
-      ElMessage.warning("负载均衡已保存，调用关系保存失败，请重新编辑后重试。");
+      ElMessage.warning("网关已保存，调用关系保存失败，请重新编辑后重试。");
     }
-    ElMessage.success(isEditing.value ? "更新成功" : "创建成功");
+    // 保存草稿部署关系
+    if (!wasEditing && draftDeployments.length > 0) {
+      try {
+        await Promise.all(
+          draftDeployments.map((item) =>
+            saveDeployment({
+              id: "",
+              resource_id: nginxId,
+              resource_type: "nginx",
+              host_id: item.host_id,
+              port: item.port,
+            }),
+          ),
+        );
+      } catch {
+        ElMessage.warning("网关已保存，部署关系保存失败，请在部署关系中重试。");
+      }
+    }
+    ElMessage.success(wasEditing ? "更新成功" : "创建成功");
     visible.value = false;
     emit("saved", { id: nginxId, mode: props.mode });
   } catch {
@@ -233,8 +270,9 @@ watch(
           <el-button text type="primary" @click="addEndpoint">添加端点</el-button>
         </div>
       </el-form-item>
-      <el-form-item label="负载策略">
-        <el-select v-model="editingNc.strategy" class="w-full">
+      <el-form-item label="转发策略">
+        <el-select v-model="editingNc.strategy" class="w-full" clearable>
+          <el-option label="默认" value="" />
           <el-option label="轮询 (roundrobin)" value="roundrobin" />
           <el-option label="IP 哈希 (ip_hash)" value="ip_hash" />
         </el-select>
@@ -279,9 +317,11 @@ watch(
     />
 
     <DeploymentPanel
-      v-if="isEditing && editingNc.id"
+      v-if="Boolean(editingNc.id)"
+      ref="deploymentPanelRef"
       :resource-id="editingNc.id!"
       resource-type="nginx"
+      :resource-persisted="isEditing"
       :resource-address="pickDeployContextAddress(editingNc.endpoints)"
       :resource-env="editingNc.env"
     />

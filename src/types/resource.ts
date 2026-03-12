@@ -29,6 +29,16 @@ export interface IpAddress {
   updated_at: string;
 }
 
+export interface Contact {
+  id: string;
+  name: string;
+  phone?: string;
+  email?: string;
+  remark?: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface BatchCreateIpParams {
   start_ip: string;
   end_ip: string;
@@ -58,6 +68,7 @@ export interface Application {
   env: "prod" | "dev" | "test";
   git_repo?: string;
   owners?: string[];
+  owner_contact_ids?: string[];
   business_application_id?: string;
   business_application_name?: string;
   status: "running" | "stopped" | "maintenance";
@@ -71,6 +82,7 @@ export interface BusinessApplication {
   name: string;
   code?: string;
   owners?: string[];
+  owner_contact_ids?: string[];
   description?: string;
   env?: "prod" | "dev" | "test";
   status: "active" | "inactive";
@@ -154,7 +166,8 @@ export type CallRelationType =
   | "mq_consume"
   | "grpc_call"
   | "db_query"
-  | "cache_access";
+  | "cache_access"
+  | "forward";
 
 export type CallDirection = "upstream" | "downstream";
 

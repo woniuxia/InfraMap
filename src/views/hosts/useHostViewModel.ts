@@ -28,7 +28,6 @@ import {
 import { envLabel } from "@/views/hosts/hostDisplay";
 
 interface HostListFilters {
-  env: string[];
   status: string[];
   os_type: string[];
   cpu_model: string[];
@@ -37,7 +36,6 @@ interface HostListFilters {
 
 function createDefaultFilters(): HostListFilters {
   return {
-    env: [],
     status: [],
     os_type: [],
     cpu_model: [],
@@ -114,14 +112,6 @@ export function useHostViewModel() {
   const cpuModelFilterOptions = ref<Array<{ label: string; value: string }>>([]);
 
   const toolbarFields = computed<SearchFieldConfig[]>(() => [
-    {
-      key: "env",
-      queryKey: "env",
-      label: "环境",
-      type: "multi-select",
-      width: "sm",
-      options: envOptions,
-    },
     {
       key: "status",
       queryKey: "status",

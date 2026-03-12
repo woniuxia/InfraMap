@@ -1,9 +1,11 @@
 use std::collections::{HashMap, HashSet};
 use tauri::State;
 
-use crate::commands::taxonomy::{build_taxonomy_exists_filter, parse_filter_values, FIELD_OWNER};
 use crate::db::audit::insert_audit_log;
-use crate::db::crud::{count_query, delete_by_id, resolve_upsert_state, write_audit_log_entry};
+use crate::db::crud::{
+    build_exists_like_clause, count_query, delete_by_id, parse_filter_values, resolve_upsert_state,
+    write_audit_log_entry,
+};
 use crate::db::transaction::with_transaction;
 use crate::db::{get_conn, DbPool};
 use crate::error::{AppError, AppResult};
@@ -36,6 +38,7 @@ fn row_to_business_application(row: &rusqlite::Row) -> rusqlite::Result<Business
         id: row.get(0)?,
         name: row.get(1)?,
         code: row.get(2)?,
+        owner_contact_ids: Some(Vec::new()),
         owners: Some(Vec::new()),
         description: row.get(3)?,
         env: row.get(4)?,
@@ -56,6 +59,7 @@ fn row_to_application_with_business(row: &rusqlite::Row) -> rusqlite::Result<App
         deploy_mode: row.get(6)?,
         env: row.get(7)?,
         git_repo: row.get(8)?,
+        owner_contact_ids: Some(Vec::new()),
         owners: Some(Vec::new()),
         business_application_id: row.get(9)?,
         business_application_name: row.get(10)?,
@@ -144,13 +148,45 @@ fn build_business_applications_where_clause(
         .filter(|s| !s.is_empty())
     {
         let like_value = format!("%{}%", search);
-        conditions.push(
-            "(business_applications.name LIKE ? \
-              OR business_applications.code LIKE ? \
-              OR business_applications.description LIKE ?)"
-                .to_string(),
+        let owner_name_search_clause = build_exists_like_clause(
+            "business_application_owner_contacts baoc JOIN contacts c ON c.id = baoc.contact_id",
+            &[
+                "baoc.business_application_id = business_applications.id",
+                "baoc.is_deleted = 0",
+                "c.is_deleted = 0",
+            ],
+            "c.name",
         );
-        for _ in 0..3 {
+        let owner_phone_search_clause = build_exists_like_clause(
+            "business_application_owner_contacts baoc JOIN contacts c ON c.id = baoc.contact_id",
+            &[
+                "baoc.business_application_id = business_applications.id",
+                "baoc.is_deleted = 0",
+                "c.is_deleted = 0",
+            ],
+            "c.phone",
+        );
+        let owner_email_search_clause = build_exists_like_clause(
+            "business_application_owner_contacts baoc JOIN contacts c ON c.id = baoc.contact_id",
+            &[
+                "baoc.business_application_id = business_applications.id",
+                "baoc.is_deleted = 0",
+                "c.is_deleted = 0",
+            ],
+            "c.email",
+        );
+
+        conditions.push(
+            format!(
+                "(business_applications.name LIKE ? \
+                  OR business_applications.code LIKE ? \
+                  OR business_applications.description LIKE ? \
+                  OR {owner_name_search_clause} \
+                  OR {owner_phone_search_clause} \
+                  OR {owner_email_search_clause})"
+            ),
+        );
+        for _ in 0..6 {
             sql_params.push(Box::new(like_value.clone()));
         }
     }
@@ -179,18 +215,23 @@ fn build_business_applications_where_clause(
         }
 
         if let Some(owner_filter) = filters.get("owner") {
-            let owners = parse_filter_values(owner_filter);
-            if !owners.is_empty() {
-                if let Some(clause) = build_taxonomy_exists_filter(
-                    "business_application",
-                    FIELD_OWNER,
-                    "business_applications.id",
-                    &owners,
-                ) {
-                    conditions.push(clause);
-                    for owner in owners {
-                        sql_params.push(Box::new(owner));
-                    }
+            let owner_contact_ids = parse_filter_values(owner_filter);
+            if !owner_contact_ids.is_empty() {
+                let placeholders = vec!["?"; owner_contact_ids.len()].join(", ");
+                conditions.push(format!(
+                    "EXISTS (
+                        SELECT 1
+                        FROM business_application_owner_contacts baoc
+                        JOIN contacts c ON c.id = baoc.contact_id
+                        WHERE baoc.business_application_id = business_applications.id
+                          AND baoc.is_deleted = 0
+                          AND c.is_deleted = 0
+                          AND baoc.contact_id IN ({})
+                    )",
+                    placeholders
+                ));
+                for contact_id in owner_contact_ids {
+                    sql_params.push(Box::new(contact_id));
                 }
             }
         }
@@ -199,49 +240,143 @@ fn build_business_applications_where_clause(
     (format!("WHERE {}", conditions.join(" AND ")), sql_params)
 }
 
-fn load_business_application_owner_map(
+fn normalize_owner_contact_ids(owner_contact_ids: Option<Vec<String>>) -> Vec<String> {
+    let mut normalized: Vec<String> = Vec::new();
+    let mut dedupe: HashSet<String> = HashSet::new();
+
+    if let Some(items) = owner_contact_ids {
+        for item in items {
+            let contact_id = item.trim().to_string();
+            if contact_id.is_empty() {
+                continue;
+            }
+            if dedupe.insert(contact_id.clone()) {
+                normalized.push(contact_id);
+            }
+        }
+    }
+
+    normalized
+}
+
+fn load_business_application_owner_contacts_map(
     conn: &rusqlite::Connection,
     business_app_ids: &[String],
-) -> Result<HashMap<String, Vec<String>>, rusqlite::Error> {
+) -> Result<HashMap<String, Vec<(String, String)>>, rusqlite::Error> {
     if business_app_ids.is_empty() {
         return Ok(HashMap::new());
     }
 
     let placeholders = vec!["?"; business_app_ids.len()].join(", ");
     let sql = format!(
-        "SELECT tb.resource_id, tt.display_name
-         FROM taxonomy_bindings tb
-         JOIN taxonomy_terms tt ON tt.id = tb.term_id
-         WHERE tb.resource_type = 'business_application'
-           AND tb.is_deleted = 0
-           AND tt.is_deleted = 0
-           AND tt.field_key = 'owner'
-           AND tb.resource_id IN ({})
-         ORDER BY tt.display_name ASC",
+        "SELECT baoc.business_application_id, c.id, c.name
+         FROM business_application_owner_contacts baoc
+         JOIN contacts c ON c.id = baoc.contact_id
+         WHERE baoc.is_deleted = 0
+           AND c.is_deleted = 0
+           AND baoc.business_application_id IN ({})
+         ORDER BY c.name COLLATE NOCASE ASC, c.id ASC",
         placeholders
     );
     let mut stmt = conn.prepare(&sql)?;
     let param_refs: Vec<&str> = business_app_ids.iter().map(String::as_str).collect();
     let rows = stmt.query_map(rusqlite::params_from_iter(param_refs), |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+        ))
     })?;
 
-    let mut map: HashMap<String, Vec<String>> = HashMap::new();
+    let mut map: HashMap<String, Vec<(String, String)>> = HashMap::new();
     for row in rows {
-        let (business_app_id, owner_name) = row?;
-        let owners = map.entry(business_app_id).or_default();
-        if !owners.iter().any(|item| item == &owner_name) {
-            owners.push(owner_name);
-        }
+        let (business_app_id, contact_id, contact_name) = row?;
+        map.entry(business_app_id)
+            .or_default()
+            .push((contact_id, contact_name));
     }
     Ok(map)
 }
 
 fn merge_business_application_owners(
     business: &mut BusinessApplication,
-    owner_map: &HashMap<String, Vec<String>>,
+    owner_map: &HashMap<String, Vec<(String, String)>>,
 ) {
-    business.owners = Some(owner_map.get(&business.id).cloned().unwrap_or_default());
+    if let Some(items) = owner_map.get(&business.id) {
+        business.owner_contact_ids = Some(items.iter().map(|(id, _)| id.clone()).collect());
+        business.owners = Some(items.iter().map(|(_, name)| name.clone()).collect());
+    } else {
+        business.owner_contact_ids = Some(Vec::new());
+        business.owners = Some(Vec::new());
+    }
+}
+
+fn sync_business_application_owner_contacts(
+    command: &str,
+    conn: &rusqlite::Connection,
+    business_application_id: &str,
+    owner_contact_ids: &[String],
+    now: &str,
+) -> AppResult<()> {
+    // 物理删除 + 重建关系：简单可靠，避免残留重复数据。
+    conn.execute(
+        "DELETE FROM business_application_owner_contacts WHERE business_application_id = ?1",
+        rusqlite::params![business_application_id],
+    )
+    .map_err(|e| AppError::from_db_error(command, "清理业务应用负责人绑定", e))?;
+
+    if owner_contact_ids.is_empty() {
+        return Ok(());
+    }
+
+    // 防御式校验 contact_id：必须存在且未删除。
+    let placeholders = vec!["?"; owner_contact_ids.len()].join(", ");
+    let sql = format!(
+        "SELECT id FROM contacts WHERE is_deleted = 0 AND id IN ({})",
+        placeholders
+    );
+    let mut stmt = conn
+        .prepare(&sql)
+        .map_err(|e| AppError::from_db_error(command, "查询联系人", e))?;
+    let rows = stmt
+        .query_map(
+            rusqlite::params_from_iter(owner_contact_ids.iter()),
+            |row| row.get::<_, String>(0),
+        )
+        .map_err(|e| AppError::from_db_error(command, "读取联系人", e))?;
+
+    let mut existing: HashSet<String> = HashSet::new();
+    for row in rows {
+        existing.insert(row.map_err(|e| AppError::from_db_error(command, "读取联系人", e))?);
+    }
+
+    let missing: Vec<String> = owner_contact_ids
+        .iter()
+        .filter(|id| !existing.contains(*id))
+        .cloned()
+        .collect();
+    if !missing.is_empty() {
+        return Err(AppError::validation(
+            command,
+            format!("负责人联系人不存在或已删除: {}", missing.join(", ")),
+        ));
+    }
+
+    for contact_id in owner_contact_ids {
+        conn.execute(
+            "INSERT INTO business_application_owner_contacts (id, business_application_id, contact_id, is_deleted, deleted_at, created_at, updated_at)
+             VALUES (?1, ?2, ?3, 0, NULL, ?4, ?4)",
+            rusqlite::params![
+                uuid::Uuid::new_v4().to_string(),
+                business_application_id,
+                contact_id,
+                now
+            ],
+        )
+        .map_err(|e| AppError::from_db_error(command, "创建业务应用负责人绑定", e))?;
+    }
+
+    Ok(())
 }
 
 fn save_business_application_inner(
@@ -249,11 +384,15 @@ fn save_business_application_inner(
     conn: &rusqlite::Connection,
     data: BusinessApplication,
 ) -> AppResult<String> {
-    validate_business_application(&data).map_err(|e| AppError::validation(command, e))?;
+    let normalized_owner_contact_ids = normalize_owner_contact_ids(data.owner_contact_ids.clone());
+    let mut normalized_data = data.clone();
+    normalized_data.owner_contact_ids = Some(normalized_owner_contact_ids.clone());
+
+    validate_business_application(&normalized_data).map_err(|e| AppError::validation(command, e))?;
 
     let now = chrono::Utc::now().to_rfc3339();
     let (persisted_id, is_new) =
-        resolve_upsert_state(command, conn, "business_applications", &data.id)?;
+        resolve_upsert_state(command, conn, "business_applications", &normalized_data.id)?;
 
     with_transaction(conn, command, |conn| {
         if is_new {
@@ -262,22 +401,29 @@ fn save_business_application_inner(
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, NULL, ?7, ?7)",
                 rusqlite::params![
                     &persisted_id,
-                    data.name,
-                    data.code,
-                    data.description,
-                    data.env,
-                    data.status,
+                    normalized_data.name,
+                    normalized_data.code,
+                    normalized_data.description,
+                    normalized_data.env,
+                    normalized_data.status,
                     now
                 ],
             )
             .map_err(|e| AppError::from_db_error(command, "创建业务应用", e))?;
+            sync_business_application_owner_contacts(
+                command,
+                conn,
+                &persisted_id,
+                &normalized_owner_contact_ids,
+                &now,
+            )?;
             write_audit_log_entry(
                 command,
                 conn,
                 "create",
                 "business_application",
                 &persisted_id,
-                Some(&data.name),
+                Some(&normalized_data.name),
             )?;
             Ok(persisted_id.clone())
         } else {
@@ -286,25 +432,32 @@ fn save_business_application_inner(
                  SET name = ?1, code = ?2, description = ?3, env = ?4, status = ?5, updated_at = ?6
                  WHERE id = ?7 AND is_deleted = 0",
                 rusqlite::params![
-                    data.name,
-                    data.code,
-                    data.description,
-                    data.env,
-                    data.status,
+                    normalized_data.name,
+                    normalized_data.code,
+                    normalized_data.description,
+                    normalized_data.env,
+                    normalized_data.status,
                     now,
-                    data.id
+                    normalized_data.id
                 ],
             )
             .map_err(|e| AppError::from_db_error(command, "更新业务应用", e))?;
+            sync_business_application_owner_contacts(
+                command,
+                conn,
+                &normalized_data.id,
+                &normalized_owner_contact_ids,
+                &now,
+            )?;
             write_audit_log_entry(
                 command,
                 conn,
                 "update",
                 "business_application",
-                &data.id,
-                Some(&data.name),
+                &normalized_data.id,
+                Some(&normalized_data.name),
             )?;
-            Ok(data.id.clone())
+            Ok(normalized_data.id.clone())
         }
     })
 }
@@ -664,7 +817,7 @@ pub fn list_business_applications(
         .map_err(|e| AppError::from_db_error(command, "读取业务应用列表", e))?;
     let mut data: Vec<BusinessApplication> = rows.filter_map(|row| row.ok()).collect();
     let business_ids: Vec<String> = data.iter().map(|item| item.id.clone()).collect();
-    let owner_map = load_business_application_owner_map(&conn, &business_ids)
+    let owner_map = load_business_application_owner_contacts_map(&conn, &business_ids)
         .map_err(|e| AppError::from_db_error(command, "读取业务应用负责人标签", e))?;
     for item in &mut data {
         merge_business_application_owners(item, &owner_map);
@@ -691,7 +844,7 @@ pub fn get_business_application(pool: State<DbPool>, id: String) -> AppResult<Bu
         .map_err(|e| {
             AppError::not_found(command, "业务应用不存在或已删除。", Some(e.to_string()))
         })?;
-    let owner_map = load_business_application_owner_map(&conn, &[business.id.clone()])
+    let owner_map = load_business_application_owner_contacts_map(&conn, &[business.id.clone()])
         .map_err(|e| AppError::from_db_error(command, "读取业务应用负责人标签", e))?;
     merge_business_application_owners(&mut business, &owner_map);
     Ok(business)
@@ -722,6 +875,11 @@ pub fn delete_business_application(pool: State<DbPool>, id: String) -> AppResult
 
     with_transaction(&conn, command, |conn| {
         delete_by_id(command, "删除业务应用", &conn, "business_applications", &id)?;
+        conn.execute(
+            "DELETE FROM business_application_owner_contacts WHERE business_application_id = ?1",
+            rusqlite::params![id],
+        )
+        .map_err(|e| AppError::from_db_error(command, "删除业务应用负责人绑定", e))?;
         conn.execute(
             "UPDATE applications
              SET business_application_id = NULL, updated_at = ?1
@@ -904,7 +1062,8 @@ mod tests {
             id: "".into(),
             name: name.into(),
             code: Some("PAY".into()),
-            owners: Some(vec!["alice".into()]),
+            owner_contact_ids: None,
+            owners: None,
             description: None,
             env: Some("prod".into()),
             status: "active".into(),
@@ -923,10 +1082,9 @@ mod tests {
     }
 
     #[test]
-    fn build_business_applications_where_clause_should_use_taxonomy_owner_filter_without_owner_text_search(
-    ) {
+    fn build_business_applications_where_clause_should_support_owner_contact_filter_and_search() {
         let mut filters = HashMap::new();
-        filters.insert("owner".to_string(), r#"["alice","bob"]"#.to_string());
+        filters.insert("owner".to_string(), r#"["c-alice","c-bob"]"#.to_string());
         let params = QueryParams {
             search: Some("alice".into()),
             filters: Some(filters),
@@ -934,24 +1092,58 @@ mod tests {
         };
 
         let (where_clause, sql_params) = build_business_applications_where_clause(&params);
-        assert!(where_clause.contains("taxonomy_bindings"));
-        assert!(where_clause.contains("tt.field_key = 'owner'"));
-        assert!(!where_clause.contains("owner LIKE ?"));
-        assert_eq!(sql_params.len(), 5);
+        assert!(where_clause.contains("business_application_owner_contacts"));
+        assert!(where_clause.contains("contacts"));
+        assert!(!where_clause.contains("taxonomy_bindings"));
+        assert!(sql_params.len() >= 8);
     }
 
     #[test]
-    fn save_business_application_inner_should_create_and_update() {
+    fn save_business_application_inner_should_create_update_and_sync_owner_contacts() {
         let conn = setup_test_db();
+        let now = chrono::Utc::now().to_rfc3339();
+        conn.execute(
+            "INSERT INTO contacts (id, name, phone, email, remark, is_deleted, deleted_at, created_at, updated_at)
+             VALUES ('c-alice', 'alice', NULL, NULL, NULL, 0, NULL, ?1, ?1)",
+            rusqlite::params![now],
+        )
+        .expect("seed alice");
+        conn.execute(
+            "INSERT INTO contacts (id, name, phone, email, remark, is_deleted, deleted_at, created_at, updated_at)
+             VALUES ('c-bob', 'bob', NULL, NULL, NULL, 0, NULL, ?1, ?1)",
+            rusqlite::params![now],
+        )
+        .expect("seed bob");
+
         let mut payload = make_business_application("支付中心");
-        let created_id =
-            save_business_application_inner("test", &conn, payload.clone()).expect("create");
+        payload.owner_contact_ids = Some(vec!["c-alice".into()]);
+        let created_id = save_business_application_inner("test", &conn, payload.clone())
+            .expect("create");
         assert!(!created_id.is_empty());
 
         payload.id = created_id.clone();
         payload.name = "支付中心-新".into();
+        payload.owner_contact_ids = Some(vec!["c-bob".into()]);
         let updated_id = save_business_application_inner("test", &conn, payload).expect("update");
         assert_eq!(updated_id, created_id);
+
+        let owner_binding_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM business_application_owner_contacts WHERE business_application_id = ?1 AND is_deleted = 0",
+                rusqlite::params![created_id],
+                |row| row.get(0),
+            )
+            .expect("count owner bindings");
+        assert_eq!(owner_binding_count, 1);
+
+        let current_owner: String = conn
+            .query_row(
+                "SELECT contact_id FROM business_application_owner_contacts WHERE business_application_id = ?1 AND is_deleted = 0 LIMIT 1",
+                rusqlite::params![created_id],
+                |row| row.get(0),
+            )
+            .expect("query current owner contact id");
+        assert_eq!(current_owner, "c-bob");
     }
 
     #[test]

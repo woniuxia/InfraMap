@@ -5,8 +5,9 @@ import type { SearchFieldConfig, SearchToolbarQueryPayload } from "@/types/searc
 import { listNginxConfigs, deleteNginxConfig } from "@/api/nginx-configs";
 import { useResourceList } from "@/composables/useResourceList";
 import { useEnvStore } from "@/stores/env";
-import { ENV_OPTIONS, STATUS_OPTIONS } from "@/constants/options";
+import { STATUS_OPTIONS } from "@/constants/options";
 import { buildNginxCopyDraft } from "@/utils/resourceCopy";
+import { generateDraftId } from "@/utils/draft";
 import { ElMessage } from "element-plus";
 import SearchToolbar from "@/components/filters/SearchToolbar.vue";
 import NginxConfigEditorDialog from "@/components/resource-editors/NginxConfigEditorDialog.vue";
@@ -26,7 +27,7 @@ const {
 } = useResourceList<NginxConfig>({
   listFn: listNginxConfigs,
   deleteFn: deleteNginxConfig,
-  entityLabel: "负载均衡",
+  entityLabel: "网关",
 });
 
 const searchText = ref("");
@@ -35,37 +36,27 @@ const editorMode = ref<EditorMode>("create");
 const editorInitialDraft = ref<Partial<NginxConfig>>({});
 
 interface NginxListFilters {
-  env: string[];
   status: string[];
   strategy: string[];
 }
 
 function createDefaultFilters(): NginxListFilters {
   return {
-    env: [],
     status: [],
     strategy: [],
   };
 }
 
 const listFilters = ref<NginxListFilters>(createDefaultFilters());
-const envOptions = ENV_OPTIONS;
 const statusOptions = STATUS_OPTIONS;
 
 const strategyOptions = [
+  { label: "默认", value: "" },
   { label: "轮询", value: "roundrobin" },
   { label: "IP 哈希", value: "ip_hash" },
 ];
 
 const toolbarFields: SearchFieldConfig[] = [
-  {
-    key: "env",
-    queryKey: "env",
-    label: "环境",
-    type: "multi-select",
-    width: "sm",
-    options: envOptions,
-  },
   {
     key: "status",
     queryKey: "status",
@@ -109,11 +100,10 @@ function normalizeEndpointDraft(endpoints?: NginxEndpoint[]): NginxEndpoint[] {
 
 function openAdd() {
   editorInitialDraft.value = {
-    id: "",
+    id: generateDraftId("nginx"),
     endpoints: [createEmptyEndpoint()],
     status: "running",
     env: envStore.currentEnv,
-    strategy: "roundrobin",
     created_at: "",
     updated_at: "",
   };
@@ -167,10 +157,9 @@ function statusLabel(status: string) {
 }
 
 function strategyLabel(strategy: string) {
+  if (!strategy) return "默认";
   return (
-    ({ roundrobin: "轮询", ip_hash: "IP 哈希" } as Record<string, string>)[strategy] ||
-    strategy ||
-    "-"
+    ({ roundrobin: "轮询", ip_hash: "IP 哈希" } as Record<string, string>)[strategy] || strategy
   );
 }
 
@@ -189,19 +178,6 @@ function endpointSummary(endpoints?: NginxEndpoint[]): string {
     return first;
   }
   return `${first} +${endpoints.length - 1}`;
-}
-
-function envLabel(env: string) {
-  return ({ prod: "生产", dev: "开发", test: "测试" } as Record<string, string>)[env] || env;
-}
-
-function envTagType(env: string): "primary" | "success" | "warning" | "info" | "danger" {
-  const map: Record<string, "primary" | "success" | "warning" | "info" | "danger"> = {
-    prod: "danger",
-    dev: "info",
-    test: "warning",
-  };
-  return map[env] || "info";
 }
 
 onMounted(() => fetchData());
@@ -226,13 +202,8 @@ onMounted(() => fetchData());
       <el-table-column label="连接端点" min-width="260" align="center">
         <template #default="{ row }">{{ endpointSummary(row.endpoints) }}</template>
       </el-table-column>
-      <el-table-column prop="strategy" label="负载策略" width="100" align="center">
+      <el-table-column prop="strategy" label="转发策略" width="100" align="center">
         <template #default="{ row }">{{ strategyLabel(row.strategy) }}</template>
-      </el-table-column>
-      <el-table-column prop="env" label="环境" width="80" align="center">
-        <template #default="{ row }">
-          <el-tag :type="envTagType(row.env)" size="small">{{ envLabel(row.env) }}</el-tag>
-        </template>
       </el-table-column>
       <el-table-column prop="status" label="状态" width="100" align="center">
         <template #default="{ row }">

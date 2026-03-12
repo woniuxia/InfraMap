@@ -17,6 +17,7 @@ import {
   Setting,
   Fold,
   Expand,
+  User,
 } from "@element-plus/icons-vue";
 import { markRaw, type Component, ref, computed, onMounted, onUnmounted, nextTick } from "vue";
 
@@ -109,7 +110,8 @@ const menuItems: { path: string; name: string; icon: Component }[] = [
   { path: "/business-applications", name: "业务应用", icon: markRaw(Collection) },
   { path: "/applications", name: "应用服务", icon: markRaw(IconMenu) },
   { path: "/middlewares", name: "中间件", icon: markRaw(Connection) },
-  { path: "/nginx-configs", name: "负载均衡", icon: markRaw(SetUp) },
+  { path: "/nginx-configs", name: "网关", icon: markRaw(SetUp) },
+  { path: "/contacts", name: "联系人", icon: markRaw(User) },
   { path: "/import-workbench", name: "批量录入", icon: markRaw(UploadFilled) },
   { path: "/jobs", name: "任务中心", icon: markRaw(Files) },
   { path: "/integrity-center", name: "数据健康", icon: markRaw(DataAnalysis) },
@@ -133,7 +135,13 @@ const menuItems: { path: string; name: string; icon: Component }[] = [
       >
         <span class="env-indicator"></span>
         <span class="env-label">{{ currentEnvLabel }}</span>
-        <svg class="env-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+        <svg
+          class="env-chevron"
+          :class="{ 'is-open': isDropdownOpen }"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+        >
           <path d="M6 9l6 6 6-6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
         </svg>
       </button>
@@ -404,6 +412,11 @@ const menuItems: { path: string; name: string; icon: Component }[] = [
   height: 16px;
   color: var(--im-text-tertiary);
   flex-shrink: 0;
+  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+
+  &.is-open {
+    transform: rotate(180deg);
+  }
 }
 
 // ===== 下拉菜单 - Portal 样式 =====

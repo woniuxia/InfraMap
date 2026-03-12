@@ -2,6 +2,7 @@ use std::net::Ipv4Addr;
 
 use crate::models::application::Application;
 use crate::models::business_application::BusinessApplication;
+use crate::models::contact::Contact;
 use crate::models::dependency::Dependency;
 use crate::models::deployment::Deployment;
 use crate::models::host::Host;
@@ -104,6 +105,23 @@ fn validate_endpoint_host(host: &str, field_name: &str) -> Result<(), String> {
 
 // --- Entity-specific validation ---
 
+pub fn validate_contact(contact: &Contact) -> Result<(), String> {
+    validate_required(&contact.name, "name")?;
+    validate_string_length(contact.name.trim(), 1, 100, "name")?;
+
+    if let Some(phone) = contact.phone.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+        validate_string_length(phone, 1, 50, "phone")?;
+    }
+    if let Some(email) = contact.email.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+        validate_string_length(email, 1, 100, "email")?;
+    }
+    if let Some(remark) = contact.remark.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+        validate_string_length(remark, 1, 300, "remark")?;
+    }
+
+    Ok(())
+}
+
 pub fn validate_host(host: &Host) -> Result<(), String> {
     validate_required(&host.hostname, "hostname")?;
     validate_string_length(&host.hostname, 1, 200, "hostname")?;
@@ -186,12 +204,13 @@ pub fn validate_application(app: &Application) -> Result<(), String> {
     if let Some(port) = app.port {
         validate_port(port)?;
     }
-    if let Some(ref owners) = app.owners {
-        if owners.len() > 20 {
-            return Err("owners length must be <= 20".into());
+    if let Some(ref owner_contact_ids) = app.owner_contact_ids {
+        if owner_contact_ids.len() > 20 {
+            return Err("owner_contact_ids length must be <= 20".into());
         }
-        for owner in owners {
-            validate_string_length(owner, 1, 50, "owner")?;
+        for contact_id in owner_contact_ids {
+            let trimmed = contact_id.trim();
+            validate_string_length(trimmed, 1, 64, "owner_contact_id")?;
         }
     }
     Ok(())
@@ -211,14 +230,13 @@ pub fn validate_business_application(app: &BusinessApplication) -> Result<(), St
             validate_string_length(code.trim(), 1, 64, "code")?;
         }
     }
-    if let Some(ref owners) = app.owners {
-        if owners.len() > 20 {
-            return Err("owners length must be <= 20".into());
+    if let Some(ref owner_contact_ids) = app.owner_contact_ids {
+        if owner_contact_ids.len() > 20 {
+            return Err("owner_contact_ids length must be <= 20".into());
         }
-        for owner in owners {
-            if !owner.trim().is_empty() {
-                validate_string_length(owner.trim(), 1, 50, "owner")?;
-            }
+        for contact_id in owner_contact_ids {
+            let trimmed = contact_id.trim();
+            validate_string_length(trimmed, 1, 64, "owner_contact_id")?;
         }
     }
     Ok(())
@@ -297,6 +315,7 @@ pub fn validate_dependency(dep: &Dependency) -> Result<(), String> {
             "grpc_call",
             "db_query",
             "cache_access",
+            "forward",
         ],
         "relation_type",
     )?;
@@ -495,6 +514,7 @@ mod tests {
             deploy_mode: None,
             env: "prod".into(),
             git_repo: None,
+            owner_contact_ids: None,
             owners: None,
             business_application_id: None,
             business_application_name: None,
@@ -529,6 +549,7 @@ mod tests {
             id: "ba1".into(),
             name: "支付中心".into(),
             code: Some("PAY".into()),
+            owner_contact_ids: None,
             owners: Some(vec!["alice".into()]),
             description: None,
             env: Some("prod".into()),

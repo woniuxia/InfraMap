@@ -70,7 +70,7 @@ const kpiCards = computed<DashboardKpiCard[]>(() => {
     },
     {
       key: "nginx",
-      title: "负载均衡",
+      title: "网关",
       value: totals.nginx_total,
       subtitle: `异常 ${totals.nginx_abnormal} / 未部署 ${coverage.undeployed_nginx_total}`,
       routeName: "NginxConfigs",
@@ -127,8 +127,8 @@ const quickActions = computed<DashboardQuickAction[]>(() => [
   },
   {
     key: "nginx",
-    title: "负载均衡",
-    desc: "进入负载均衡列表",
+    title: "网关",
+    desc: "进入网关列表",
     routeName: "NginxConfigs",
     icon: SetUp,
     priority: "primary",

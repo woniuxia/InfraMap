@@ -1,150 +1,152 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed } from "vue";
 import type {
   ImpactResult,
   PathResult,
   TopologyNode,
   TopologyV3EvidenceItem,
   TopologyV3TroubleshootReport,
-} from '@/types'
+} from "@/types";
 
-export type TopologyWorkbenchTab = 'overview' | 'evidence' | 'path' | 'impact'
+export type TopologyWorkbenchTab = "overview" | "evidence" | "path" | "impact";
 
 const props = defineProps<{
-  visible: boolean
-  activeTab: TopologyWorkbenchTab
-  selectedNode: TopologyNode | null
-  troubleshootReport: TopologyV3TroubleshootReport | null
-  troubleshootLoading: boolean
-  pathResult: PathResult | null
-  impactResult: ImpactResult | null
-  nodeNameMap: Record<string, string>
-}>()
+  visible: boolean;
+  activeTab: TopologyWorkbenchTab;
+  selectedNode: TopologyNode | null;
+  troubleshootReport: TopologyV3TroubleshootReport | null;
+  troubleshootLoading: boolean;
+  pathResult: PathResult | null;
+  impactResult: ImpactResult | null;
+  nodeNameMap: Record<string, string>;
+}>();
 
 const emit = defineEmits<{
-  (e: 'close'): void
-  (e: 'tab-change', tab: TopologyWorkbenchTab): void
-  (e: 'start-path-trace'): void
-  (e: 'analyze-impact'): void
-  (e: 'edit-node'): void
-}>()
+  (e: "close"): void;
+  (e: "tab-change", tab: TopologyWorkbenchTab): void;
+  (e: "start-path-trace"): void;
+  (e: "analyze-impact"): void;
+  (e: "edit-node"): void;
+}>();
 
 const tabs: Array<{ key: TopologyWorkbenchTab; label: string }> = [
-  { key: 'overview', label: '概览' },
-  { key: 'evidence', label: '证据' },
-  { key: 'path', label: '路径' },
-  { key: 'impact', label: '影响' },
-]
+  { key: "overview", label: "概览" },
+  { key: "evidence", label: "证据" },
+  { key: "path", label: "路径" },
+  { key: "impact", label: "影响" },
+];
 
 const NODE_TYPE_LABELS: Record<string, string> = {
-  application: '应用',
-  middleware: '中间件',
-  nginx: '负载均衡',
-}
+  application: "应用",
+  middleware: "中间件",
+  nginx: "网关",
+};
 
 const STATUS_LABELS: Record<string, string> = {
-  running: '运行中',
-  stopped: '已停止',
-  maintenance: '维护中',
-}
+  running: "运行中",
+  stopped: "已停止",
+  maintenance: "维护中",
+};
 
 const ENV_LABELS: Record<string, string> = {
-  prod: '生产',
-  dev: '开发',
-  test: '测试',
-}
+  prod: "生产",
+  dev: "开发",
+  test: "测试",
+};
 
 const EVIDENCE_TYPE_LABELS: Record<string, string> = {
-  profile: '节点画像',
-  dependency_summary: '依赖摘要',
-  deployment: '部署记录',
-  audit: '审计事件',
-  call_relation: '调用关系',
-  metric: '监控指标',
-  alert: '告警',
-  change: '变更',
-  annotation: '注释',
-}
+  profile: "节点画像",
+  dependency_summary: "依赖摘要",
+  deployment: "部署记录",
+  audit: "审计事件",
+  call_relation: "调用关系",
+  metric: "监控指标",
+  alert: "告警",
+  change: "变更",
+  annotation: "注释",
+};
 
-const reportSummary = computed(() => props.troubleshootReport?.summary ?? null)
-const evidenceItems = computed(() => props.troubleshootReport?.evidence?.items ?? [])
-const evidenceTotal = computed(() => props.troubleshootReport?.evidence?.total ?? evidenceItems.value.length)
-const reportInsights = computed(() => props.troubleshootReport?.insights ?? [])
-const upstreamItems = computed(() => props.troubleshootReport?.upstream ?? [])
-const downstreamItems = computed(() => props.troubleshootReport?.downstream ?? [])
+const reportSummary = computed(() => props.troubleshootReport?.summary ?? null);
+const evidenceItems = computed(() => props.troubleshootReport?.evidence?.items ?? []);
+const evidenceTotal = computed(
+  () => props.troubleshootReport?.evidence?.total ?? evidenceItems.value.length,
+);
+const reportInsights = computed(() => props.troubleshootReport?.insights ?? []);
+const upstreamItems = computed(() => props.troubleshootReport?.upstream ?? []);
+const downstreamItems = computed(() => props.troubleshootReport?.downstream ?? []);
 
 const overviewMetrics = computed(() => {
-  if (!reportSummary.value) return []
+  if (!reportSummary.value) return [];
   return [
-    { key: 'inbound', label: '入边', value: reportSummary.value.inboundEdgeCount },
-    { key: 'outbound', label: '出边', value: reportSummary.value.outboundEdgeCount },
-    { key: 'deployment', label: '部署', value: reportSummary.value.deploymentCount },
-    { key: 'audit', label: '最近变更', value: reportSummary.value.recentAuditCount },
-  ]
-})
+    { key: "inbound", label: "入边", value: reportSummary.value.inboundEdgeCount },
+    { key: "outbound", label: "出边", value: reportSummary.value.outboundEdgeCount },
+    { key: "deployment", label: "部署", value: reportSummary.value.deploymentCount },
+    { key: "audit", label: "最近变更", value: reportSummary.value.recentAuditCount },
+  ];
+});
 
 const impactByDepth = computed(() => {
-  if (!props.impactResult) return []
-  const depthMap: Record<number, { id: string; name: string; node_type: string }[]> = {}
+  if (!props.impactResult) return [];
+  const depthMap: Record<number, { id: string; name: string; node_type: string }[]> = {};
   props.impactResult.affected_nodes.forEach((node) => {
     if (!depthMap[node.depth]) {
-      depthMap[node.depth] = []
+      depthMap[node.depth] = [];
     }
-    depthMap[node.depth].push(node)
-  })
+    depthMap[node.depth].push(node);
+  });
   return Object.entries(depthMap)
     .sort(([left], [right]) => Number(left) - Number(right))
-    .map(([depth, nodes]) => ({ depth: Number(depth), nodes }))
-})
+    .map(([depth, nodes]) => ({ depth: Number(depth), nodes }));
+});
 
 function extraEntries(node: TopologyNode): Array<{ key: string; value: string }> {
-  if (!node.extra) return []
+  if (!node.extra) return [];
   const labels: Record<string, string> = {
-    type: '类型',
-    category: '分类',
-    tech_stack: '技术栈',
-    address: '地址',
-    port: '端口',
-    version: '版本',
-    endpoint_count: '端点数量',
-    first_endpoint: '首个端点',
-    strategy: '策略',
-  }
+    type: "类型",
+    category: "分类",
+    tech_stack: "技术栈",
+    address: "地址",
+    port: "端口",
+    version: "版本",
+    endpoint_count: "端点数量",
+    first_endpoint: "首个端点",
+    strategy: "策略",
+  };
 
   return Object.entries(node.extra)
-    .filter(([, value]) => value !== undefined && value !== null && value !== '')
+    .filter(([, value]) => value !== undefined && value !== null && value !== "")
     .map(([key, value]) => ({
       key: labels[key] || key,
       value: String(value),
-    }))
+    }));
 }
 
 function evidenceTypeLabel(item: TopologyV3EvidenceItem): string {
-  const type = item.evidenceType || item.evidence_type || 'annotation'
-  return EVIDENCE_TYPE_LABELS[type] || type
+  const type = item.evidenceType || item.evidence_type || "annotation";
+  return EVIDENCE_TYPE_LABELS[type] || type;
 }
 
 function evidenceTone(item: TopologyV3EvidenceItem): string {
-  if (item.severity === 'critical') return 'danger'
-  if (item.severity === 'warning') return 'warning'
-  return 'info'
+  if (item.severity === "critical") return "danger";
+  if (item.severity === "warning") return "warning";
+  return "info";
 }
 
 function formatEvidenceTime(timestamp?: string): string {
-  if (!timestamp) return '未知时间'
-  const date = new Date(timestamp)
-  if (Number.isNaN(date.getTime())) return timestamp
-  return date.toLocaleString('zh-CN', { hour12: false })
+  if (!timestamp) return "未知时间";
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return timestamp;
+  return date.toLocaleString("zh-CN", { hour12: false });
 }
 
 function getNodeName(nodeId: string): string {
-  return props.nodeNameMap[nodeId] || nodeId.slice(0, 8)
+  return props.nodeNameMap[nodeId] || nodeId.slice(0, 8);
 }
 
 function insightSeverityLabel(severity?: string): string {
-  if (severity === 'critical') return '高风险'
-  if (severity === 'warning') return '需关注'
-  return '提示'
+  if (severity === "critical") return "高风险";
+  if (severity === "warning") return "需关注";
+  return "提示";
 }
 </script>
 
@@ -154,7 +156,7 @@ function insightSeverityLabel(severity?: string): string {
       <div class="panel-header">
         <div>
           <div class="panel-eyebrow">排障工作台</div>
-          <div class="panel-title">{{ selectedNode?.name || '未选择节点' }}</div>
+          <div class="panel-title">{{ selectedNode?.name || "未选择节点" }}</div>
         </div>
         <button type="button" class="text-btn" @click="emit('close')">关闭</button>
       </div>
@@ -179,11 +181,15 @@ function insightSeverityLabel(severity?: string): string {
               <div class="node-card-main">
                 <span class="node-name">{{ selectedNode.name }}</span>
                 <span class="status-chip" :data-tone="reportSummary?.statusSeverity || 'info'">
-                  {{ STATUS_LABELS[selectedNode.status || 'running'] || selectedNode.status || '未知' }}
+                  {{
+                    STATUS_LABELS[selectedNode.status || "running"] || selectedNode.status || "未知"
+                  }}
                 </span>
               </div>
               <div class="node-meta">
-                <span>{{ NODE_TYPE_LABELS[selectedNode.node_type] || selectedNode.node_type }}</span>
+                <span>
+                  {{ NODE_TYPE_LABELS[selectedNode.node_type] || selectedNode.node_type }}
+                </span>
                 <span>·</span>
                 <span>{{ ENV_LABELS[selectedNode.env] || selectedNode.env }}</span>
                 <template v-if="selectedNode.host_name">
@@ -201,9 +207,15 @@ function insightSeverityLabel(severity?: string): string {
             </div>
 
             <div class="action-row">
-              <button type="button" class="action-btn" @click="emit('start-path-trace')">发起路径追踪</button>
-              <button type="button" class="action-btn" @click="emit('analyze-impact')">分析影响面</button>
-              <button type="button" class="action-btn ghost" @click="emit('edit-node')">编辑资源</button>
+              <button type="button" class="action-btn" @click="emit('start-path-trace')">
+                发起路径追踪
+              </button>
+              <button type="button" class="action-btn" @click="emit('analyze-impact')">
+                分析影响面
+              </button>
+              <button type="button" class="action-btn ghost" @click="emit('edit-node')">
+                编辑资源
+              </button>
             </div>
 
             <div v-if="extraEntries(selectedNode).length > 0" class="section-block">
@@ -219,9 +231,15 @@ function insightSeverityLabel(severity?: string): string {
             <div v-if="reportInsights.length > 0" class="section-block">
               <div class="section-title">线索提示</div>
               <div class="insight-list">
-                <article v-for="(item, index) in reportInsights" :key="`${item.kind}-${index}`" class="insight-item">
+                <article
+                  v-for="(item, index) in reportInsights"
+                  :key="`${item.kind}-${index}`"
+                  class="insight-item"
+                >
                   <div class="insight-head">
-                    <span class="insight-badge" :data-tone="item.severity || 'info'">{{ insightSeverityLabel(item.severity) }}</span>
+                    <span class="insight-badge" :data-tone="item.severity || 'info'">
+                      {{ insightSeverityLabel(item.severity) }}
+                    </span>
                     <span class="insight-title">{{ item.title }}</span>
                   </div>
                   <div v-if="item.description" class="insight-desc">{{ item.description }}</div>
@@ -236,14 +254,18 @@ function insightSeverityLabel(severity?: string): string {
                   <div class="neighbor-title">上游 {{ upstreamItems.length }}</div>
                   <div v-if="upstreamItems.length === 0" class="muted-text">暂无上游</div>
                   <div v-else class="neighbor-list">
-                    <span v-for="item in upstreamItems" :key="item.id" class="neighbor-chip">{{ item.name }}</span>
+                    <span v-for="item in upstreamItems" :key="item.id" class="neighbor-chip">
+                      {{ item.name }}
+                    </span>
                   </div>
                 </div>
                 <div class="neighbor-column">
                   <div class="neighbor-title">下游 {{ downstreamItems.length }}</div>
                   <div v-if="downstreamItems.length === 0" class="muted-text">暂无下游</div>
                   <div v-else class="neighbor-list">
-                    <span v-for="item in downstreamItems" :key="item.id" class="neighbor-chip">{{ item.name }}</span>
+                    <span v-for="item in downstreamItems" :key="item.id" class="neighbor-chip">
+                      {{ item.name }}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -258,17 +280,21 @@ function insightSeverityLabel(severity?: string): string {
               <div class="section-title">证据</div>
               <div class="section-meta">共 {{ evidenceTotal }} 条</div>
             </div>
-            <div v-if="troubleshootLoading" data-testid="evidence-loading" class="loading-block">证据加载中...</div>
+            <div v-if="troubleshootLoading" data-testid="evidence-loading" class="loading-block">
+              证据加载中...
+            </div>
             <div v-else-if="evidenceItems.length === 0" class="empty-block">暂无关联证据</div>
             <div v-else class="evidence-list">
               <article v-for="item in evidenceItems" :key="item.id" class="evidence-item">
                 <div class="evidence-head">
-                  <span class="evidence-type" :data-tone="evidenceTone(item)">{{ evidenceTypeLabel(item) }}</span>
+                  <span class="evidence-type" :data-tone="evidenceTone(item)">
+                    {{ evidenceTypeLabel(item) }}
+                  </span>
                   <span class="evidence-time">{{ formatEvidenceTime(item.timestamp) }}</span>
                 </div>
                 <div class="evidence-title">{{ item.title }}</div>
                 <div v-if="item.description" class="evidence-desc">{{ item.description }}</div>
-                <div class="evidence-source">{{ item.source || 'topology_v3' }}</div>
+                <div class="evidence-source">{{ item.source || "topology_v3" }}</div>
               </article>
             </div>
           </div>
@@ -282,7 +308,11 @@ function insightSeverityLabel(severity?: string): string {
               <div class="section-title">路径结果</div>
               <div class="section-meta">找到 {{ pathResult.paths.length }} 条</div>
             </div>
-            <div v-for="(path, index) in pathResult.paths" :key="`${index}-${path.join('-')}`" class="path-item">
+            <div
+              v-for="(path, index) in pathResult.paths"
+              :key="`${index}-${path.join('-')}`"
+              class="path-item"
+            >
               <div class="path-index">#{{ index + 1 }}</div>
               <div class="path-chain">
                 <template v-for="(nodeId, nodeIndex) in path" :key="`${nodeId}-${nodeIndex}`">
@@ -307,14 +337,18 @@ function insightSeverityLabel(severity?: string): string {
                 <div class="metric-value">{{ impactResult.max_depth }}</div>
               </div>
             </div>
-            <div v-if="impactResult.affected_nodes.length === 0" class="empty-block inline">无上游依赖</div>
+            <div v-if="impactResult.affected_nodes.length === 0" class="empty-block inline">
+              无上游依赖
+            </div>
             <div v-else class="impact-list">
               <div v-for="group in impactByDepth" :key="group.depth" class="impact-group">
                 <div class="impact-title">第 {{ group.depth }} 层</div>
                 <div class="impact-tags">
                   <span v-for="node in group.nodes" :key="node.id" class="impact-chip">
                     {{ node.name }}
-                    <span class="impact-node-type">({{ NODE_TYPE_LABELS[node.node_type] || node.node_type }})</span>
+                    <span class="impact-node-type">
+                      ({{ NODE_TYPE_LABELS[node.node_type] || node.node_type }})
+                    </span>
                   </span>
                 </div>
               </div>
@@ -472,23 +506,23 @@ function insightSeverityLabel(severity?: string): string {
   font-size: 12px;
 }
 
-.status-chip[data-tone='critical'],
-.evidence-type[data-tone='danger'],
-.insight-badge[data-tone='critical'] {
+.status-chip[data-tone="critical"],
+.evidence-type[data-tone="danger"],
+.insight-badge[data-tone="critical"] {
   background: color-mix(in srgb, var(--im-danger) 16%, transparent);
   color: var(--im-danger);
 }
 
-.status-chip[data-tone='warning'],
-.evidence-type[data-tone='warning'],
-.insight-badge[data-tone='warning'] {
+.status-chip[data-tone="warning"],
+.evidence-type[data-tone="warning"],
+.insight-badge[data-tone="warning"] {
   background: color-mix(in srgb, var(--im-warning) 16%, transparent);
   color: var(--im-warning);
 }
 
-.status-chip[data-tone='info'],
-.evidence-type[data-tone='info'],
-.insight-badge[data-tone='info'],
+.status-chip[data-tone="info"],
+.evidence-type[data-tone="info"],
+.insight-badge[data-tone="info"],
 .neighbor-chip,
 .impact-chip {
   background: var(--im-accent-dim);
@@ -591,7 +625,9 @@ function insightSeverityLabel(severity?: string): string {
 
 .slide-enter-active,
 .slide-leave-active {
-  transition: transform 0.18s ease, opacity 0.18s ease;
+  transition:
+    transform 0.18s ease,
+    opacity 0.18s ease;
 }
 
 .slide-enter-from,

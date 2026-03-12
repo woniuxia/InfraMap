@@ -5,7 +5,6 @@ import type { SearchFieldConfig, SearchToolbarQueryPayload } from "@/types/searc
 import { listMiddlewares, deleteMiddleware } from "@/api/middlewares";
 import { useResourceList } from "@/composables/useResourceList";
 import { useEnvStore } from "@/stores/env";
-import { ENV_OPTIONS } from "@/constants/options";
 import { generateDraftId } from "@/utils/draft";
 import {
   MIDDLEWARE_CATEGORY_OPTIONS,
@@ -42,20 +41,16 @@ const editorInitialDraft = ref<Partial<Middleware>>({});
 
 interface MiddlewareListFilters {
   category: string[];
-  env: string[];
 }
 
 function createDefaultFilters(): MiddlewareListFilters {
   return {
     category: [],
-    env: [],
   };
 }
 
 const listFilters = ref<MiddlewareListFilters>(createDefaultFilters());
 const categoryOptions = MIDDLEWARE_CATEGORY_OPTIONS;
-
-const envOptions = ENV_OPTIONS;
 
 const toolbarFields: SearchFieldConfig[] = [
   {
@@ -65,14 +60,6 @@ const toolbarFields: SearchFieldConfig[] = [
     type: "multi-select",
     width: "md",
     options: categoryOptions,
-  },
-  {
-    key: "env",
-    queryKey: "env",
-    label: "环境",
-    type: "multi-select",
-    width: "sm",
-    options: envOptions,
   },
 ];
 
@@ -134,19 +121,6 @@ function middlewareTypeIconAlt(row: Pick<Middleware, "category" | "type">): stri
   return getMiddlewareIconByType(row.type, row.category).alt;
 }
 
-function envLabel(env: string) {
-  return ({ prod: "生产", dev: "开发", test: "测试" } as Record<string, string>)[env] || env;
-}
-
-function envTagType(env: string): "primary" | "success" | "warning" | "info" | "danger" {
-  const map: Record<string, "primary" | "success" | "warning" | "info" | "danger"> = {
-    prod: "danger",
-    dev: "info",
-    test: "warning",
-  };
-  return map[env] || "info";
-}
-
 onMounted(() => fetchData());
 </script>
 
@@ -187,11 +161,6 @@ onMounted(() => fetchData());
         </template>
       </el-table-column>
       <el-table-column prop="version" label="版本" width="100" align="center" />
-      <el-table-column prop="env" label="环境" width="80" align="center">
-        <template #default="{ row }">
-          <el-tag :type="envTagType(row.env)" size="small">{{ envLabel(row.env) }}</el-tag>
-        </template>
-      </el-table-column>
       <el-table-column label="操作" width="210" fixed="right" align="center">
         <template #default="{ row }">
           <el-button text type="primary" size="small" @click="openEdit(row)">编辑</el-button>

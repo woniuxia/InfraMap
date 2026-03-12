@@ -3,8 +3,6 @@ import { ref } from "vue";
 import type { Host } from "@/types";
 import {
   buildHardwareSummary,
-  envLabel,
-  envTagType,
   parseHostTags,
   statusLabel,
   statusTagType,
@@ -148,11 +146,6 @@ function handleExpandChange(_row: Host, expandedRows: Host[]) {
           <span class="ip-summary-text">{{ ipDisplayText(row) }}</span>
         </template>
       </el-table-column>
-      <el-table-column prop="env" label="环境" width="90" align="center">
-        <template #default="{ row }">
-          <el-tag :type="envTagType(row.env)" size="small">{{ envLabel(row.env) }}</el-tag>
-        </template>
-      </el-table-column>
       <el-table-column prop="status" label="状态" width="100" align="center">
         <template #default="{ row }">
           <el-tag :type="statusTagType(row.status)" size="small">
@@ -245,12 +238,11 @@ function handleExpandChange(_row: Host, expandedRows: Host[]) {
 
 .host-expand {
   padding: 12px 14px;
-  background:
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--im-surface-1) 86%, transparent),
-      var(--im-surface-0)
-    );
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--im-surface-1) 86%, transparent),
+    var(--im-surface-0)
+  );
   border: 1px solid var(--im-border-subtle);
   border-radius: var(--im-radius-sm);
 }

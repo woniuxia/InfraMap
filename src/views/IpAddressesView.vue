@@ -13,7 +13,10 @@ import { listIpTagTerms } from "@/api/taxonomy";
 import type { IpAddress } from "@/types";
 import type { SearchFieldConfig, SearchToolbarQueryPayload } from "@/types/searchToolbar";
 import { useResourceList } from "@/composables/useResourceList";
+import { useEnvStore } from "@/stores/env";
 import { ENV_OPTIONS } from "@/constants/options";
+
+const envStore = useEnvStore();
 import SearchToolbar from "@/components/filters/SearchToolbar.vue";
 import CopyableTextCell from "@/components/table/CopyableTextCell.vue";
 
@@ -34,8 +37,7 @@ const {
 });
 
 const searchText = ref("");
-const listFilters = ref<{ env: string[]; is_vip: string[]; tags: string[] }>({
-  env: [],
+const listFilters = ref<{ is_vip: string[]; tags: string[] }>({
   is_vip: [],
   tags: [],
 });
@@ -51,7 +53,7 @@ const batchExpanded = ref(false);
 const batchForm = ref({
   start_ip: "",
   end_ip: "",
-  env: "prod" as IpAddress["env"],
+  env: envStore.currentEnv as IpAddress["env"],
   description: "",
 });
 const batchTagList = ref<string[]>([]);
@@ -80,14 +82,6 @@ const formTagSuggestionOptions = computed(() => buildTagSuggestionOptions(tagLis
 const batchTagSuggestionOptions = computed(() => buildTagSuggestionOptions(batchTagList.value));
 
 const toolbarFields = computed<SearchFieldConfig[]>(() => [
-  {
-    key: "env",
-    queryKey: "env",
-    label: "环境",
-    type: "multi-select",
-    width: "md",
-    options: envOptions,
-  },
   {
     key: "is_vip",
     queryKey: "is_vip",
@@ -159,19 +153,6 @@ function formatRealIpsCount(json?: string): string {
   return count > 0 ? String(count) : "-";
 }
 
-function envLabel(env: string): string {
-  return ({ prod: "生产", dev: "开发", test: "测试" } as Record<string, string>)[env] ?? env;
-}
-
-function envTagType(env: string): "primary" | "success" | "warning" | "info" | "danger" {
-  const map: Record<string, "primary" | "success" | "warning" | "info" | "danger"> = {
-    prod: "danger",
-    dev: "info",
-    test: "warning",
-  };
-  return map[env] ?? "info";
-}
-
 function handleToolbarQuery(payload: SearchToolbarQueryPayload) {
   handleQuery(payload);
 }
@@ -188,7 +169,7 @@ async function loadTagFilterOptions() {
 function openAdd() {
   editingIp.value = {
     ip_address: "",
-    env: "prod",
+    env: envStore.currentEnv,
     is_vip: false,
     real_ips: undefined,
     tags: undefined,
@@ -397,11 +378,6 @@ onMounted(() => {
       <el-table-column label="IP地址" min-width="220" align="center">
         <template #default="{ row }">
           <CopyableTextCell :text="row.ip_address" aria-label="复制IP地址" />
-        </template>
-      </el-table-column>
-      <el-table-column prop="env" label="环境" width="90" align="center">
-        <template #default="{ row }">
-          <el-tag :type="envTagType(row.env)" size="small">{{ envLabel(row.env) }}</el-tag>
         </template>
       </el-table-column>
       <el-table-column label="类型" width="100" align="center">
