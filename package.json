@@ -17,6 +17,9 @@
     "test:e2e": "playwright test",
     "test:backend": "cd src-tauri && cargo test",
     "build:installer": "tauri build",
+    "sync-version": "powershell -ExecutionPolicy Bypass -File ./scripts/sync-version.ps1",
+    "build:win": "powershell -ExecutionPolicy Bypass -File ./scripts/build-tauri-win.ps1",
+    "release:win": "powershell -ExecutionPolicy Bypass -File ./scripts/release-win.ps1",
     "prepare": "husky"
   },
   "dependencies": {
