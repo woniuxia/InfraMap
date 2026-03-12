@@ -2,11 +2,15 @@
 import { computed, onMounted, ref } from "vue";
 import type { FormInstance, FormRules } from "element-plus";
 import { ElMessage } from "element-plus";
+import { Phone, Message, Edit, Delete, Grid, List as ListIcon } from "@element-plus/icons-vue";
 import type { Contact } from "@/types";
 import type { SearchFieldConfig, SearchToolbarQueryPayload } from "@/types/searchToolbar";
 import { listContacts, saveContact, deleteContact } from "@/api/contacts";
 import { useResourceList } from "@/composables/useResourceList";
+import { useViewToggle } from "@/composables/useViewToggle";
 import SearchToolbar from "@/components/filters/SearchToolbar.vue";
+import ContactCard from "@/components/contact/ContactCard.vue";
+import ContactAvatar from "@/components/contact/ContactAvatar.vue";
 
 const {
   loading,
@@ -22,6 +26,11 @@ const {
   listFn: listContacts,
   deleteFn: deleteContact,
   entityLabel: "联系人",
+});
+
+const { currentView, isCardView } = useViewToggle({
+  storageKey: "contacts-view-mode",
+  defaultView: "card",
 });
 
 const searchText = ref("");
@@ -41,6 +50,7 @@ const formRules: FormRules = {
     { required: true, message: "请输入联系人姓名", trigger: "blur" },
     { min: 1, max: 100, message: "姓名长度需在 1-100 字符内", trigger: "blur" },
   ],
+  company: [{ min: 0, max: 100, message: "单位长度需在 0-100 字符内", trigger: "blur" }],
   phone: [{ min: 0, max: 50, message: "电话长度需在 0-50 字符内", trigger: "blur" }],
   email: [{ min: 0, max: 100, message: "邮箱长度需在 0-100 字符内", trigger: "blur" }],
   remark: [{ min: 0, max: 300, message: "备注长度需在 0-300 字符内", trigger: "blur" }],
@@ -61,6 +71,7 @@ function openAdd() {
   editingContact.value = {
     id: "",
     name: "",
+    company: undefined,
     phone: undefined,
     email: undefined,
     remark: undefined,
@@ -72,6 +83,14 @@ function openEdit(row: Contact) {
   isEditing.value = true;
   editingContact.value = { ...row };
   dialogVisible.value = true;
+}
+
+function handleEditFromCard(contact: Contact) {
+  openEdit(contact);
+}
+
+function handleDeleteFromCard(contact: Contact) {
+  handleDelete(contact.id, contact.name);
 }
 
 async function handleSave() {
@@ -86,6 +105,7 @@ async function handleSave() {
   const payload: Partial<Contact> = {
     id: typeof editingContact.value.id === "string" ? editingContact.value.id.trim() : "",
     name: String(editingContact.value.name ?? "").trim(),
+    company: normalizeOptionalText(editingContact.value.company),
     phone: normalizeOptionalText(editingContact.value.phone),
     email: normalizeOptionalText(editingContact.value.email),
     remark: normalizeOptionalText(editingContact.value.remark),
@@ -120,35 +140,88 @@ onMounted(() => {
     <SearchToolbar
       v-model:search-text="searchText"
       v-model:filters="listFilters"
-      search-placeholder="搜索姓名/电话/邮箱/备注..."
+      search-placeholder="搜索姓名/单位/电话/邮箱/备注..."
       :fields="toolbarFields"
       @query="handleToolbarQuery"
     >
       <template #actions="{ hasActiveFilters, reset }">
-        <el-button :disabled="!hasActiveFilters" @click="reset">重置筛选</el-button>
-        <el-button type="primary" @click="openAdd">新增联系人</el-button>
+        <div class="toolbar-actions">
+          <el-radio-group v-model="currentView" size="small" class="view-toggle">
+            <el-radio-button label="card">
+              <el-icon><Grid /></el-icon>
+            </el-radio-button>
+            <el-radio-button label="list">
+              <el-icon><ListIcon /></el-icon>
+            </el-radio-button>
+          </el-radio-group>
+          <el-button :disabled="!hasActiveFilters" @click="reset">重置筛选</el-button>
+          <el-button type="primary" @click="openAdd">新增联系人</el-button>
+        </div>
       </template>
     </SearchToolbar>
 
-    <el-table :data="data" v-loading="loading" border stripe class="w-full im-table-fixed-ops">
-      <el-table-column prop="name" label="姓名" min-width="140" show-overflow-tooltip />
-      <el-table-column prop="phone" label="电话" min-width="140" show-overflow-tooltip>
-        <template #default="{ row }">{{ row.phone || "-" }}</template>
+    <!-- Card View -->
+    <div v-if="isCardView" v-loading="loading" class="contact-grid">
+      <ContactCard
+        v-for="contact in data"
+        :key="contact.id"
+        :contact="contact"
+        @edit="handleEditFromCard"
+        @delete="handleDeleteFromCard"
+      />
+      <el-empty v-if="!loading && data.length === 0" description="暂无联系人" class="contact-empty">
+        <el-button type="primary" @click="openAdd">添加第一个联系人</el-button>
+      </el-empty>
+    </div>
+
+    <!-- List View -->
+    <el-table
+      v-else
+      :data="data"
+      v-loading="loading"
+      border
+      stripe
+      class="w-full im-table-fixed-ops"
+    >
+      <el-table-column label="姓名" min-width="200">
+        <template #default="{ row }">
+          <div class="contact-name-cell">
+            <ContactAvatar :name="row.name" :size="36" />
+            <div class="contact-name-info">
+              <span class="name">{{ row.name }}</span>
+              <span v-if="row.company" class="company">{{ row.company }}</span>
+            </div>
+          </div>
+        </template>
       </el-table-column>
-      <el-table-column prop="email" label="邮箱" min-width="180" show-overflow-tooltip>
-        <template #default="{ row }">{{ row.email || "-" }}</template>
+      <el-table-column label="联系方式" min-width="180">
+        <template #default="{ row }">
+          <div class="contact-info-cell">
+            <div v-if="row.phone" class="info-item">
+              <el-icon><Phone /></el-icon>
+              <span>{{ row.phone }}</span>
+            </div>
+            <div v-if="row.email" class="info-item">
+              <el-icon><Message /></el-icon>
+              <span>{{ row.email }}</span>
+            </div>
+            <span v-if="!row.phone && !row.email">-</span>
+          </div>
+        </template>
       </el-table-column>
-      <el-table-column prop="remark" label="备注" min-width="220" show-overflow-tooltip>
+      <el-table-column prop="remark" label="备注" min-width="200" show-overflow-tooltip>
         <template #default="{ row }">{{ row.remark || "-" }}</template>
       </el-table-column>
-      <el-table-column prop="updated_at" label="更新时间" width="170" align="center">
+      <el-table-column prop="updated_at" label="更新时间" width="150" align="center">
         <template #default="{ row }">{{ row.updated_at || "-" }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="150" fixed="right" align="center">
+      <el-table-column label="操作" width="100" fixed="right" align="center">
         <template #default="{ row }">
-          <el-button text type="primary" size="small" @click="openEdit(row)">编辑</el-button>
-          <el-button text type="danger" size="small" @click="handleDelete(row.id, row.name)">
-            删除
+          <el-button link type="primary" size="small" @click="openEdit(row)">
+            <el-icon><Edit /></el-icon>
+          </el-button>
+          <el-button link type="danger" size="small" @click="handleDelete(row.id, row.name)">
+            <el-icon><Delete /></el-icon>
           </el-button>
         </template>
       </el-table-column>
@@ -159,7 +232,7 @@ onMounted(() => {
         v-model:current-page="queryParams.page"
         v-model:page-size="queryParams.page_size"
         :total="total"
-        :page-sizes="[10, 20, 50]"
+        :page-sizes="[12, 24, 48, 96]"
         layout="total, sizes, prev, pager, next"
         @current-change="handlePageChange"
         @size-change="handlePageSizeChange"
@@ -170,6 +243,13 @@ onMounted(() => {
       <el-form ref="formRef" :model="editingContact" :rules="formRules" label-width="92px">
         <el-form-item label="姓名" prop="name" required>
           <el-input v-model="editingContact.name" placeholder="请输入联系人姓名" maxlength="100" />
+        </el-form-item>
+        <el-form-item label="单位" prop="company">
+          <el-input
+            v-model="editingContact.company"
+            placeholder="公司/组织（可选）"
+            maxlength="100"
+          />
         </el-form-item>
         <el-form-item label="电话" prop="phone">
           <el-input v-model="editingContact.phone" placeholder="可选" maxlength="50" />
@@ -200,5 +280,97 @@ onMounted(() => {
 <style scoped lang="scss">
 .resource-view {
   padding: 0;
+}
+
+.toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.view-toggle {
+  .el-radio-button__inner {
+    padding: 6px 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+}
+
+.contact-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+  min-height: 200px;
+}
+
+.contact-empty {
+  grid-column: 1 / -1;
+  padding: 60px 0;
+}
+
+.contact-name-cell {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+
+  .contact-name-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .name {
+    font-weight: 500;
+    color: var(--el-text-color-primary);
+  }
+
+  .company {
+    font-size: 12px;
+    color: var(--el-text-color-secondary);
+  }
+}
+
+.contact-info-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+
+  .info-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: var(--el-text-color-regular);
+
+    .el-icon {
+      font-size: 14px;
+      color: var(--el-text-color-secondary);
+    }
+  }
+}
+
+@media (max-width: 1400px) {
+  .contact-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 1100px) {
+  .contact-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 768px) {
+  .contact-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .toolbar-actions {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
 }
 </style>
