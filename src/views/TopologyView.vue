@@ -19,14 +19,14 @@ import MiddlewareEditorDialog from "@/components/resource-editors/MiddlewareEdit
 import NginxConfigEditorDialog from "@/components/resource-editors/NginxConfigEditorDialog.vue";
 import type {
   Application,
-  ImpactResult,
   Middleware,
   NginxConfig,
-  PathResult,
+  TopologyImpactResponse,
   TopologyNode,
+  TopologyPathsResponse,
+  TopologyTaskInsight,
   TopologyTaskViewMode,
-  TopologyV3TaskInsight,
-  TopologyV3TroubleshootReport,
+  TopologyTroubleshootReport,
 } from "@/types";
 import {
   DEFAULT_TOPOLOGY_FILTER,
@@ -76,10 +76,10 @@ type TopologyWorkbenchTab = "overview" | "evidence" | "path" | "impact";
 const panelVisible = ref(false);
 const activePanelTab = ref<TopologyWorkbenchTab>("overview");
 const selectedNode = ref<TopologyNode | null>(null);
-const troubleshootReport = ref<TopologyV3TroubleshootReport | null>(null);
+const troubleshootReport = ref<TopologyTroubleshootReport | null>(null);
 const troubleshootLoading = ref(false);
-const pathResult = ref<PathResult | null>(null);
-const impactResult = ref<ImpactResult | null>(null);
+const pathResult = ref<TopologyPathsResponse | null>(null);
+const impactResult = ref<TopologyImpactResponse | null>(null);
 
 const pathTraceMode = ref(false);
 const pathSource = ref<string | null>(null);
@@ -100,7 +100,7 @@ const focusNeighborhoodEnabled = ref(true);
 const containerRef = ref<HTMLDivElement>();
 const troubleshootCache = new Map<
   string,
-  { report: TopologyV3TroubleshootReport; loadedAt: number }
+  { report: TopologyTroubleshootReport; loadedAt: number }
 >();
 let troubleshootRequestVersion = 0;
 
@@ -132,11 +132,11 @@ function resetTroubleshootState() {
   troubleshootReport.value = null;
 }
 
-function resolveInsightNodeIds(insight: TopologyV3TaskInsight): string[] {
+function resolveInsightNodeIds(insight: TopologyTaskInsight): string[] {
   return Array.from(new Set((insight.nodeIds || insight.node_ids || []).filter(Boolean)));
 }
 
-function insightSeverityLabel(insight: TopologyV3TaskInsight): string {
+function insightSeverityLabel(insight: TopologyTaskInsight): string {
   if (insight.severity === "critical") return "高风险";
   if (insight.severity === "warning") return "需关注";
   return "提示";
@@ -409,14 +409,18 @@ async function handleFindPaths(sourceId: string, targetId: string) {
       .filter((path) => path.length > 0);
 
     pathResult.value = {
-      paths,
+      paths: paths.map((nodeIds) => ({ nodeIds })),
       truncated: result.truncated,
+      totalCount: result.totalCount ?? result.total_count,
     };
 
     panelVisible.value = true;
     activePanelTab.value = "path";
-    if (pathResult.value.paths.length > 0) {
-      canvasRef.value?.highlightPaths(pathResult.value.paths);
+    const pathNodeIds = pathResult.value.paths
+      .map((p) => p.nodeIds || p.node_ids || [])
+      .filter((ids) => ids.length > 0);
+    if (pathNodeIds.length > 0) {
+      canvasRef.value?.highlightPaths(pathNodeIds);
     } else {
       canvasRef.value?.clearHighlight();
       ElMessage.warning("未找到连接路径");
@@ -448,15 +452,15 @@ async function analyzeImpactForNode(node: TopologyNode | null) {
     }));
 
     impactResult.value = {
-      affected_nodes: affectedNodes,
-      total_count: result.totalCount ?? result.total_count ?? affectedNodes.length,
-      max_depth: result.maxDepth ?? result.max_depth ?? 0,
+      affectedNodes: affectedNodes,
+      totalCount: result.totalCount ?? result.total_count ?? affectedNodes.length,
+      maxDepth: result.maxDepth ?? result.max_depth ?? 0,
     };
 
     selectedNode.value = node;
     panelVisible.value = true;
     activePanelTab.value = "impact";
-    canvasRef.value?.highlightImpact(node.id, impactResult.value);
+    canvasRef.value?.highlightImpact(node.id, { affectedNodes });
   } catch {
     // error shown by tauriInvoke
   }
@@ -476,7 +480,7 @@ function handleSearch(payload: { matchIds: string[]; focusId?: string }) {
   canvasRef.value?.highlightSearch(payload.matchIds, payload.focusId);
 }
 
-function handleInsightClick(insight: TopologyV3TaskInsight) {
+function handleInsightClick(insight: TopologyTaskInsight) {
   const nodeIds = resolveInsightNodeIds(insight);
   if (nodeIds.length === 0) {
     ElMessage.info("该洞察暂无可高亮节点");
@@ -617,7 +621,7 @@ onBeforeUnmount(() => {
   <div ref="containerRef" class="topology-view" v-loading="loading" @click="closeContextMenu">
     <TopologyControlBar
       :nodes="graphData?.nodes || []"
-      :stats="graphData?.legend_stats || null"
+      :stats="graphData?.legendStats || null"
       :filter="effectiveFilter"
       :layout="selectedLayout"
       :focus-neighborhood-enabled="focusNeighborhoodEnabled"

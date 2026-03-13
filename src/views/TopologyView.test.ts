@@ -3,7 +3,7 @@ import { flushPromises, mount } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createPinia } from "pinia";
 import TopologyView from "@/views/TopologyView.vue";
-import type { TopologyGraph, TopologyV3TroubleshootReport } from "@/types";
+import type { TopologyGraph, TopologyTroubleshootReport } from "@/types";
 
 const {
   storeState,
@@ -44,7 +44,7 @@ const {
     maxDepth: 0,
   })),
   getTopologyTroubleshootReportV3Mock: vi.fn(
-    async (): Promise<TopologyV3TroubleshootReport> => ({
+    async (): Promise<TopologyTroubleshootReport> => ({
       node: {
         id: "node-1",
         name: "订单服务",
@@ -165,7 +165,7 @@ function createTroubleshootReport(
   nodeId: string,
   name: string,
   inboundEdgeCount: number,
-): TopologyV3TroubleshootReport {
+): TopologyTroubleshootReport {
   return {
     node: {
       id: nodeId,
@@ -723,8 +723,8 @@ describe("TopologyView", () => {
   });
 
   it("ignores stale troubleshoot responses when switching nodes quickly", async () => {
-    const nodeOneRequest = createDeferred<TopologyV3TroubleshootReport>();
-    const nodeTwoRequest = createDeferred<TopologyV3TroubleshootReport>();
+    const nodeOneRequest = createDeferred<TopologyTroubleshootReport>();
+    const nodeTwoRequest = createDeferred<TopologyTroubleshootReport>();
     getTopologyTroubleshootReportV3Mock
       .mockImplementationOnce(() => nodeOneRequest.promise)
       .mockImplementationOnce(() => nodeTwoRequest.promise);
@@ -783,7 +783,7 @@ describe("TopologyView", () => {
 
     expect(wrapper.get('[data-testid="panel-summary-inbound"]').text()).toBe("1");
 
-    const pendingRequest = createDeferred<TopologyV3TroubleshootReport>();
+    const pendingRequest = createDeferred<TopologyTroubleshootReport>();
 
     getTopologyTroubleshootReportV3Mock.mockImplementationOnce(() => pendingRequest.promise);
 

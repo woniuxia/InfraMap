@@ -30,7 +30,22 @@
       "Bash(git add:*)",
       "Bash(git commit:*)",
       "Bash(git push:*)",
-      "Bash(npx vue-tsc:*)"
+      "Bash(npx vue-tsc:*)",
+      "WebFetch(domain:github.com)",
+      "Bash(cd /e/Projects/InfraMap/src-tauri && cargo check 2>&1)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -c \"import sys,json,subprocess,os;d=json.load(sys.stdin);f=d.get('tool_input',{}).get('file_path','');ext=os.path.splitext(f)[1].lower();subprocess.run(['npx','prettier','--write',f],capture_output=True) if ext in ('.ts','.vue','.tsx','.js','.jsx','.css','.scss') else None\""
+          }
+        ]
+      }
     ]
   }
 }

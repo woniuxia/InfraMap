@@ -11,7 +11,6 @@ struct RuntimeLogEntry<'a> {
     details: Option<String>,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum AppErrorCode {
@@ -38,7 +37,6 @@ pub struct AppError {
 
 pub type AppResult<T> = Result<T, AppError>;
 
-#[allow(dead_code)]
 impl AppError {
     pub fn new(
         code: AppErrorCode,

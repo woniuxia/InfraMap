@@ -14,19 +14,6 @@ export interface PagedResult<T> {
   page_size: number;
 }
 
-export interface HealthStatus {
-  status: string;
-  db_connected: boolean;
-  db_path: string;
-  table_count: number;
-  schema_version: number;
-}
-
-export interface DbInfo {
-  tables: string[];
-  index_count: number;
-}
-
 export interface SystemSettings {
   id: string;
   auto_backup_enabled: boolean;

@@ -6,9 +6,10 @@ import type {
   TopologyKindCount,
   TopologyLegendStats,
   TopologyNode,
+  TopologyNodeType,
 } from "@/types";
 
-export type TopologyEdgeType = TopologyEdge["edgeType"];
+export type TopologyEdgeType = NonNullable<TopologyEdge["edgeType"]>;
 
 export interface TopologyFilterState {
   env: TopologyEnv;
@@ -77,7 +78,8 @@ export function fromExternalNodeId(nodeId: string): string {
 
 function sortNodes(nodes: TopologyNode[]): TopologyNode[] {
   return [...nodes].sort((left, right) => {
-    if (left.importance !== right.importance) return right.importance - left.importance;
+    if ((left.importance ?? 0) !== (right.importance ?? 0))
+      return (right.importance ?? 0) - (left.importance ?? 0);
     return left.name.localeCompare(right.name);
   });
 }
@@ -166,14 +168,15 @@ export function computeLegendStats(
     };
   });
 
-  const nodeTypeCounts = countKinds(nodes.map((node) => node.nodeType));
+  const nodeTypeCounts = countKinds(
+    nodes.map((node) => node.nodeType).filter((t): t is TopologyNodeType => t != null),
+  );
 
   const edgeTypeMap = new Map<string, number>();
   for (const edge of edges) {
-    edgeTypeMap.set(
-      edge.edgeType,
-      (edgeTypeMap.get(edge.edgeType) || 0) + Math.max(1, edge.strength),
-    );
+    const edgeType = edge.edgeType;
+    if (!edgeType) continue;
+    edgeTypeMap.set(edgeType, (edgeTypeMap.get(edgeType) || 0) + Math.max(1, edge.strength ?? 1));
   }
   const edgeTypeCounts = Array.from(edgeTypeMap.entries())
     .map(([kind, count]) => ({ kind, count }))
@@ -237,22 +240,23 @@ export function filterTopologyGraph(
   const edgeTypeSet = new Set(filter.edgeTypes);
 
   let visibleNodes = transformedNodes.filter((node) => {
-    if (nodeKindSet.size > 0 && !nodeKindSet.has(node.groupKind)) return false;
+    if (nodeKindSet.size > 0 && (!node.groupKind || !nodeKindSet.has(node.groupKind))) return false;
     return true;
   });
   let visibleNodeIds = new Set(visibleNodes.map((node) => node.id));
 
   let visibleEdges = transformedEdges.filter((edge) => {
     if (!visibleNodeIds.has(edge.source) || !visibleNodeIds.has(edge.target)) return false;
-    if (edgeTypeSet.size > 0 && !edgeTypeSet.has(edge.edgeType)) return false;
+    if (edgeTypeSet.size > 0 && (!edge.edgeType || !edgeTypeSet.has(edge.edgeType))) return false;
     return true;
   });
 
   if (!filter.showAllEdges && visibleEdges.length > EDGE_RENDER_LIMIT) {
     visibleEdges = [...visibleEdges]
       .sort((left, right) => {
-        if (left.crossEnv !== right.crossEnv) return left.crossEnv ? -1 : 1;
-        if (left.strength !== right.strength) return right.strength - left.strength;
+        if ((left.crossEnv ?? false) !== (right.crossEnv ?? false)) return left.crossEnv ? -1 : 1;
+        if ((left.strength ?? 0) !== (right.strength ?? 0))
+          return (right.strength ?? 0) - (left.strength ?? 0);
         return left.id.localeCompare(right.id);
       })
       .slice(0, EDGE_RENDER_LIMIT);

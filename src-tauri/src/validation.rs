@@ -3,7 +3,6 @@ use std::net::Ipv4Addr;
 use crate::models::application::Application;
 use crate::models::business_application::BusinessApplication;
 use crate::models::contact::Contact;
-use crate::models::dependency::Dependency;
 use crate::models::deployment::Deployment;
 use crate::models::host::Host;
 use crate::models::ip_address::IpAddress;
@@ -300,28 +299,6 @@ pub fn validate_deployment(dep: &Deployment) -> Result<(), String> {
     if let Some(port) = dep.port {
         validate_port(port)?;
     }
-    Ok(())
-}
-
-pub fn validate_dependency(dep: &Dependency) -> Result<(), String> {
-    validate_required(&dep.source_id, "source_id")?;
-    validate_required(&dep.source_type, "source_type")?;
-    validate_required(&dep.target_id, "target_id")?;
-    validate_required(&dep.target_type, "target_type")?;
-    validate_enum(
-        &dep.relation_type,
-        &[
-            "http_call",
-            "tcp",
-            "mq_produce",
-            "mq_consume",
-            "grpc_call",
-            "db_query",
-            "cache_access",
-            "forward",
-        ],
-        "relation_type",
-    )?;
     Ok(())
 }
 

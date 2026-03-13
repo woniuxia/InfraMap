@@ -1,6 +1,6 @@
 import { defineStore } from "pinia";
 import { ref, computed } from "vue";
-import { getTopologySnapshot, getTopologyTaskView } from "@/api/topology";
+import { getTopologySnapshotV3, getTopologyTaskViewV3 } from "@/api/topologyV3";
 import type {
   TopologyEdge,
   TopologyEnv,
@@ -51,10 +51,10 @@ function resolveGroupKind(nodeType: TopologyNodeType, raw?: string): TopologyGro
 }
 
 function normalizeNode(node: TopologyNode): TopologyNode {
-  const nodeType: TopologyNodeType = node.nodeType || "application";
-  const groupKind = resolveGroupKind(nodeType, node.groupKind);
+  const nodeType: TopologyNodeType = node.nodeType || node.node_type || "application";
+  const groupKind = resolveGroupKind(nodeType, node.groupKind || node.group_kind);
   const importance = Number.isFinite(node.importance) ? Number(node.importance) : 1;
-  const isExternal = node.isExternal === true;
+  const isExternal = node.isExternal === true || node.is_external === true;
   const env = node.env || "prod";
   const extra = {
     ...(node.extra || {}),
@@ -67,19 +67,19 @@ function normalizeNode(node: TopologyNode): TopologyNode {
     nodeType: nodeType,
     env,
     groupKind: groupKind,
-    hostId: node.hostId,
-    hostName: node.hostName,
-    hostIpDisplay: node.hostIpDisplay,
+    hostId: node.hostId || node.host_id,
+    hostName: node.hostName || node.host_name,
+    hostIpDisplay: node.hostIpDisplay || node.host_ip_display,
     status: node.status,
     importance,
     extra,
     isExternal: isExternal || undefined,
-    externalRefId: node.externalRefId,
+    externalRefId: node.externalRefId || node.external_ref_id,
   };
 }
 
 function normalizeEdge(edge: TopologyEdge): TopologyEdge {
-  const edgeType: TopologyEdge["edgeType"] = edge.edgeType || "http_call";
+  const edgeType: TopologyEdge["edgeType"] = edge.edgeType || edge.edge_type || "http_call";
   const strength = Number.isFinite(edge.strength) ? Number(edge.strength) : 1;
 
   return {
@@ -89,7 +89,7 @@ function normalizeEdge(edge: TopologyEdge): TopologyEdge {
     edgeType: edgeType,
     label: edge.label,
     strength,
-    crossEnv: edge.crossEnv === true,
+    crossEnv: edge.crossEnv === true || edge.cross_env === true,
   };
 }
 
@@ -173,8 +173,10 @@ function buildLegendStats(
         appCount: inEnv.filter((node) => node.groupKind === "application_service").length,
       };
     }),
-    nodeTypeCounts: countKinds(nodes.map((node) => node.nodeType)),
-    edgeTypeCounts: countKinds(edges.map((edge) => edge.edgeType)),
+    nodeTypeCounts: countKinds(
+      nodes.map((node) => node.nodeType || node.node_type || "application"),
+    ),
+    edgeTypeCounts: countKinds(edges.map((edge) => edge.edgeType || edge.edge_type || "http_call")),
     applicationServiceCount: nodes.filter((node) => node.groupKind === "application_service")
       .length,
     currentEnv: env,
@@ -186,8 +188,10 @@ function buildLegendStats(
 function normalizeSnapshot(snapshot: TopologySnapshotResponse): TopologyGraph {
   const nodes = (snapshot.nodes || []).map(normalizeNode);
   const edges = (snapshot.edges || []).map(normalizeEdge);
-  const legendStats = normalizeLegendStats(snapshot.legendStats, nodes, edges, snapshot.meta?.env);
-  const layoutHints = normalizeLayoutHints(snapshot.layoutHints, edges);
+  const stats = snapshot.legendStats || snapshot.legend_stats;
+  const hints = snapshot.layoutHints || snapshot.layout_hints;
+  const legendStats = normalizeLegendStats(stats, nodes, edges, snapshot.meta?.env);
+  const layoutHints = normalizeLayoutHints(hints, edges);
 
   return {
     lanes: normalizeLanes(nodes, snapshot.lanes),
@@ -201,8 +205,8 @@ function normalizeSnapshot(snapshot: TopologySnapshotResponse): TopologyGraph {
 function normalizeTaskInsight(insight: TopologyTaskInsight): TopologyTaskInsight {
   return {
     ...insight,
-    nodeIds: insight.nodeIds || [],
-    edgeIds: insight.edgeIds || [],
+    nodeIds: insight.nodeIds || insight.node_ids || [],
+    edgeIds: insight.edgeIds || insight.edge_ids || [],
   };
 }
 
@@ -240,10 +244,10 @@ export const useTopologyStore = defineStore("topology", () => {
 
     if (taskView.value === "explore") {
       taskInsights.value = [];
-      return getTopologySnapshot(query);
+      return getTopologySnapshotV3(query);
     }
 
-    const response = await getTopologyTaskView(query);
+    const response = await getTopologyTaskViewV3(query);
     taskInsights.value = (response.insights || []).map(normalizeTaskInsight);
     return response.snapshot;
   }

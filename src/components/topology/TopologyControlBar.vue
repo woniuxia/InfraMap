@@ -129,7 +129,7 @@ function doSearch() {
   matchIds.value = props.nodes
     .filter((node) => {
       const name = node.name.toLowerCase();
-      const nodeType = node.nodeType.toLowerCase();
+      const nodeType = (node.nodeType || "").toLowerCase();
       const extra = node.extra || {};
       const address = ((extra.address as string) || "").toLowerCase();
       const ip = ((extra.ip as string) || "").toLowerCase();

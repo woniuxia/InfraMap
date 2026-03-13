@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import type {
-  ImpactResult,
-  PathResult,
+  TopologyEvidenceItem,
+  TopologyImpactResponse,
   TopologyNode,
-  TopologyV3EvidenceItem,
-  TopologyV3TroubleshootReport,
+  TopologyPathsResponse,
+  TopologyTroubleshootReport,
 } from "@/types";
 
 export type TopologyWorkbenchTab = "overview" | "evidence" | "path" | "impact";
@@ -14,10 +14,10 @@ const props = defineProps<{
   visible: boolean;
   activeTab: TopologyWorkbenchTab;
   selectedNode: TopologyNode | null;
-  troubleshootReport: TopologyV3TroubleshootReport | null;
+  troubleshootReport: TopologyTroubleshootReport | null;
   troubleshootLoading: boolean;
-  pathResult: PathResult | null;
-  impactResult: ImpactResult | null;
+  pathResult: TopologyPathsResponse | null;
+  impactResult: TopologyImpactResponse | null;
   nodeNameMap: Record<string, string>;
 }>();
 
@@ -87,12 +87,14 @@ const overviewMetrics = computed(() => {
 
 const impactByDepth = computed(() => {
   if (!props.impactResult) return [];
+  const nodes = props.impactResult.affectedNodes || props.impactResult.affected_nodes || [];
   const depthMap: Record<number, { id: string; name: string; node_type: string }[]> = {};
-  props.impactResult.affected_nodes.forEach((node) => {
+  nodes.forEach((node) => {
+    const nodeType = node.nodeType || node.node_type || "application";
     if (!depthMap[node.depth]) {
       depthMap[node.depth] = [];
     }
-    depthMap[node.depth].push(node);
+    depthMap[node.depth].push({ id: node.id, name: node.name, node_type: nodeType });
   });
   return Object.entries(depthMap)
     .sort(([left], [right]) => Number(left) - Number(right))
@@ -121,12 +123,12 @@ function extraEntries(node: TopologyNode): Array<{ key: string; value: string }>
     }));
 }
 
-function evidenceTypeLabel(item: TopologyV3EvidenceItem): string {
+function evidenceTypeLabel(item: TopologyEvidenceItem): string {
   const type = item.evidenceType || item.evidence_type || "annotation";
   return EVIDENCE_TYPE_LABELS[type] || type;
 }
 
-function evidenceTone(item: TopologyV3EvidenceItem): string {
+function evidenceTone(item: TopologyEvidenceItem): string {
   if (item.severity === "critical") return "danger";
   if (item.severity === "warning") return "warning";
   return "info";
@@ -188,7 +190,11 @@ function insightSeverityLabel(severity?: string): string {
               </div>
               <div class="node-meta">
                 <span>
-                  {{ NODE_TYPE_LABELS[selectedNode.node_type] || selectedNode.node_type }}
+                  {{
+                    NODE_TYPE_LABELS[selectedNode.node_type || ""] ||
+                    selectedNode.node_type ||
+                    "未知"
+                  }}
                 </span>
                 <span>·</span>
                 <span>{{ ENV_LABELS[selectedNode.env] || selectedNode.env }}</span>
@@ -310,14 +316,22 @@ function insightSeverityLabel(severity?: string): string {
             </div>
             <div
               v-for="(path, index) in pathResult.paths"
-              :key="`${index}-${path.join('-')}`"
+              :key="`${index}-${(path.nodeIds || path.node_ids || []).join('-')}`"
               class="path-item"
             >
               <div class="path-index">#{{ index + 1 }}</div>
               <div class="path-chain">
-                <template v-for="(nodeId, nodeIndex) in path" :key="`${nodeId}-${nodeIndex}`">
+                <template
+                  v-for="(nodeId, nodeIndex) in path.nodeIds || path.node_ids || []"
+                  :key="`${nodeId}-${nodeIndex}`"
+                >
                   <span class="path-node">{{ getNodeName(nodeId) }}</span>
-                  <span v-if="nodeIndex < path.length - 1" class="path-arrow">→</span>
+                  <span
+                    v-if="nodeIndex < (path.nodeIds || path.node_ids || []).length - 1"
+                    class="path-arrow"
+                  >
+                    →
+                  </span>
                 </template>
               </div>
             </div>
@@ -330,14 +344,21 @@ function insightSeverityLabel(severity?: string): string {
             <div class="metric-grid compact">
               <div class="metric-card">
                 <div class="metric-label">受影响节点</div>
-                <div class="metric-value">{{ impactResult.total_count }}</div>
+                <div class="metric-value">
+                  {{ impactResult.totalCount ?? impactResult.total_count ?? 0 }}
+                </div>
               </div>
               <div class="metric-card">
                 <div class="metric-label">最大层级</div>
-                <div class="metric-value">{{ impactResult.max_depth }}</div>
+                <div class="metric-value">
+                  {{ impactResult.maxDepth ?? impactResult.max_depth ?? 0 }}
+                </div>
               </div>
             </div>
-            <div v-if="impactResult.affected_nodes.length === 0" class="empty-block inline">
+            <div
+              v-if="(impactResult.affectedNodes || impactResult.affected_nodes || []).length === 0"
+              class="empty-block inline"
+            >
               无上游依赖
             </div>
             <div v-else class="impact-list">

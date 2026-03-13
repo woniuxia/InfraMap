@@ -130,7 +130,7 @@ fn copy_dir_recursive(source_dir: &Path, target_dir: &Path) -> Result<(), String
     Ok(())
 }
 
-#[allow(dead_code)]
+#[cfg(test)]
 pub fn migrate_storage(source: &StoragePaths, target_root: &Path) -> Result<(), String> {
     std::fs::create_dir_all(target_root)
         .map_err(|e| format!("Failed to create target root directory: {}", e))?;

@@ -19,12 +19,12 @@ import {
   getTopologyTroubleshootReportV3,
 } from "@/api/topologyV3";
 import type {
-  TopologyV3EvidenceQuery,
-  TopologyV3ImpactQuery,
-  TopologyV3PathsQuery,
-  TopologyV3SnapshotQuery,
-  TopologyV3TaskViewQuery,
-  TopologyV3TroubleshootReportQuery,
+  TopologyEvidenceQuery,
+  TopologyImpactQuery,
+  TopologyPathsQuery,
+  TopologySnapshotQuery,
+  TopologyTaskViewQuery,
+  TopologyTroubleshootReportQuery,
 } from "@/types";
 
 describe("topology API", () => {
@@ -34,7 +34,7 @@ describe("topology API", () => {
   });
 
   it("getTopologySnapshot should invoke get_topology_snapshot_v3", async () => {
-    const query: TopologyV3SnapshotQuery = {
+    const query: TopologySnapshotQuery = {
       env: "prod",
       taskView: "explore",
       maxDepth: 3,
@@ -66,7 +66,7 @@ describe("topology API", () => {
   });
 
   it("getTopologyTaskView should invoke get_topology_task_view_v3", async () => {
-    const query: TopologyV3TaskViewQuery = {
+    const query: TopologyTaskViewQuery = {
       taskView: "impact",
       env: "prod",
       maxDepth: 2,
@@ -109,7 +109,7 @@ describe("topology API", () => {
   });
 
   it("getTopologyPaths should invoke get_topology_paths_v3", async () => {
-    const query: TopologyV3PathsQuery = {
+    const query: TopologyPathsQuery = {
       sourceId: "A",
       targetId: "B",
       taskView: "explore",
@@ -131,7 +131,7 @@ describe("topology API", () => {
   });
 
   it("getTopologyImpact should invoke get_topology_impact_v3", async () => {
-    const query: TopologyV3ImpactQuery = {
+    const query: TopologyImpactQuery = {
       nodeId: "C",
       taskView: "impact",
       maxDepth: 3,
@@ -152,7 +152,7 @@ describe("topology API", () => {
   });
 
   it("getTopologyEvidence should invoke get_topology_evidence_v3", async () => {
-    const query: TopologyV3EvidenceQuery = {
+    const query: TopologyEvidenceQuery = {
       nodeId: "node-1",
       taskView: "troubleshoot",
       maxItems: 20,
@@ -178,7 +178,7 @@ describe("topology API", () => {
   });
 
   it("getTopologyTroubleshootReportV3 should invoke get_topology_troubleshoot_report_v3", async () => {
-    const query: TopologyV3TroubleshootReportQuery = {
+    const query: TopologyTroubleshootReportQuery = {
       nodeId: "node-1",
       taskView: "troubleshoot",
       evidenceLimit: 10,

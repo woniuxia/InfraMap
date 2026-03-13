@@ -312,69 +312,7 @@ fn import_snapshot_payload(
     rebuild_taxonomy_term_stats(conn, &chrono::Utc::now().to_rfc3339())
         .map_err(|err| format!("rebuild taxonomy stats failed: {}", err))?;
 
-    // 兼容旧快照：schema_version < 23 的数据没有 contacts/owner_contacts 表，需从 legacy owner taxonomy 回填。
-    let has_contacts_tables = payload.tables.iter().any(|item| item.table == "contacts")
-        && payload
-            .tables
-            .iter()
-            .any(|item| item.table == "application_owner_contacts")
-        && payload
-            .tables
-            .iter()
-            .any(|item| item.table == "business_application_owner_contacts");
-    if payload.manifest.schema_version < 23 && !has_contacts_tables {
-        backfill_contacts_and_owner_contacts_from_taxonomy(conn)?;
-    }
-
     Ok((counts, total_rows))
-}
-
-fn backfill_contacts_and_owner_contacts_from_taxonomy(conn: &Connection) -> Result<(), String> {
-    conn.execute_batch(
-        r#"
-        INSERT OR IGNORE INTO contacts (id, name, phone, email, remark, is_deleted, deleted_at, created_at, updated_at)
-        SELECT tt.id, tt.display_name, NULL, NULL, NULL, 0, NULL,
-               COALESCE(tt.created_at, datetime('now')),
-               COALESCE(tt.updated_at, datetime('now'))
-          FROM taxonomy_terms tt
-         WHERE tt.is_deleted = 0
-           AND tt.field_key = 'owner'
-           AND TRIM(COALESCE(tt.display_name, '')) <> '';
-
-        INSERT OR IGNORE INTO application_owner_contacts (id, application_id, contact_id, is_deleted, deleted_at, created_at, updated_at)
-        SELECT lower(hex(randomblob(16))), tb.resource_id, tb.term_id, 0, NULL,
-               COALESCE(tb.created_at, datetime('now')),
-               COALESCE(tb.updated_at, datetime('now'))
-          FROM taxonomy_bindings tb
-          JOIN taxonomy_terms tt
-            ON tt.id = tb.term_id
-           AND tt.is_deleted = 0
-           AND tt.field_key = 'owner'
-          JOIN applications a
-            ON a.id = tb.resource_id
-           AND a.is_deleted = 0
-         WHERE tb.resource_type = 'application'
-           AND tb.is_deleted = 0;
-
-        INSERT OR IGNORE INTO business_application_owner_contacts (id, business_application_id, contact_id, is_deleted, deleted_at, created_at, updated_at)
-        SELECT lower(hex(randomblob(16))), tb.resource_id, tb.term_id, 0, NULL,
-               COALESCE(tb.created_at, datetime('now')),
-               COALESCE(tb.updated_at, datetime('now'))
-          FROM taxonomy_bindings tb
-          JOIN taxonomy_terms tt
-            ON tt.id = tb.term_id
-           AND tt.is_deleted = 0
-           AND tt.field_key = 'owner'
-          JOIN business_applications ba
-            ON ba.id = tb.resource_id
-           AND ba.is_deleted = 0
-         WHERE tb.resource_type = 'business_application'
-           AND tb.is_deleted = 0;
-        "#,
-    )
-    .map_err(|err| format!("backfill contacts from taxonomy failed: {}", err))?;
-
-    Ok(())
 }
 
 pub(crate) fn preview_snapshot_v2_inner(
@@ -525,7 +463,6 @@ pub fn import_snapshot_v2(
 #[cfg(test)]
 mod tests {
     use super::{import_snapshot_payload, preview_snapshot_v2_inner};
-    use crate::commands::taxonomy::save_resource_terms;
     use crate::test_helpers::{insert_test_application, insert_test_host, setup_test_db};
 
     #[test]
@@ -569,75 +506,6 @@ mod tests {
             .expect("count applications");
         assert_eq!(host_count, 1);
         assert_eq!(app_count, 1);
-    }
-
-    #[test]
-    fn import_snapshot_payload_should_backfill_contacts_when_missing() {
-        let conn = setup_test_db();
-        insert_test_application(&conn, "app-1", "orders-api", "prod");
-        conn.execute(
-            "INSERT INTO business_applications (id, name, code, description, env, status, is_deleted, deleted_at, created_at, updated_at)
-             VALUES ('ba-1', '支付中心', 'PAY', NULL, 'prod', 'active', 0, NULL, datetime('now'), datetime('now'))",
-            [],
-        )
-        .expect("seed business application");
-
-        let now = chrono::Utc::now().to_rfc3339();
-        save_resource_terms(
-            &conn,
-            "application",
-            "app-1",
-            "owner",
-            &vec!["alice".into()],
-            &now,
-        )
-        .expect("seed application owner taxonomy");
-        save_resource_terms(
-            &conn,
-            "business_application",
-            "ba-1",
-            "owner",
-            &vec!["alice".into()],
-            &now,
-        )
-        .expect("seed business application owner taxonomy");
-
-        let mut payload = super::build_snapshot_payload(&conn).expect("build snapshot").0;
-        payload.manifest.schema_version = 22;
-        payload.tables.retain(|item| {
-            item.table != "contacts"
-                && item.table != "application_owner_contacts"
-                && item.table != "business_application_owner_contacts"
-        });
-
-        import_snapshot_payload(&conn, &payload).expect("import payload");
-
-        let contact_count: u64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM contacts WHERE is_deleted = 0",
-                [],
-                |row| row.get(0),
-            )
-            .expect("count contacts");
-        assert_eq!(contact_count, 1);
-
-        let app_owner_count: u64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM application_owner_contacts WHERE is_deleted = 0",
-                [],
-                |row| row.get(0),
-            )
-            .expect("count app owner contacts");
-        assert_eq!(app_owner_count, 1);
-
-        let business_owner_count: u64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM business_application_owner_contacts WHERE is_deleted = 0",
-                [],
-                |row| row.get(0),
-            )
-            .expect("count business app owner contacts");
-        assert_eq!(business_owner_count, 1);
     }
 }
 

@@ -107,7 +107,7 @@ export function selectVisibleEdgeIds(
 export function normalizeNodesForDensity(nodes: TopologyNode[]): DensityNodeInput[] {
   return nodes.map((node) => ({
     id: node.id,
-    importance: node.importance,
+    importance: node.importance ?? 0,
   }));
 }
 
@@ -116,7 +116,7 @@ export function normalizeEdgesForDensity(edges: TopologyEdge[]): DensityEdgeInpu
     id: edge.id,
     source: edge.source,
     target: edge.target,
-    strength: edge.strength,
-    crossEnv: edge.crossEnv,
+    strength: edge.strength ?? 1,
+    crossEnv: edge.crossEnv ?? false,
   }));
 }

@@ -25,3 +25,6 @@ Thumbs.db
 # E2E artifacts
 playwright-report/
 test-results/
+
+# MCP config (may contain personal paths)
+.mcp.json
