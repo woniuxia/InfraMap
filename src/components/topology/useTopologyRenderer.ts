@@ -306,7 +306,7 @@ function buildStylesheet(
         "text-halign": "center",
         "font-size": 11,
         color: theme.labelSecondary,
-        padding: "14px",
+        padding: "8px",
         "overlay-opacity": 0,
       },
     },
@@ -315,6 +315,13 @@ function buildStylesheet(
       style: {
         "border-color": withAlpha(theme.impact, "B8"),
         color: theme.impact,
+      },
+    },
+    {
+      selector: 'node[kind = "system"]',
+      style: {
+        "border-style": "solid",
+        "border-color": withAlpha(theme.highlight, "88"),
       },
     },
     {

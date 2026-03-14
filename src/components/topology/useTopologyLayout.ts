@@ -62,8 +62,8 @@ export function useTopologyLayout(options: UseTopologyLayoutOptions) {
       return {
         name: "dagre",
         rankDir: "LR",
-        nodeSep: 72,
-        rankSep: 180,
+        nodeSep: 88,
+        rankSep: 210,
         fit: true,
         padding: 36,
         animate: false,
@@ -78,8 +78,27 @@ export function useTopologyLayout(options: UseTopologyLayoutOptions) {
       fit: true,
       padding: 40,
       packComponents: false,
-      nodeRepulsion: (node: cytoscape.NodeSingular) => (node.data("isExternal") ? 8000 : 12000),
-      idealEdgeLength: (edge: cytoscape.EdgeSingular) => (edge.data("crossEnv") ? 240 : 180),
+      gravity: 0.4,
+      gravityRange: 4.5,
+      nodeRepulsion: (node: cytoscape.NodeSingular) => {
+        if (node.data("isExternal")) return 8000;
+
+        const baseRepulsion = node.isChild() ? 4500 : 12000;
+
+        // 高度数节点降低斥力，使其趋向中心
+        const degree = node.degree(false);
+        if (degree >= 8) return Math.round(baseRepulsion * 0.45);
+        if (degree >= 5) return Math.round(baseRepulsion * 0.65);
+        if (degree >= 3) return Math.round(baseRepulsion * 0.82);
+        return baseRepulsion;
+      },
+      idealEdgeLength: (edge: cytoscape.EdgeSingular) => {
+        if (edge.data("crossEnv")) return 260;
+        const sourceParent = edge.source().data("parent");
+        const targetParent = edge.target().data("parent");
+        if (sourceParent && targetParent && sourceParent === targetParent) return 90;
+        return 200;
+      },
       numIter: options.getIsLargeGraph() ? 1600 : 2200,
       tile: true,
     } as unknown as LayoutOptions;

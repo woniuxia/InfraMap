@@ -3,7 +3,7 @@ import type { TopologyGraph, TopologyNode } from "@/types";
 import {
   EXTERNAL_ZONE_COMBO_ID,
   compactLabel,
-  formatHostComboLabel,
+  formatSystemComboLabel,
   isExternalTopologyNode,
   isOpaqueIdentifier,
 } from "@/components/topology/topologyGraph.utils";
@@ -15,7 +15,7 @@ import {
   resolveMiddlewareNodeIcon,
 } from "@/icons/nodeIconResolver";
 
-const HOST_COMPOUND_PREFIX = "host:";
+const SYSTEM_COMPOUND_PREFIX = "system:";
 
 export interface BuildTopologyCyElementsOptions {
   density: ZoomDensity;
@@ -30,8 +30,8 @@ interface EdgeRenderProfile {
   labelFontSize: number;
 }
 
-export function toHostCompoundId(hostId: string): string {
-  return `${HOST_COMPOUND_PREFIX}${hostId}`;
+export function toSystemCompoundId(systemId: string): string {
+  return `${SYSTEM_COMPOUND_PREFIX}${systemId}`;
 }
 
 function humanizeOpaqueLabel(value: string): string {
@@ -95,30 +95,30 @@ export function buildTopologyCyElements(
   options: BuildTopologyCyElementsOptions,
 ): ElementDefinition[] {
   const nodeById = new Map<string, TopologyNode>(graph.nodes.map((node) => [node.id, node]));
-  const nodesByHost = new Map<string, TopologyNode[]>();
+  const nodesBySystem = new Map<string, TopologyNode[]>();
   for (const node of graph.nodes) {
-    if (!node.hostId || isExternalTopologyNode(node)) continue;
-    const items = nodesByHost.get(node.hostId);
+    if (!node.systemId || isExternalTopologyNode(node)) continue;
+    const items = nodesBySystem.get(node.systemId);
     if (items) {
       items.push(node);
     } else {
-      nodesByHost.set(node.hostId, [node]);
+      nodesBySystem.set(node.systemId, [node]);
     }
   }
 
-  const hostCompoundIds = new Set<string>();
-  const hostCompounds: ElementDefinition[] = [];
-  for (const [hostId, hostNodes] of nodesByHost.entries()) {
-    if (hostNodes.length < 2) continue;
-    const compoundId = toHostCompoundId(hostId);
-    hostCompoundIds.add(hostId);
-    hostCompounds.push({
+  const systemCompoundIds = new Set<string>();
+  const systemCompounds: ElementDefinition[] = [];
+  for (const [systemId, systemNodes] of nodesBySystem.entries()) {
+    if (systemNodes.length < 2) continue;
+    const compoundId = toSystemCompoundId(systemId);
+    systemCompoundIds.add(systemId);
+    systemCompounds.push({
       data: {
         id: compoundId,
-        kind: "host",
-        hostId: hostId,
-        label: formatHostComboLabel(hostId, hostNodes),
-        nodeCount: hostNodes.length,
+        kind: "system",
+        systemId: systemId,
+        label: formatSystemComboLabel(systemId, systemNodes),
+        nodeCount: systemNodes.length,
       },
     });
   }
@@ -151,8 +151,8 @@ export function buildTopologyCyElements(
     let parent: string | undefined;
     if (isExternal && hasExternalNodes) {
       parent = EXTERNAL_ZONE_COMBO_ID;
-    } else if (node.hostId && hostCompoundIds.has(node.hostId)) {
-      parent = toHostCompoundId(node.hostId);
+    } else if (node.systemId && systemCompoundIds.has(node.systemId)) {
+      parent = toSystemCompoundId(node.systemId);
     }
 
     return {
@@ -168,6 +168,8 @@ export function buildTopologyCyElements(
         hostId: node.hostId,
         hostName: node.hostName,
         hostIpDisplay: node.hostIpDisplay,
+        systemId: node.systemId,
+        systemName: node.systemName,
         importance: node.importance,
         isExternal: isExternal,
         externalRefId: node.externalRefId || node.extra?.externalRefId,
@@ -220,5 +222,5 @@ export function buildTopologyCyElements(
     };
   });
 
-  return [...hostCompounds, ...externalCompound, ...nodeElements, ...edgeElements];
+  return [...systemCompounds, ...externalCompound, ...nodeElements, ...edgeElements];
 }

@@ -125,13 +125,29 @@ pub fn get_topology_graph_inner(conn: &Connection) -> Result<TopologyGraph, Stri
         }
     }
 
+    let mut system_name_map: HashMap<String, String> = HashMap::new();
+    {
+        let mut stmt = conn
+            .prepare("SELECT id, name FROM systems WHERE is_deleted = 0")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|e| e.to_string())?;
+        for row in rows {
+            let (id, name) = row.map_err(|e| e.to_string())?;
+            system_name_map.insert(id, name);
+        }
+    }
+
     let mut nodes: Vec<TopologyNode> = Vec::new();
     let mut node_env_map: HashMap<String, String> = HashMap::new();
 
     {
         let mut stmt = conn
             .prepare(
-                "SELECT id, name, type, address, port, tech_stack, env, status \
+                "SELECT id, name, type, address, port, tech_stack, env, status, system_id \
                  FROM services WHERE is_deleted = 0",
             )
             .map_err(|e| e.to_string())?;
@@ -145,6 +161,7 @@ pub fn get_topology_graph_inner(conn: &Connection) -> Result<TopologyGraph, Stri
                 let tech_stack: Option<String> = row.get(5)?;
                 let env = normalize_env(row.get(6)?);
                 let status: Option<String> = row.get(7)?;
+                let system_id: Option<String> = row.get(8)?;
 
                 let mut extra = serde_json::Map::new();
                 if let Some(ref value) = app_type {
@@ -175,6 +192,8 @@ pub fn get_topology_graph_inner(conn: &Connection) -> Result<TopologyGraph, Stri
                     host_id: None,
                     host_name: None,
                     host_ip_display: None,
+                    system_id,
+                    system_name: None,
                     status,
                     importance: 1.0,
                     extra: Some(serde_json::Value::Object(extra)),
@@ -190,6 +209,9 @@ pub fn get_topology_graph_inner(conn: &Connection) -> Result<TopologyGraph, Stri
                     node.host_name = host_meta.host_name.clone();
                     node.host_ip_display = host_meta.host_ip_display.clone();
                 }
+            }
+            if let Some(ref sid) = node.system_id {
+                node.system_name = system_name_map.get(sid).cloned();
             }
             node_env_map.insert(node.id.clone(), node.env.clone());
             nodes.push(node);
@@ -249,6 +271,8 @@ pub fn get_topology_graph_inner(conn: &Connection) -> Result<TopologyGraph, Stri
                     host_id: None,
                     host_name: None,
                     host_ip_display: None,
+                    system_id: None,
+                    system_name: None,
                     status: None,
                     importance: 0.82,
                     extra: Some(serde_json::Value::Object(extra)),
@@ -327,6 +351,8 @@ pub fn get_topology_graph_inner(conn: &Connection) -> Result<TopologyGraph, Stri
                     host_id: None,
                     host_name: None,
                     host_ip_display: None,
+                    system_id: None,
+                    system_name: None,
                     status,
                     importance: 0.9,
                     extra: Some(serde_json::Value::Object(extra)),
@@ -1292,6 +1318,8 @@ fn to_node_v3(node: &TopologyNode) -> TopologyNodeV3 {
         host_id: node.host_id.clone(),
         host_name: node.host_name.clone(),
         host_ip_display: node.host_ip_display.clone(),
+        system_id: node.system_id.clone(),
+        system_name: node.system_name.clone(),
         status: node.status.clone(),
         importance: node.importance,
         extra: node.extra.clone(),

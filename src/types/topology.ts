@@ -35,6 +35,10 @@ export interface TopologyNode {
   host_name?: string;
   hostIpDisplay?: string;
   host_ip_display?: string;
+  systemId?: string;
+  system_id?: string;
+  systemName?: string;
+  system_name?: string;
   status?: string;
   importance?: number;
   isExternal?: boolean;

@@ -52,6 +52,10 @@ pub struct TopologyNodeV3 {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub host_ip_display: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub system_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<String>,
     pub importance: f32,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -353,6 +357,10 @@ pub struct RuntimeTopologyNode {
     pub host_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub host_ip_display: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<String>,
     pub importance: f32,

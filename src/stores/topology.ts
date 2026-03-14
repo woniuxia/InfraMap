@@ -70,6 +70,8 @@ function normalizeNode(node: TopologyNode): TopologyNode {
     hostId: node.hostId || node.host_id,
     hostName: node.hostName || node.host_name,
     hostIpDisplay: node.hostIpDisplay || node.host_ip_display,
+    systemId: node.systemId || node.system_id,
+    systemName: node.systemName || node.system_name,
     status: node.status,
     importance,
     extra,

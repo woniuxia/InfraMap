@@ -3,7 +3,7 @@ import type { TopologyGraph, TopologyNode } from "@/types";
 import { computeLegendStats, filterTopologyGraph } from "@/components/topology/topologyGraph.utils";
 import {
   buildTopologyCyElements,
-  toHostCompoundId,
+  toSystemCompoundId,
 } from "@/components/topology/topologyCytoscape.utils";
 
 function createNode(
@@ -25,6 +25,8 @@ function createGraphFixture(): TopologyGraph {
       env: "prod",
       groupKind: "service",
       hostId: "host-prod-1",
+      systemId: "sys-1",
+      systemName: "订单系统",
       status: "running",
       extra: { address: "10.0.0.1", type: "frontend" },
     }),
@@ -35,6 +37,7 @@ function createGraphFixture(): TopologyGraph {
       env: "prod",
       groupKind: "middleware",
       hostId: "host-prod-1",
+      systemId: "sys-1",
       extra: { category: "cache", type: "Redis", icon_key: "heroicons:window" },
     }),
     createNode({
@@ -103,11 +106,11 @@ describe("topologyCytoscape utils", () => {
       isLargeGraph: false,
     });
 
-    const hostCompound = elements.find((item) => item.data?.id === toHostCompoundId("host-prod-1"));
+    const systemCompound = elements.find((item) => item.data?.id === toSystemCompoundId("sys-1"));
     const externalCompound = elements.find((item) => item.data?.id === "external-zone");
     const externalNode = elements.find((item) => item.data?.id === "external:app-test-1");
 
-    expect(hostCompound).toBeTruthy();
+    expect(systemCompound).toBeTruthy();
     expect(externalCompound).toBeTruthy();
     expect(externalNode?.data?.parent).toBe("external-zone");
   });

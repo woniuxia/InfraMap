@@ -361,3 +361,10 @@ export function formatHostComboLabel(hostId: string, hostNodes: TopologyNode[]):
     displayName || (isOpaqueIdentifier(hostId) ? `主机 #${hostId.slice(-6)}` : hostId);
   return compactLabel(baseLabel, 22);
 }
+
+export function formatSystemComboLabel(systemId: string, systemNodes: TopologyNode[]): string {
+  for (const node of systemNodes) {
+    if (node.systemName) return compactLabel(node.systemName, 22);
+  }
+  return compactLabel(isOpaqueIdentifier(systemId) ? `系统 #${systemId.slice(-6)}` : systemId, 22);
+}
