@@ -8,7 +8,7 @@ const appStore = useAppStore();
 
 <template>
   <el-container class="app-container">
-    <el-aside :width="appStore.sidebarCollapsed ? '64px' : '200px'" class="app-sidebar">
+    <el-aside :width="appStore.sidebarCollapsed ? '68px' : '220px'" class="app-sidebar">
       <SidebarMenu />
     </el-aside>
     <el-container>

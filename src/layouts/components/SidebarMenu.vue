@@ -226,8 +226,14 @@ function navigateToSettings() {
       router
       class="main-menu"
     >
-      <!-- 主菜单 7 项 -->
-      <el-menu-item v-for="item in mainMenuItems" :key="item.path" :index="item.path">
+      <!-- 资源类菜单项 -->
+      <el-menu-item v-for="item in mainMenuItems.slice(0, 6)" :key="item.path" :index="item.path">
+        <el-icon><component :is="item.icon" /></el-icon>
+        <template #title>{{ item.name }}</template>
+      </el-menu-item>
+
+      <!-- 视图类菜单项（拓扑图） -->
+      <el-menu-item v-for="item in mainMenuItems.slice(6)" :key="item.path" :index="item.path">
         <el-icon><component :is="item.icon" /></el-icon>
         <template #title>{{ item.name }}</template>
       </el-menu-item>
@@ -248,25 +254,23 @@ function navigateToSettings() {
       </el-sub-menu>
     </el-menu>
 
-    <!-- 底部区域：系统设置 + 折叠按钮 -->
-    <div class="sidebar-bottom">
+    <!-- 底部区域：系统设置 + 折叠按钮（单行横向布局） -->
+    <div class="sidebar-bottom" :class="{ 'is-collapsed': appStore.sidebarCollapsed }">
       <div
         class="settings-item"
-        :class="{ 'is-active': isSettingsActive, 'is-collapsed': appStore.sidebarCollapsed }"
+        :class="{ 'is-active': isSettingsActive }"
         @click="navigateToSettings"
       >
         <el-icon><Setting /></el-icon>
-        <span v-show="!appStore.sidebarCollapsed" class="settings-text">
+        <span v-if="!appStore.sidebarCollapsed" class="settings-text">
           {{ settingsItem.name }}
         </span>
       </div>
-      <div class="sidebar-footer">
-        <el-button text @click="appStore.toggleSidebar">
-          <el-icon size="18">
-            <Fold v-if="!appStore.sidebarCollapsed" />
-            <Expand v-else />
-          </el-icon>
-        </el-button>
+      <div class="collapse-btn" @click="appStore.toggleSidebar">
+        <el-icon size="18">
+          <Fold v-if="!appStore.sidebarCollapsed" />
+          <Expand v-else />
+        </el-icon>
       </div>
     </div>
   </div>
@@ -285,7 +289,7 @@ function navigateToSettings() {
   display: flex;
   align-items: center;
   justify-content: center;
-  border-bottom: 1px solid var(--im-border-light);
+  border-bottom: 1px solid var(--im-border);
   font-weight: 600;
 }
 .logo-text {
@@ -304,7 +308,9 @@ function navigateToSettings() {
   overflow-y: auto;
 
   :deep(.el-menu-item) {
-    margin: 2px 8px;
+    margin: 3px 8px;
+    height: 44px;
+    line-height: 44px;
     border-radius: var(--im-radius-sm);
     transition: all var(--im-duration-base) var(--im-ease-standard);
   }
@@ -321,7 +327,7 @@ function navigateToSettings() {
       top: 50%;
       transform: translateY(-50%);
       width: 3px;
-      height: 16px;
+      height: 20px;
       border-radius: 0 2px 2px 0;
       background: var(--im-accent);
     }
@@ -329,29 +335,49 @@ function navigateToSettings() {
 
   // 子菜单标题样式
   :deep(.el-sub-menu__title) {
-    margin: 2px 8px;
+    margin: 3px 8px;
+    height: 44px;
+    line-height: 44px;
     border-radius: var(--im-radius-sm);
+
+    .el-sub-menu__icon-arrow {
+      display: none;
+    }
   }
 }
 
 // 底部区域容器
 .sidebar-bottom {
-  border-top: 1px solid var(--im-border-light);
+  border-top: 1px solid var(--im-border);
   background: var(--im-surface-0);
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  height: 52px;
+  padding: 0 4px;
+  gap: 4px;
+
+  &.is-collapsed {
+    flex-direction: column;
+    height: auto;
+    padding: 4px 0;
+    gap: 0;
+  }
 }
 
 // 系统设置独立项样式
 .settings-item {
   display: flex;
   align-items: center;
-  height: 48px;
-  padding: 0 16px;
-  margin: 4px 8px;
+  justify-content: center;
+  flex: 1;
+  height: 44px;
+  padding: 0 12px;
   border-radius: var(--im-radius-sm);
   cursor: pointer;
   transition: all var(--im-duration-base) var(--im-ease-standard);
   color: var(--im-text-primary);
+  overflow: hidden;
 
   &:hover {
     background: var(--im-surface-1);
@@ -369,26 +395,30 @@ function navigateToSettings() {
       top: 50%;
       transform: translateY(-50%);
       width: 3px;
-      height: 16px;
+      height: 20px;
       border-radius: 0 2px 2px 0;
       background: var(--im-accent);
     }
   }
 
-  &.is-collapsed {
+  .is-collapsed & {
+    flex: none;
+    width: 44px;
     justify-content: center;
     padding: 0;
-    margin: 4px auto;
-    width: 48px;
+    margin: 0 auto;
   }
 
   .el-icon {
     font-size: 18px;
-    margin-right: 12px;
     flex-shrink: 0;
   }
 
-  &.is-collapsed .el-icon {
+  &:not(.is-active) .el-icon {
+    margin-right: 10px;
+  }
+
+  .is-collapsed & .el-icon {
     margin-right: 0;
   }
 }
@@ -400,11 +430,28 @@ function navigateToSettings() {
   text-overflow: ellipsis;
 }
 
-.sidebar-footer {
-  padding: 8px;
+// 折叠按钮
+.collapse-btn {
   display: flex;
+  align-items: center;
   justify-content: center;
-  border-top: 1px solid var(--im-border-light);
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  border-radius: var(--im-radius-sm);
+  cursor: pointer;
+  color: var(--im-text-secondary);
+  transition: all var(--im-duration-base) var(--im-ease-standard);
+
+  &:hover {
+    background: var(--im-surface-1);
+    color: var(--im-text-primary);
+  }
+
+  .is-collapsed & {
+    width: 44px;
+    margin: 0 auto;
+  }
 }
 
 // 子菜单弹出层样式
@@ -425,7 +472,6 @@ function navigateToSettings() {
 .env-selector-wrapper {
   padding: 12px;
   border-bottom: 1px solid var(--im-border-light);
-  background: linear-gradient(180deg, var(--im-surface-1) 0%, var(--im-surface-0) 100%);
   display: flex;
   justify-content: center;
 }
@@ -694,15 +740,13 @@ function navigateToSettings() {
     background: rgba(255, 255, 255, 0.03);
     box-shadow:
       0 0 0 1px rgba(255, 255, 255, 0.06),
-      0 1px 2px rgba(0, 0, 0, 0.2),
-      inset 0 1px 0 rgba(255, 255, 255, 0.04);
+      0 1px 2px rgba(0, 0, 0, 0.2);
 
     &:hover {
       background: rgba(255, 255, 255, 0.05);
       box-shadow:
         0 0 0 1px rgba(255, 255, 255, 0.08),
-        0 4px 12px rgba(0, 0, 0, 0.3),
-        inset 0 1px 0 rgba(255, 255, 255, 0.04);
+        0 4px 12px rgba(0, 0, 0, 0.3);
     }
   }
 
