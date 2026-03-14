@@ -48,7 +48,7 @@ describe("topology API", () => {
         envCounts: [],
         nodeTypeCounts: [],
         edgeTypeCounts: [],
-        applicationServiceCount: 0,
+        serviceCount: 0,
       },
       layoutHints: {
         laneOrder: ["prod", "test", "dev"],
@@ -82,7 +82,7 @@ describe("topology API", () => {
           envCounts: [],
           nodeTypeCounts: [],
           edgeTypeCounts: [],
-          applicationServiceCount: 0,
+          serviceCount: 0,
         },
         layoutHints: {
           laneOrder: ["prod", "test", "dev"],
@@ -137,7 +137,7 @@ describe("topology API", () => {
       maxDepth: 3,
     };
     const mockResult = {
-      affectedNodes: [{ id: "n1", name: "App", nodeType: "application", depth: 1 }],
+      affectedNodes: [{ id: "n1", name: "App", nodeType: "service", depth: 1 }],
       totalCount: 1,
       maxDepth: 1,
       severity: "warning",

@@ -18,7 +18,7 @@ describe("resourceLabel", () => {
   it("formats relation target label for application/middleware/nginx", () => {
     expect(
       formatRelationTargetLabel({
-        resourceType: "application",
+        resourceType: "service",
         name: "order-api",
         appType: "backend",
       }),

@@ -36,14 +36,14 @@ describe("import-jobs API", () => {
     __setMockHandler("preview_import_rows", (_cmd, args) => {
       expect(args).toEqual({
         input: {
-          rows: [{ resource_type: "application", name: "app-a" }],
+          rows: [{ resource_type: "service", name: "app-a" }],
         },
       });
       return mock;
     });
 
     const result = await previewImportRows({
-      rows: [{ resource_type: "application", name: "app-a" }],
+      rows: [{ resource_type: "service", name: "app-a" }],
     });
     expect(result).toEqual(mock);
   });
@@ -61,7 +61,7 @@ describe("import-jobs API", () => {
     __setMockHandler("execute_import_rows", (_cmd, args) => {
       expect(args).toEqual({
         input: {
-          rows: [{ resource_type: "application", name: "app-a" }],
+          rows: [{ resource_type: "service", name: "app-a" }],
           strategy: "skip",
         },
       });
@@ -69,7 +69,7 @@ describe("import-jobs API", () => {
     });
 
     const result = await executeImportRows({
-      rows: [{ resource_type: "application", name: "app-a" }],
+      rows: [{ resource_type: "service", name: "app-a" }],
       strategy: "skip",
     });
     expect(result).toEqual(mock);

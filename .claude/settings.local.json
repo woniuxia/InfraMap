@@ -32,7 +32,9 @@
       "Bash(git push:*)",
       "Bash(npx vue-tsc:*)",
       "WebFetch(domain:github.com)",
-      "Bash(cd /e/Projects/InfraMap/src-tauri && cargo check 2>&1)"
+      "Bash(cd /e/Projects/InfraMap/src-tauri && cargo check 2>&1)",
+      "Bash(cd \"E:/Projects/InfraMap\" && node -e \"const src = require\\('vue'\\); const template = require\\('fs'\\).readFileSync\\('src/views/SystemsView.vue', 'utf8'\\); const compiled = require\\('@vue/compiler-sfc'\\).compile\\(template, { filename: 'SystemsView.vue' }\\); console.log\\('Compilation successful'\\);\" 2>&1)",
+      "Bash(cd src-tauri:*)"
     ]
   },
   "hooks": {

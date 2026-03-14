@@ -74,7 +74,7 @@ fn count_related_resources(conn: &rusqlite::Connection) -> Result<u64, rusqlite:
            SELECT DISTINCT owner_type, owner_id
            FROM call_relations
            WHERE is_deleted = 0
-             AND owner_type IN ('application', 'middleware', 'nginx')
+             AND owner_type IN ('service', 'middleware', 'nginx')
          )",
         [],
         |row| row.get::<_, i64>(0),
@@ -96,7 +96,7 @@ fn query_env_distribution(conn: &rusqlite::Connection) -> Result<Vec<EnvCount>, 
                FROM (
                  SELECT env FROM hosts WHERE is_deleted = 0
                  UNION ALL
-                 SELECT env FROM applications WHERE is_deleted = 0
+                 SELECT env FROM services WHERE is_deleted = 0
                  UNION ALL
                  SELECT env FROM middlewares WHERE is_deleted = 0
                  UNION ALL
@@ -187,13 +187,13 @@ fn build_risk_items(
         });
     }
 
-    if totals.application_abnormal > 0 {
+    if totals.service_abnormal > 0 {
         items.push(DashboardRiskItem {
-            key: "application_abnormal".to_string(),
-            label: "异常应用服务".to_string(),
-            count: totals.application_abnormal,
+            key: "service_abnormal".to_string(),
+            label: "异常服务".to_string(),
+            count: totals.service_abnormal,
             severity: "critical".to_string(),
-            target_route: "Applications".to_string(),
+            target_route: "Services".to_string(),
             target_filters: make_filter_map(&[("status", "stopped,maintenance")]),
         });
     }
@@ -249,10 +249,10 @@ fn get_dashboard_overview_inner(
         .map_err(|e| AppError::from_db_error(command, "统计主机总数", e))?;
     let host_abnormal = count_abnormal(conn, "hosts")
         .map_err(|e| AppError::from_db_error(command, "统计主机异常数量", e))?;
-    let application_total = count_active(conn, "applications")
-        .map_err(|e| AppError::from_db_error(command, "统计应用总数", e))?;
-    let application_abnormal = count_abnormal(conn, "applications")
-        .map_err(|e| AppError::from_db_error(command, "统计应用异常数量", e))?;
+    let service_total = count_active(conn, "services")
+        .map_err(|e| AppError::from_db_error(command, "统计服务总数", e))?;
+    let service_abnormal = count_abnormal(conn, "services")
+        .map_err(|e| AppError::from_db_error(command, "统计服务异常数量", e))?;
     let middleware_total = count_active(conn, "middlewares")
         .map_err(|e| AppError::from_db_error(command, "统计中间件总数", e))?;
     let nginx_total = count_active(conn, "nginx_configs")
@@ -264,16 +264,16 @@ fn get_dashboard_overview_inner(
     let dependency_total = count_dependency_total(conn)
         .map_err(|e| AppError::from_db_error(command, "统计依赖总数", e))?;
 
-    let deployed_application_total = count_deployed_by_type(conn, "application")
-        .map_err(|e| AppError::from_db_error(command, "统计已部署应用数量", e))?;
+    let deployed_service_total = count_deployed_by_type(conn, "service")
+        .map_err(|e| AppError::from_db_error(command, "统计已部署服务数量", e))?;
     let deployed_middleware_total = count_deployed_by_type(conn, "middleware")
         .map_err(|e| AppError::from_db_error(command, "统计已部署中间件数量", e))?;
     let deployed_nginx_total = count_deployed_by_type(conn, "nginx")
         .map_err(|e| AppError::from_db_error(command, "统计已部署网关数量", e))?;
 
-    let undeployed_application_total =
-        count_undeployed_by_type(conn, "applications", "application")
-            .map_err(|e| AppError::from_db_error(command, "统计未部署应用数量", e))?;
+    let undeployed_service_total =
+        count_undeployed_by_type(conn, "services", "service")
+            .map_err(|e| AppError::from_db_error(command, "统计未部署服务数量", e))?;
     let undeployed_middleware_total =
         count_undeployed_by_type(conn, "middlewares", "middleware")
             .map_err(|e| AppError::from_db_error(command, "统计未部署中间件数量", e))?;
@@ -290,8 +290,8 @@ fn get_dashboard_overview_inner(
     let totals = DashboardTotals {
         host_total,
         host_abnormal,
-        application_total,
-        application_abnormal,
+        service_total,
+        service_abnormal,
         middleware_total,
         nginx_total,
         nginx_abnormal,
@@ -299,13 +299,13 @@ fn get_dashboard_overview_inner(
         dependency_total,
     };
 
-    let abnormal_total = host_abnormal + application_abnormal + nginx_abnormal;
-    let status_trackable_total = host_total + application_total + nginx_total;
-    let deployable_total = application_total + middleware_total + nginx_total;
+    let abnormal_total = host_abnormal + service_abnormal + nginx_abnormal;
+    let status_trackable_total = host_total + service_total + nginx_total;
+    let deployable_total = service_total + middleware_total + nginx_total;
     let deployed_total =
-        deployed_application_total + deployed_middleware_total + deployed_nginx_total;
+        deployed_service_total + deployed_middleware_total + deployed_nginx_total;
     let undeployed_total =
-        undeployed_application_total + undeployed_middleware_total + undeployed_nginx_total;
+        undeployed_service_total + undeployed_middleware_total + undeployed_nginx_total;
     let relatable_total = deployable_total;
     let isolated_total = relatable_total.saturating_sub(related_total);
 
@@ -330,7 +330,7 @@ fn get_dashboard_overview_inner(
         related_total,
         isolated_total,
         relation_coverage: percent(related_total, relatable_total),
-        undeployed_application_total,
+        undeployed_service_total,
         undeployed_middleware_total,
         undeployed_nginx_total,
     };
@@ -360,7 +360,7 @@ pub fn get_dashboard_overview(pool: State<DbPool>) -> AppResult<DashboardOvervie
 mod tests {
     use super::get_dashboard_overview_inner;
     use crate::test_helpers::{
-        insert_test_application, insert_test_dependency, insert_test_deployment, insert_test_host,
+        insert_test_service, insert_test_dependency, insert_test_deployment, insert_test_host,
         insert_test_middleware, insert_test_nginx_config, setup_test_db,
     };
 
@@ -387,7 +387,7 @@ mod tests {
         let overview = get_dashboard_overview_inner("test", &conn).expect("query overview");
 
         assert_eq!(overview.totals.host_total, 0);
-        assert_eq!(overview.totals.application_total, 0);
+        assert_eq!(overview.totals.service_total, 0);
         assert_eq!(overview.coverage.deployable_total, 0);
         assert_eq!(overview.coverage.undeployed_total, 0);
         assert_eq!(overview.health.abnormal_total, 0);
@@ -409,10 +409,10 @@ mod tests {
         )
         .expect("update host status");
 
-        insert_test_application(&conn, "app-1", "app-1", "prod");
-        insert_test_application(&conn, "app-2", "app-2", "prod");
+        insert_test_service(&conn, "app-1", "app-1", "prod", "");
+        insert_test_service(&conn, "app-2", "app-2", "prod", "");
         conn.execute(
-            "UPDATE applications SET status = 'maintenance' WHERE id = 'app-2'",
+            "UPDATE services SET status = 'maintenance' WHERE id = 'app-2'",
             [],
         )
         .expect("update application status");
@@ -428,7 +428,7 @@ mod tests {
         )
         .expect("update nginx status");
 
-        insert_test_deployment(&conn, "dep-1", "app-1", "application", "host-1");
+        insert_test_deployment(&conn, "dep-1", "app-1", "service", "host-1");
         insert_test_deployment(&conn, "dep-2", "mw-1", "middleware", "host-1");
         insert_test_deployment(&conn, "dep-3", "nginx-1", "nginx", "host-1");
 
@@ -436,7 +436,7 @@ mod tests {
             &conn,
             "rel-1",
             "app-1",
-            "application",
+            "service",
             "mw-1",
             "middleware",
             "http_call",
@@ -446,7 +446,7 @@ mod tests {
             &conn,
             "log-old",
             "create",
-            "application",
+            "service",
             "app-1",
             "app-1",
             "2026-03-01T09:00:00.000Z",
@@ -465,8 +465,8 @@ mod tests {
 
         assert_eq!(overview.totals.host_total, 2);
         assert_eq!(overview.totals.host_abnormal, 1);
-        assert_eq!(overview.totals.application_total, 2);
-        assert_eq!(overview.totals.application_abnormal, 1);
+        assert_eq!(overview.totals.service_total, 2);
+        assert_eq!(overview.totals.service_abnormal, 1);
         assert_eq!(overview.totals.middleware_total, 2);
         assert_eq!(overview.totals.nginx_total, 2);
         assert_eq!(overview.totals.nginx_abnormal, 1);
@@ -484,7 +484,7 @@ mod tests {
         assert_eq!(overview.coverage.related_total, 2);
         assert_eq!(overview.coverage.isolated_total, 4);
         assert!((overview.coverage.relation_coverage - 33.3).abs() < 0.001);
-        assert_eq!(overview.coverage.undeployed_application_total, 1);
+        assert_eq!(overview.coverage.undeployed_service_total, 1);
         assert_eq!(overview.coverage.undeployed_middleware_total, 1);
         assert_eq!(overview.coverage.undeployed_nginx_total, 1);
 

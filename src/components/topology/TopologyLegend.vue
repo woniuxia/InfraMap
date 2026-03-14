@@ -19,7 +19,7 @@ const emit = defineEmits<{
 const collapsed = ref(false);
 
 const NODE_KIND_LABELS: Record<TopologyGroupKind, string> = {
-  application_service: "应用服务",
+  service: "服务",
   middleware: "中间件",
   nginx: "Nginx",
 };
@@ -48,13 +48,11 @@ const nodeItems = computed(() => {
   const source = props.stats?.nodeTypeCounts || [];
   return source
     .map((item) => ({
-      kind: item.kind === "application" ? "application_service" : item.kind,
+      kind: item.kind === "service" ? "service" : item.kind,
       count: item.count,
     }))
     .filter((item): item is { kind: TopologyGroupKind; count: number } => {
-      return (
-        item.kind === "application_service" || item.kind === "middleware" || item.kind === "nginx"
-      );
+      return item.kind === "service" || item.kind === "middleware" || item.kind === "nginx";
     });
 });
 

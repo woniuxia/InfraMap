@@ -39,17 +39,24 @@ const emit = defineEmits<{
 const advancedExpanded = ref(false);
 let queryTimer: ReturnType<typeof setTimeout> | null = null;
 
-const widthPresetMap: Record<SearchFieldWidth, { xl: number; lg: number; md: number; sm: number }> = {
-  sm: { xl: 2, lg: 3, md: 2, sm: 1 },
-  md: { xl: 3, lg: 4, md: 2, sm: 1 },
-  lg: { xl: 4, lg: 8, md: 4, sm: 1 },
-};
+const widthPresetMap: Record<SearchFieldWidth, { xl: number; lg: number; md: number; sm: number }> =
+  {
+    sm: { xl: 2, lg: 3, md: 2, sm: 1 },
+    md: { xl: 3, lg: 4, md: 2, sm: 1 },
+    lg: { xl: 4, lg: 8, md: 4, sm: 1 },
+  };
 
-const basicFields = computed(() => props.fields.filter((field) => (field.section ?? "basic") === "basic"));
-const advancedFields = computed(() => props.fields.filter((field) => (field.section ?? "basic") === "advanced"));
+const basicFields = computed(() =>
+  props.fields.filter((field) => (field.section ?? "basic") === "basic"),
+);
+const advancedFields = computed(() =>
+  props.fields.filter((field) => (field.section ?? "basic") === "advanced"),
+);
 const hasAdvancedFields = computed(() => advancedFields.value.length > 0);
-const activeAdvancedCount = computed(() =>
-  advancedFields.value.filter((field) => !isEmptyFilterValue(field, props.filters[field.key])).length
+const activeAdvancedCount = computed(
+  () =>
+    advancedFields.value.filter((field) => !isEmptyFilterValue(field, props.filters[field.key]))
+      .length,
 );
 const advancedToggleText = computed(() => {
   if (activeAdvancedCount.value > 0) {
@@ -216,7 +223,7 @@ onBeforeUnmount(() => {
           :model-value="textFieldValue(field)"
           :placeholder="field.placeholder || `请输入${field.label}`"
           :clearable="field.clearable ?? true"
-          @update:model-value="(value) => onTextFieldInput(field, String(value))"
+          @update:model-value="onTextFieldInput(field, String($event))"
           @keyup.enter="onTextFieldEnter($event, field)"
           @clear="() => onTextFieldClear(field)"
         />
@@ -229,9 +236,14 @@ onBeforeUnmount(() => {
           collapse-tags
           collapse-tags-tooltip
           :max-collapse-tags="field.maxCollapseTags ?? 1"
-          @change="(value) => onSelectFieldChange(field, value as SearchFieldValue)"
+          @change="onSelectFieldChange(field, $event as SearchFieldValue)"
         >
-          <el-option v-for="item in field.options || []" :key="item.value" :label="item.label" :value="item.value" />
+          <el-option
+            v-for="item in field.options || []"
+            :key="item.value"
+            :label="item.label"
+            :value="item.value"
+          />
         </el-select>
       </div>
     </div>
@@ -262,7 +274,7 @@ onBeforeUnmount(() => {
               :model-value="textFieldValue(field)"
               :placeholder="field.placeholder || `请输入${field.label}`"
               :clearable="field.clearable ?? true"
-              @update:model-value="(value) => onTextFieldInput(field, String(value))"
+              @update:model-value="onTextFieldInput(field, String($event))"
               @keyup.enter="onTextFieldEnter($event, field)"
               @clear="() => onTextFieldClear(field)"
             />
@@ -275,7 +287,7 @@ onBeforeUnmount(() => {
               collapse-tags
               collapse-tags-tooltip
               :max-collapse-tags="field.maxCollapseTags ?? 1"
-              @change="(value) => onSelectFieldChange(field, value as SearchFieldValue)"
+              @change="onSelectFieldChange(field, $event as SearchFieldValue)"
             >
               <el-option
                 v-for="item in field.options || []"
@@ -288,7 +300,6 @@ onBeforeUnmount(() => {
         </div>
       </div>
     </el-collapse-transition>
-
   </div>
 </template>
 
@@ -301,8 +312,11 @@ onBeforeUnmount(() => {
   padding: 12px;
   border: 1px solid var(--im-border-light);
   border-radius: var(--im-radius-md);
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--im-surface-1) 82%, transparent), var(--im-surface-0));
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--im-surface-1) 82%, transparent),
+    var(--im-surface-0)
+  );
 }
 
 .im-search-grid {

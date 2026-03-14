@@ -2,22 +2,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { defineComponent, h, inject, provide } from "vue";
 import { flushPromises, mount } from "@vue/test-utils";
 import { createPinia } from "pinia";
-import BusinessApplicationsView from "@/views/BusinessApplicationsView.vue";
-import {
-  listBusinessApplications,
-  listServicesByBusinessApplication,
-  replaceServicesByBusinessApplication,
-  saveBusinessApplication,
-  deleteBusinessApplication,
-} from "@/api/business-applications";
-import { listApplications } from "@/api/applications";
+import SystemsView from "@/views/SystemsView.vue";
+import { listSystems, listServicesBySystem, saveSystem, deleteSystem } from "@/api";
 import { listContacts } from "@/api/contacts";
 
 const {
   businessEnvOptions,
   businessStatusOptions,
   getEnvLabelMock,
-  getBusinessApplicationStatusLabelMock,
+  getSystemStatusLabelMock,
   messageSuccess,
 } = vi.hoisted(() => ({
   businessEnvOptions: [
@@ -35,7 +28,7 @@ const {
       env ||
       "-",
   ),
-  getBusinessApplicationStatusLabelMock: vi.fn(
+  getSystemStatusLabelMock: vi.fn(
     (status?: string) =>
       (({ active: "激活", inactive: "停用" }) as Record<string, string>)[status ?? ""] ||
       status ||
@@ -53,11 +46,11 @@ vi.mock("element-plus", () => ({
   },
 }));
 
-vi.mock("@/api/business-applications", () => ({
-  listBusinessApplications: vi.fn(async () => ({
+vi.mock("@/api", () => ({
+  listSystems: vi.fn(async () => ({
     data: [
       {
-        id: "ba-1",
+        id: "sys-1",
         name: "支付中心",
         owners: ["alice", "bob"],
         owner_contact_ids: ["contact-alice", "contact-bob"],
@@ -71,41 +64,39 @@ vi.mock("@/api/business-applications", () => ({
     page: 1,
     page_size: 20,
   })),
-  saveBusinessApplication: vi.fn(async () => "ba-1"),
-  deleteBusinessApplication: vi.fn(async () => undefined),
-  listServicesByBusinessApplication: vi.fn(async () => ({
+  saveSystem: vi.fn(async () => "sys-1"),
+  deleteSystem: vi.fn(async () => undefined),
+  listServicesBySystem: vi.fn(async () => ({
     frontend: [
       {
-        id: "app-fe-1",
+        id: "svc-fe-1",
+        system_id: "sys-1",
+        system_name: "支付中心",
         name: "portal-web",
         type: "frontend",
         address: "10.0.0.10",
         port: 80,
+        env: "prod",
+        status: "running",
+        created_at: "",
+        updated_at: "",
       },
     ],
     backend: [
       {
-        id: "app-be-1",
+        id: "svc-be-1",
+        system_id: "sys-1",
+        system_name: "支付中心",
         name: "payment-api",
         type: "backend",
         address: "10.0.0.21",
         port: 8080,
+        env: "prod",
+        status: "running",
+        created_at: "",
+        updated_at: "",
       },
     ],
-  })),
-  replaceServicesByBusinessApplication: vi.fn(async () => ({
-    attached_count: 0,
-    detached_count: 0,
-    unchanged_count: 0,
-  })),
-}));
-
-vi.mock("@/api/applications", () => ({
-  listApplications: vi.fn(async () => ({
-    data: [],
-    total: 0,
-    page: 1,
-    page_size: 500,
   })),
 }));
 
@@ -125,13 +116,13 @@ vi.mock("@/api/contacts", () => ({
 
 vi.mock("@/constants/options", () => ({
   ENV_OPTIONS: businessEnvOptions,
-  BUSINESS_APPLICATION_STATUS_OPTIONS: businessStatusOptions,
-  BUSINESS_APPLICATION_STATUS_LABELS: {
+  SYSTEM_STATUS_OPTIONS: businessStatusOptions,
+  SYSTEM_STATUS_LABELS: {
     active: "激活",
     inactive: "停用",
   },
   getEnvLabel: getEnvLabelMock,
-  getBusinessApplicationStatusLabel: getBusinessApplicationStatusLabelMock,
+  getSystemStatusLabel: getSystemStatusLabelMock,
 }));
 
 const SearchToolbarStub = defineComponent({
@@ -265,7 +256,7 @@ const ElTableColumnStub = defineComponent({
 });
 
 function mountView() {
-  return mount(BusinessApplicationsView, {
+  return mount(SystemsView, {
     global: {
       plugins: [createPinia()],
       stubs: {
@@ -293,7 +284,7 @@ function mountView() {
   });
 }
 
-describe("BusinessApplicationsView", () => {
+describe("SystemsView", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -305,21 +296,19 @@ describe("BusinessApplicationsView", () => {
 
     expect(wrapper.text()).toContain("alice");
     expect(wrapper.text()).toContain("bob");
-    expect(wrapper.text()).toContain("前端服务");
-    expect(wrapper.text()).toContain("后端服务");
     expect(wrapper.text()).toContain("portal-web");
     expect(wrapper.text()).toContain("10.0.0.10:80");
     expect(wrapper.text()).toContain("payment-api");
     expect(wrapper.text()).toContain("10.0.0.21:8080");
   });
 
-  it("saves business application and replaces mounted services", async () => {
+  it("saves system and refreshes list", async () => {
     const wrapper = mountView();
     await flushPromises();
 
     const addButton = wrapper
       .findAll("button")
-      .find((button) => button.text().trim() === "新增业务应用");
+      .find((button) => button.text().trim() === "新增系统");
     expect(addButton).toBeDefined();
     await addButton!.trigger("click");
     await flushPromises();
@@ -329,17 +318,14 @@ describe("BusinessApplicationsView", () => {
     await saveButton!.trigger("click");
     await flushPromises();
 
-    const savePayload =
-      (vi.mocked(saveBusinessApplication).mock.calls[0]?.[0] as Record<string, unknown>) ?? {};
+    const savePayload = (vi.mocked(saveSystem).mock.calls[0]?.[0] as Record<string, unknown>) ?? {};
     expect(Object.prototype.hasOwnProperty.call(savePayload, "owners")).toBe(false);
     expect(savePayload["owner_contact_ids"]).toEqual([]);
-    expect(listApplications).toHaveBeenCalled();
-    expect(saveBusinessApplication).toHaveBeenCalled();
+    expect(saveSystem).toHaveBeenCalled();
     expect(listContacts).toHaveBeenCalled();
-    expect(replaceServicesByBusinessApplication).toHaveBeenCalledWith("ba-1", []);
-    expect(listBusinessApplications).toHaveBeenCalled();
-    expect(listServicesByBusinessApplication).toHaveBeenCalledWith("ba-1");
-    expect(deleteBusinessApplication).not.toHaveBeenCalled();
+    expect(listSystems).toHaveBeenCalled();
+    expect(listServicesBySystem).toHaveBeenCalledWith("sys-1");
+    expect(deleteSystem).not.toHaveBeenCalled();
     expect(messageSuccess).toHaveBeenCalled();
   });
 
@@ -352,11 +338,11 @@ describe("BusinessApplicationsView", () => {
     expect(renderedFields).toContain('"value":"active"');
     expect(renderedFields).toContain('"label":"停用"');
     expect(renderedFields).toContain('"value":"inactive"');
-    expect(getBusinessApplicationStatusLabelMock).toHaveBeenCalledWith("active");
+    expect(getSystemStatusLabelMock).toHaveBeenCalledWith("active");
 
     const addButton = wrapper
       .findAll("button")
-      .find((button) => button.text().trim() === "新增业务应用");
+      .find((button) => button.text().trim() === "新增系统");
     expect(addButton).toBeDefined();
     await addButton!.trigger("click");
     await flushPromises();

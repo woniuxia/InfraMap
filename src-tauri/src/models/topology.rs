@@ -92,7 +92,7 @@ pub struct TopologyLegendStatsV3 {
     pub env_counts: Vec<TopologyEnvCountV3>,
     pub node_type_counts: Vec<TopologyKindCountV3>,
     pub edge_type_counts: Vec<TopologyKindCountV3>,
-    pub application_service_count: u32,
+    pub service_count: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub current_env: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -390,7 +390,7 @@ pub struct RuntimeTopologyLegendStats {
     pub env_counts: Vec<RuntimeTopologyEnvCount>,
     pub node_type_counts: Vec<RuntimeTopologyKindCount>,
     pub edge_type_counts: Vec<RuntimeTopologyKindCount>,
-    pub application_service_count: u32,
+    pub service_count: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

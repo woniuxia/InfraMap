@@ -2,23 +2,23 @@ import { describe, expect, it, vi } from "vitest";
 import { defineComponent } from "vue";
 import { mount } from "@vue/test-utils";
 import { createPinia } from "pinia";
-import ApplicationsView from "@/views/ApplicationsView.vue";
+import ServicesView from "@/views/ServicesView.vue";
 import NginxConfigsView from "@/views/NginxConfigsView.vue";
 
-vi.mock("@/api/applications", () => ({
-  listApplications: vi.fn(async () => ({
+vi.mock("@/api/services", () => ({
+  listServices: vi.fn(async () => ({
     data: [],
     total: 0,
     page: 1,
     page_size: 20,
   })),
-  saveApplication: vi.fn(async () => "app-1"),
-  deleteApplication: vi.fn(async () => undefined),
+  saveService: vi.fn(async () => "svc-1"),
+  deleteService: vi.fn(async () => undefined),
 }));
 
 vi.mock("@/api/taxonomy", () => ({
-  listApplicationOwnerTerms: vi.fn(async () => []),
-  listApplicationTechStackTerms: vi.fn(async () => []),
+  listServiceOwnerTerms: vi.fn(async () => []),
+  listServiceTechStackTerms: vi.fn(async () => []),
 }));
 
 vi.mock("@/api/nginx-configs", () => ({
@@ -64,8 +64,8 @@ function getToolbarFields(wrapper: ReturnType<typeof mount>): ToolbarFieldItem[]
 }
 
 describe("search toolbar field placement", () => {
-  it("keeps deploy mode in basic filters for applications", () => {
-    const wrapper = mount(ApplicationsView, {
+  it("keeps deploy mode in basic filters for services", () => {
+    const wrapper = mount(ServicesView, {
       global: {
         plugins: [createPinia()],
         stubs: {
@@ -85,7 +85,7 @@ describe("search toolbar field placement", () => {
           ElOption: PassThroughStub,
           CallRelationsEditor: PassThroughStub,
           DeploymentPanel: PassThroughStub,
-          ApplicationEditorDialog: PassThroughStub,
+          ServiceEditorDialog: PassThroughStub,
         },
         directives: {
           loading: () => undefined,

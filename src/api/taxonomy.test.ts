@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { __clearMockHandlers, __setMockHandler } from "@/__mocks__/tauri";
 import {
-  listApplicationOwnerTerms,
-  listApplicationTechStackTerms,
-  listBusinessApplicationOwnerTerms,
+  listServiceOwnerTerms,
+  listServiceTechStackTerms,
+  listSystemOwnerTerms,
   listHostCpuModelTerms,
   listHostOsTypeTerms,
   listHostOsTypeTermsByCount,
@@ -32,7 +32,7 @@ describe("taxonomy API", () => {
   it("listTaxonomyTerms should invoke list_taxonomy_terms with all args", async () => {
     __setMockHandler("list_taxonomy_terms", (_cmd, args) => {
       expect(args).toEqual({
-        resourceType: "application",
+        resourceType: "service",
         fieldKey: "tech_stack",
         limit: 20,
         sortBy: "recent",
@@ -43,7 +43,7 @@ describe("taxonomy API", () => {
     });
 
     const result = await listTaxonomyTerms({
-      resource_type: "application",
+      resource_type: "service",
       field_key: "tech_stack",
       limit: 20,
       sort_by: "recent",
@@ -56,7 +56,7 @@ describe("taxonomy API", () => {
   it("listTaxonomyTerms should support minimum args", async () => {
     __setMockHandler("list_taxonomy_terms", (_cmd, args) => {
       expect(args).toEqual({
-        resourceType: "application",
+        resourceType: "service",
         fieldKey: "owner",
         limit: undefined,
         sortBy: undefined,
@@ -67,7 +67,7 @@ describe("taxonomy API", () => {
     });
 
     const result = await listTaxonomyTerms({
-      resource_type: "application",
+      resource_type: "service",
       field_key: "owner",
     });
     expect(result).toEqual(["alice"]);
@@ -158,10 +158,10 @@ describe("taxonomy API", () => {
     expect(result).toEqual(["vip", "gateway"]);
   });
 
-  it("listApplicationOwnerTerms should use application owner with global scope", async () => {
+  it("listServiceOwnerTerms should use service owner with global scope", async () => {
     __setMockHandler("list_taxonomy_terms", (_cmd, args) => {
       expect(args).toEqual({
-        resourceType: "application",
+        resourceType: "service",
         fieldKey: "owner",
         limit: 100,
         sortBy: "recent",
@@ -171,14 +171,14 @@ describe("taxonomy API", () => {
       return ["alice"];
     });
 
-    const result = await listApplicationOwnerTerms();
+    const result = await listServiceOwnerTerms();
     expect(result).toEqual(["alice"]);
   });
 
-  it("listBusinessApplicationOwnerTerms should use business application owner with resource_type scope", async () => {
+  it("listSystemOwnerTerms should use system owner with resource_type scope", async () => {
     __setMockHandler("list_taxonomy_terms", (_cmd, args) => {
       expect(args).toEqual({
-        resourceType: "business_application",
+        resourceType: "system",
         fieldKey: "owner",
         limit: 100,
         sortBy: "recent",
@@ -188,14 +188,14 @@ describe("taxonomy API", () => {
       return ["alice", "bob"];
     });
 
-    const result = await listBusinessApplicationOwnerTerms();
+    const result = await listSystemOwnerTerms();
     expect(result).toEqual(["alice", "bob"]);
   });
 
-  it("listApplicationTechStackTerms should pass app_type with global scope", async () => {
+  it("listServiceTechStackTerms should pass app_type with global scope", async () => {
     __setMockHandler("list_taxonomy_terms", (_cmd, args) => {
       expect(args).toEqual({
-        resourceType: "application",
+        resourceType: "service",
         fieldKey: "tech_stack",
         limit: 10,
         sortBy: "recent",
@@ -205,7 +205,7 @@ describe("taxonomy API", () => {
       return ["Vue"];
     });
 
-    const result = await listApplicationTechStackTerms({ app_type: "frontend" });
+    const result = await listServiceTechStackTerms({ app_type: "frontend" });
     expect(result).toEqual(["Vue"]);
   });
 

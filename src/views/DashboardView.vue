@@ -28,9 +28,7 @@ const totalAssets = computed(() => {
   if (!totals) {
     return 0;
   }
-  return (
-    totals.host_total + totals.application_total + totals.middleware_total + totals.nginx_total
-  );
+  return totals.host_total + totals.service_total + totals.middleware_total + totals.nginx_total;
 });
 
 const kpiCards = computed<DashboardKpiCard[]>(() => {
@@ -51,11 +49,11 @@ const kpiCards = computed<DashboardKpiCard[]>(() => {
       tone: "primary",
     },
     {
-      key: "application",
-      title: "应用服务",
-      value: totals.application_total,
-      subtitle: `异常 ${totals.application_abnormal} / 未部署 ${coverage.undeployed_application_total}`,
-      routeName: "Applications",
+      key: "service",
+      title: "服务",
+      value: totals.service_total,
+      subtitle: `异常 ${totals.service_abnormal} / 未部署 ${coverage.undeployed_service_total}`,
+      routeName: "Services",
       icon: Menu,
       tone: "success",
     },
@@ -109,10 +107,10 @@ const quickActions = computed<DashboardQuickAction[]>(() => [
     badge: "常用",
   },
   {
-    key: "applications",
-    title: "应用服务",
-    desc: "进入应用服务列表",
-    routeName: "Applications",
+    key: "services",
+    title: "服务",
+    desc: "进入服务列表",
+    routeName: "Services",
     icon: Menu,
     priority: "primary",
     badge: "常用",
@@ -212,7 +210,7 @@ function onQuickAction(action: DashboardQuickAction) {
 function targetRouteByResourceType(type: string) {
   const map: Record<string, string> = {
     host: "Hosts",
-    application: "Applications",
+    service: "Services",
     middleware: "Middlewares",
     nginx: "NginxConfigs",
   };

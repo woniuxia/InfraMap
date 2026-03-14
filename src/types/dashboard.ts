@@ -1,8 +1,8 @@
 export interface DashboardTotals {
   host_total: number;
   host_abnormal: number;
-  application_total: number;
-  application_abnormal: number;
+  service_total: number;
+  service_abnormal: number;
   middleware_total: number;
   nginx_total: number;
   nginx_abnormal: number;
@@ -25,7 +25,7 @@ export interface DashboardCoverage {
   related_total: number;
   isolated_total: number;
   relation_coverage: number;
-  undeployed_application_total: number;
+  undeployed_service_total: number;
   undeployed_middleware_total: number;
   undeployed_nginx_total: number;
 }

@@ -132,7 +132,7 @@ pub fn get_topology_graph_inner(conn: &Connection) -> Result<TopologyGraph, Stri
         let mut stmt = conn
             .prepare(
                 "SELECT id, name, type, address, port, tech_stack, env, status \
-                 FROM applications WHERE is_deleted = 0",
+                 FROM services WHERE is_deleted = 0",
             )
             .map_err(|e| e.to_string())?;
         let rows = stmt
@@ -169,9 +169,9 @@ pub fn get_topology_graph_inner(conn: &Connection) -> Result<TopologyGraph, Stri
                 Ok(TopologyNode {
                     id,
                     name,
-                    node_type: "application".to_string(),
+                    node_type: "service".to_string(),
                     env,
-                    group_kind: "application_service".to_string(),
+                    group_kind: "service".to_string(),
                     host_id: None,
                     host_name: None,
                     host_ip_display: None,
@@ -417,7 +417,7 @@ pub fn get_topology_graph_inner(conn: &Connection) -> Result<TopologyGraph, Stri
 
     for node in &nodes {
         *env_node_counts.entry(node.env.clone()).or_insert(0) += 1;
-        if node.node_type == "application" {
+        if node.node_type == "service" {
             *env_app_counts.entry(node.env.clone()).or_insert(0) += 1;
         }
         *node_type_counts.entry(node.node_type.clone()).or_insert(0) += 1;
@@ -449,16 +449,16 @@ pub fn get_topology_graph_inner(conn: &Connection) -> Result<TopologyGraph, Stri
         *edge_type_counts.entry(edge.edge_type.clone()).or_insert(0) += edge.strength;
     }
 
-    let application_service_count = nodes
+    let service_count = nodes
         .iter()
-        .filter(|node| node.group_kind == "application_service")
+        .filter(|node| node.group_kind == "service")
         .count() as u32;
 
     let legend_stats = TopologyLegendStats {
         env_counts,
         node_type_counts: vectorize_kind_count(node_type_counts),
         edge_type_counts: vectorize_kind_count(edge_type_counts),
-        application_service_count,
+        service_count,
     };
 
     let layout_hints = TopologyLayoutHints {
@@ -569,7 +569,7 @@ pub fn analyze_impact_inner(
     let mut name_map: HashMap<String, (String, String)> = HashMap::new();
     {
         let mut stmt = conn.prepare(
-            "SELECT id, name, 'application' AS node_type FROM applications WHERE is_deleted = 0 \
+            "SELECT id, name, 'service' AS node_type FROM services WHERE is_deleted = 0 \
              UNION ALL \
              SELECT id, name, 'middleware' AS node_type FROM middlewares WHERE is_deleted = 0 \
              UNION ALL \
@@ -685,7 +685,7 @@ pub fn get_topology_snapshot_v3_inner(
             lane.app_count = graph
                 .nodes
                 .iter()
-                .filter(|node| node.env == lane.id && node.node_type == "application")
+                .filter(|node| node.env == lane.id && node.node_type == "service")
                 .count() as u32;
         }
 
@@ -698,7 +698,7 @@ pub fn get_topology_snapshot_v3_inner(
             env_count.app_count = graph
                 .nodes
                 .iter()
-                .filter(|node| node.env == env_count.env && node.node_type == "application")
+                .filter(|node| node.env == env_count.env && node.node_type == "service")
                 .count() as u32;
         }
 
@@ -713,10 +713,10 @@ pub fn get_topology_snapshot_v3_inner(
             *edge_type_map.entry(edge.edge_type.clone()).or_insert(0) += edge.strength;
         }
         graph.legend_stats.edge_type_counts = map_kind_counts(edge_type_map);
-        graph.legend_stats.application_service_count = graph
+        graph.legend_stats.service_count = graph
             .nodes
             .iter()
-            .filter(|node| node.group_kind == "application_service")
+            .filter(|node| node.group_kind == "service")
             .count() as u32;
         graph.layout_hints.high_density_mode = graph.nodes.len() > 800;
     }
@@ -1342,7 +1342,7 @@ fn to_legend_stats_v3(
             .iter()
             .map(to_kind_count_v3)
             .collect(),
-        application_service_count: stats.application_service_count,
+        service_count: stats.service_count,
         current_env,
         external_node_count: None,
         cross_env_edge_count: Some(edges.iter().filter(|edge| edge.cross_env).count() as u32),
@@ -1399,8 +1399,8 @@ fn load_node_profile(conn: &Connection, node_id: &str) -> Result<NodeProfile, St
         .prepare(
             "SELECT id, name, node_type, env, status
              FROM (
-               SELECT id, name, 'application' AS node_type, env, status
-               FROM applications
+               SELECT id, name, 'service' AS node_type, env, status
+               FROM services
                WHERE is_deleted = 0
                UNION ALL
                SELECT id, name, 'middleware' AS node_type, env, NULL AS status
@@ -1527,62 +1527,62 @@ mod tests {
     use super::*;
     use crate::db::audit::insert_audit_log;
     use crate::test_helpers::{
-        insert_test_application, insert_test_dependency, insert_test_deployment, insert_test_host,
+        insert_test_service, insert_test_dependency, insert_test_deployment, insert_test_host,
         setup_test_db,
     };
 
     fn setup_graph(conn: &Connection) {
-        insert_test_application(conn, "A", "App-A", "prod");
-        insert_test_application(conn, "B", "App-B", "prod");
-        insert_test_application(conn, "C", "App-C", "prod");
-        insert_test_application(conn, "D", "App-D", "prod");
-        insert_test_application(conn, "E", "App-E", "test");
+        insert_test_service(conn, "A", "App-A", "prod", "");
+        insert_test_service(conn, "B", "App-B", "prod", "");
+        insert_test_service(conn, "C", "App-C", "prod", "");
+        insert_test_service(conn, "D", "App-D", "prod", "");
+        insert_test_service(conn, "E", "App-E", "test", "");
 
         insert_test_dependency(
             conn,
             "e1",
             "A",
-            "application",
+            "service",
             "B",
-            "application",
+            "service",
             "http_call",
         );
         insert_test_dependency(
             conn,
             "e2",
             "B",
-            "application",
+            "service",
             "C",
-            "application",
+            "service",
             "http_call",
         );
         insert_test_dependency(
             conn,
             "e3",
             "C",
-            "application",
+            "service",
             "D",
-            "application",
+            "service",
             "http_call",
         );
-        insert_test_dependency(conn, "e4", "A", "application", "C", "application", "tcp");
+        insert_test_dependency(conn, "e4", "A", "service", "C", "service", "tcp");
         insert_test_dependency(
             conn,
             "e5",
             "B",
-            "application",
+            "service",
             "E",
-            "application",
+            "service",
             "http_call",
         );
     }
 
-    fn update_application_status(conn: &Connection, id: &str, status: &str) {
+    fn update_service_status(conn: &Connection, id: &str, status: &str) {
         conn.execute(
-            "UPDATE applications SET status = ?1 WHERE id = ?2",
+            "UPDATE services SET status = ?1 WHERE id = ?2",
             rusqlite::params![status, id],
         )
-        .expect("update application status");
+        .expect("update service status");
     }
 
     #[test]
@@ -1645,8 +1645,8 @@ mod tests {
         assert!(legend_stats.get("env_counts").is_none());
         assert!(legend_stats.get("nodeTypeCounts").is_some());
         assert!(legend_stats.get("node_type_counts").is_none());
-        assert!(legend_stats.get("applicationServiceCount").is_some());
-        assert!(legend_stats.get("application_service_count").is_none());
+        assert!(legend_stats.get("serviceCount").is_some());
+        assert!(legend_stats.get("service_count").is_none());
 
         let env_count = &legend_stats["envCounts"][0];
         assert!(env_count.get("appCount").is_some());
@@ -1773,7 +1773,7 @@ mod tests {
         insert_test_host(&conn, "H1", "server1", "10.0.0.1");
         conn.execute("UPDATE hosts SET env = 'test' WHERE id = 'H1'", [])
             .expect("update host env");
-        insert_test_deployment(&conn, "dep1", "A", "application", "H1");
+        insert_test_deployment(&conn, "dep1", "A", "service", "H1");
 
         let graph = get_topology_graph_inner(&conn).expect("graph query");
         let node_a = graph
@@ -1791,22 +1791,22 @@ mod tests {
     #[test]
     fn topology_v3_graph_should_compute_cross_env_and_legend_stats() {
         let conn = setup_test_db();
-        insert_test_application(&conn, "A", "App-A", "prod");
-        insert_test_application(&conn, "B", "App-B", "test");
+        insert_test_service(&conn, "A", "App-A", "prod", "");
+        insert_test_service(&conn, "B", "App-B", "test", "");
         insert_test_dependency(
             &conn,
             "e1",
             "A",
-            "application",
+            "service",
             "B",
-            "application",
+            "service",
             "http_call",
         );
 
         let graph = get_topology_graph_inner(&conn).expect("graph query");
         assert_eq!(graph.edges.len(), 1);
         assert!(graph.edges[0].cross_env);
-        assert_eq!(graph.legend_stats.application_service_count, 2);
+        assert_eq!(graph.legend_stats.service_count, 2);
 
         let env_prod = graph
             .legend_stats
@@ -1829,7 +1829,7 @@ mod tests {
         let conn = setup_test_db();
         setup_graph(&conn);
         insert_test_host(&conn, "H1", "host-1", "10.0.0.1");
-        insert_test_deployment(&conn, "dep-1", "A", "application", "H1");
+        insert_test_deployment(&conn, "dep-1", "A", "service", "H1");
 
         let query = TopologyEvidenceQuery {
             node_id: "A".to_string(),
@@ -1852,7 +1852,7 @@ mod tests {
     fn topology_v3_troubleshoot_report_should_flag_abnormal_status() {
         let conn = setup_test_db();
         setup_graph(&conn);
-        update_application_status(&conn, "A", "stopped");
+        update_service_status(&conn, "A", "stopped");
 
         let query = TopologyTroubleshootReportV3Query {
             node_id: "A".to_string(),
@@ -1899,7 +1899,7 @@ mod tests {
         insert_audit_log(
             &conn,
             "update_application",
-            "application",
+            "service",
             "A",
             Some("App-A"),
             Some("{\"status\":\"running\"}"),

@@ -1,4 +1,4 @@
-import type { Application, Host, Middleware, NginxConfig } from "@/types";
+import type { Service, Host, Middleware, NginxConfig } from "@/types";
 
 const COPY_DEFAULT_NAME = "未命名";
 
@@ -39,10 +39,7 @@ export function buildHostCopyDraft(row: Host, date: Date = new Date()): Partial<
   };
 }
 
-export function buildApplicationCopyDraft(
-  row: Application,
-  date: Date = new Date()
-): Partial<Application> {
+export function buildServiceCopyDraft(row: Service, date: Date = new Date()): Partial<Service> {
   return {
     ...stripSystemFields(row),
     name: buildCopyName(row.name, date),
@@ -51,7 +48,7 @@ export function buildApplicationCopyDraft(
 
 export function buildMiddlewareCopyDraft(
   row: Middleware,
-  date: Date = new Date()
+  date: Date = new Date(),
 ): Partial<Middleware> {
   return {
     ...stripSystemFields(row),
@@ -61,7 +58,7 @@ export function buildMiddlewareCopyDraft(
 
 export function buildNginxCopyDraft(
   row: NginxConfig,
-  date: Date = new Date()
+  date: Date = new Date(),
 ): Partial<NginxConfig> {
   return {
     ...stripSystemFields(row),

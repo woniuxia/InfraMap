@@ -8,7 +8,7 @@ const applicationTypeLabelMap: Record<string, string> = {
 };
 
 export interface RelationTargetLabelInput {
-  resourceType: "application" | "middleware" | "nginx";
+  resourceType: "service" | "middleware" | "nginx";
   name: string;
   appType?: string;
   middlewareType?: string;
@@ -30,7 +30,7 @@ export function formatRelationTargetLabel(input: RelationTargetLabelInput): stri
   const name = normalizeText(input.name);
   const fallbackName = name.length > 0 ? name : "-";
 
-  if (input.resourceType === "application") {
+  if (input.resourceType === "service") {
     const typeLabel = getApplicationTypeLabel(input.appType);
     return `${fallbackName}（${typeLabel}）`;
   }

@@ -11,7 +11,6 @@ export {}
 /* prettier-ignore */
 declare module 'vue' {
   export interface GlobalComponents {
-    ApplicationEditorDialog: typeof import('./components/resource-editors/ApplicationEditorDialog.vue')['default']
     CallRelationsEditor: typeof import('./components/CallRelationsEditor.vue')['default']
     ContactAvatar: typeof import('./components/contact/ContactAvatar.vue')['default']
     ContactCard: typeof import('./components/contact/ContactCard.vue')['default']
@@ -65,6 +64,7 @@ declare module 'vue' {
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
     SearchToolbar: typeof import('./components/filters/SearchToolbar.vue')['default']
+    ServiceEditorDialog: typeof import('./components/resource-editors/ServiceEditorDialog.vue')['default']
     TopologyCanvas: typeof import('./components/topology/TopologyCanvas.vue')['default']
     TopologyControlBar: typeof import('./components/topology/TopologyControlBar.vue')['default']
     TopologyDetailPanel: typeof import('./components/topology/TopologyDetailPanel.vue')['default']

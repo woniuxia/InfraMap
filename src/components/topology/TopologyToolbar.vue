@@ -80,7 +80,7 @@ watch(
 );
 
 const typeOptions = [
-  { label: "应用服务", value: "application_service" },
+  { label: "应用服务", value: "service" },
   { label: "中间件", value: "middleware" },
   { label: "Nginx", value: "nginx" },
 ];

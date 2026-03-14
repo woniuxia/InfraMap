@@ -187,9 +187,9 @@ const graphFixture: TopologyGraph = {
     {
       id: "app-prod-1",
       name: "订单服务",
-      nodeType: "application",
+      nodeType: "service",
       env: "prod",
-      groupKind: "application_service",
+      groupKind: "service",
       importance: 1,
       status: "running",
       extra: {
@@ -204,9 +204,9 @@ const graphFixture: TopologyGraph = {
       { env: "test", count: 0, appCount: 0 },
       { env: "dev", count: 0, appCount: 0 },
     ],
-    nodeTypeCounts: [{ kind: "application", count: 1 }],
+    nodeTypeCounts: [{ kind: "service", count: 1 }],
     edgeTypeCounts: [],
-    applicationServiceCount: 1,
+    serviceCount: 1,
     currentEnv: "prod",
     externalNodeCount: 0,
     crossEnvEdgeCount: 0,
@@ -230,9 +230,9 @@ const edgeGraphFixture: TopologyGraph = {
     {
       id: "app-prod-2",
       name: "库存服务",
-      nodeType: "application",
+      nodeType: "service",
       env: "prod",
-      groupKind: "application_service",
+      groupKind: "service",
       importance: 1,
       status: "running",
       extra: {
@@ -259,7 +259,7 @@ const edgeGraphFixture: TopologyGraph = {
       { env: "dev", count: 0, appCount: 0 },
     ],
     edgeTypeCounts: [{ kind: "http_call", count: 1 }],
-    applicationServiceCount: 2,
+    serviceCount: 2,
   },
 };
 
@@ -342,7 +342,7 @@ describe("TopologyCanvas", () => {
     const parentBlock = findStyleBlock(stylesheet, "node:parent");
     const externalBlock = findStyleBlock(stylesheet, 'node[kind = "external"]');
     const backgroundImage = resolveStyleValue(nodeBlock.style["background-image"], {
-      nodeType: "application",
+      nodeType: "service",
       app_type_key: "frontend",
       isExternal: false,
       status: "running",
@@ -352,7 +352,7 @@ describe("TopologyCanvas", () => {
 
     expect(
       resolveStyleValue(nodeBlock.style["background-opacity"], {
-        nodeType: "application",
+        nodeType: "service",
         app_type_key: "frontend",
         isExternal: false,
         status: "running",
@@ -379,7 +379,7 @@ describe("TopologyCanvas", () => {
     const stylesheet = getLatestStylesheet();
     const nodeBlock = findStyleBlock(stylesheet, "node[shape][size][label_font_size]");
     const backgroundImage = resolveStyleValue(nodeBlock.style["background-image"], {
-      nodeType: "application",
+      nodeType: "service",
       app_type_key: "frontend",
       isExternal: false,
       status: "running",

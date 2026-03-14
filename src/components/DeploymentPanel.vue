@@ -15,7 +15,7 @@ import { generateDraftId } from "@/utils/draft";
 
 const props = defineProps<{
   resourceId: string;
-  resourceType: "application" | "middleware" | "nginx";
+  resourceType: "service" | "middleware" | "nginx";
   defaultPort?: number;
   resourcePersisted?: boolean;
   resourceAddress?: string;

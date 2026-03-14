@@ -145,7 +145,7 @@ impl AppError {
         }
 
         if raw.contains(
-            "UNIQUE constraint failed: applications.name, applications.env, applications.type",
+            "UNIQUE constraint failed: services.name, services.env, services.type",
         ) {
             return Self::conflict(
                 command,
@@ -275,9 +275,9 @@ mod tests {
     #[test]
     fn map_application_name_env_type_unique_constraint_to_conflict() {
         let err = AppError::from_db_error(
-            "save_application",
-            "保存应用",
-            "UNIQUE constraint failed: applications.name, applications.env, applications.type",
+            "save_service",
+            "保存服务",
+            "UNIQUE constraint failed: services.name, services.env, services.type",
         );
         assert_eq!(err.code, AppErrorCode::Conflict);
         assert_eq!(

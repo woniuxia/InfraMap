@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  BUSINESS_APPLICATION_STATUS_OPTIONS,
+  SYSTEM_STATUS_OPTIONS,
   DEPLOY_MODE_OPTIONS,
   ENV_OPTIONS,
   STATUS_OPTIONS,
@@ -43,8 +43,8 @@ describe("shared options", () => {
     ]);
   });
 
-  it("exports business application status options", () => {
-    expect(BUSINESS_APPLICATION_STATUS_OPTIONS).toEqual([
+  it("exports system status options", () => {
+    expect(SYSTEM_STATUS_OPTIONS).toEqual([
       { label: "激活", value: "active" },
       { label: "停用", value: "inactive" },
     ]);

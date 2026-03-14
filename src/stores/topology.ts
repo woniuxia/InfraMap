@@ -44,14 +44,14 @@ function countKinds(items: string[]): TopologyKindCount[] {
 }
 
 function resolveGroupKind(nodeType: TopologyNodeType, raw?: string): TopologyGroupKind {
-  if (raw === "application_service" || raw === "middleware" || raw === "nginx") return raw;
+  if (raw === "service" || raw === "middleware" || raw === "nginx") return raw;
   if (nodeType === "middleware") return "middleware";
   if (nodeType === "nginx") return "nginx";
-  return "application_service";
+  return "service";
 }
 
 function normalizeNode(node: TopologyNode): TopologyNode {
-  const nodeType: TopologyNodeType = node.nodeType || node.node_type || "application";
+  const nodeType: TopologyNodeType = node.nodeType || node.node_type || "service";
   const groupKind = resolveGroupKind(nodeType, node.groupKind || node.group_kind);
   const importance = Number.isFinite(node.importance) ? Number(node.importance) : 1;
   const isExternal = node.isExternal === true || node.is_external === true;
@@ -103,8 +103,7 @@ function normalizeLanes(nodes: TopologyNode[], sourceLanes: TopologyLane[] = [])
       label: lane?.label || TOPOLOGY_ENV_LABELS[env],
       order: lane?.order ?? index,
       nodeCount: lane?.nodeCount ?? inEnv.length,
-      appCount:
-        lane?.appCount ?? inEnv.filter((node) => node.groupKind === "application_service").length,
+      appCount: lane?.appCount ?? inEnv.filter((node) => node.groupKind === "service").length,
     };
   });
 }
@@ -133,7 +132,7 @@ function normalizeLegendStats(
       kind: item.kind,
       count: item.count,
     })),
-    applicationServiceCount: legendStats.applicationServiceCount,
+    serviceCount: legendStats.serviceCount,
     currentEnv: legendStats.currentEnv,
     externalNodeCount: legendStats.externalNodeCount,
     crossEnvEdgeCount: legendStats.crossEnvEdgeCount,
@@ -170,15 +169,12 @@ function buildLegendStats(
       return {
         env: laneEnv,
         count: inEnv.length,
-        appCount: inEnv.filter((node) => node.groupKind === "application_service").length,
+        appCount: inEnv.filter((node) => node.groupKind === "service").length,
       };
     }),
-    nodeTypeCounts: countKinds(
-      nodes.map((node) => node.nodeType || node.node_type || "application"),
-    ),
+    nodeTypeCounts: countKinds(nodes.map((node) => node.nodeType || node.node_type || "service")),
     edgeTypeCounts: countKinds(edges.map((edge) => edge.edgeType || edge.edge_type || "http_call")),
-    applicationServiceCount: nodes.filter((node) => node.groupKind === "application_service")
-      .length,
+    serviceCount: nodes.filter((node) => node.groupKind === "service").length,
     currentEnv: env,
     externalNodeCount: nodes.filter((node) => node.isExternal === true).length,
     crossEnvEdgeCount: edges.filter((edge) => edge.crossEnv).length,

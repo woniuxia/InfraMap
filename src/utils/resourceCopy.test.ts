@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import type { Application, Host, Middleware, NginxConfig } from "@/types";
+import type { Service, Host, Middleware, NginxConfig } from "@/types";
 import {
-  buildApplicationCopyDraft,
+  buildServiceCopyDraft,
   buildCopyName,
   buildHostCopyDraft,
   buildMiddlewareCopyDraft,
@@ -46,7 +46,7 @@ describe("resourceCopy", () => {
       env: "dev",
       status: "running",
       os_type: "Ubuntu 22.04",
-      tags: "[\"db\"]",
+      tags: '["db"]',
       created_at: "2026-01-03T00:00:00Z",
       updated_at: "2026-01-03T00:00:00Z",
     };
@@ -56,13 +56,15 @@ describe("resourceCopy", () => {
     expect(draft.hostname).toBe("db-host（副本 20260228090507）");
     expect(draft.ip_display).toBeUndefined();
     expect(draft.os_type).toBe("Ubuntu 22.04");
-    expect(draft.tags).toBe("[\"db\"]");
+    expect(draft.tags).toBe('["db"]');
     expect(draft.id).toBeUndefined();
   });
 
-  it("builds application copy draft with copied name and no system fields", () => {
-    const app: Application = {
-      id: "a1",
+  it("builds service copy draft with copied name and no system fields", () => {
+    const service: Service = {
+      id: "svc-1",
+      system_id: "sys-1",
+      system_name: "支付系统",
       name: "payment-api",
       type: "backend",
       address: "10.0.1.10",
@@ -74,7 +76,7 @@ describe("resourceCopy", () => {
       updated_at: "2026-01-01T00:00:00Z",
     };
 
-    const draft = buildApplicationCopyDraft(app, fixedDate);
+    const draft = buildServiceCopyDraft(service, fixedDate);
     expect(draft.name).toBe("payment-api（副本 20260228090507）");
     expect(draft.address).toBe("10.0.1.10");
     expect(draft.owners).toEqual(["ops", "devops"]);

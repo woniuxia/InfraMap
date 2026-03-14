@@ -111,7 +111,7 @@ function flushPromises() {
 function mountPanel(
   props: {
     resourceId?: string;
-    resourceType?: "application" | "middleware" | "nginx";
+    resourceType?: "service" | "middleware" | "nginx";
     resourcePersisted?: boolean;
     resourceAddress?: string;
     resourceEnv?: "prod" | "dev" | "test";
@@ -261,7 +261,7 @@ describe("DeploymentPanel", () => {
 
     const wrapper = mountPanel({
       resourceId: "app-draft-1",
-      resourceType: "application",
+      resourceType: "service",
       resourcePersisted: false,
     });
     await flushPromises();

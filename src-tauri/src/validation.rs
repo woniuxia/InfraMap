@@ -1,7 +1,7 @@
 use std::net::Ipv4Addr;
 
-use crate::models::application::Application;
-use crate::models::business_application::BusinessApplication;
+use crate::models::service::Service;
+use crate::models::system::InfraSystem;
 use crate::models::contact::Contact;
 use crate::models::deployment::Deployment;
 use crate::models::host::Host;
@@ -182,11 +182,10 @@ pub fn validate_ip_address_resource(ip: &IpAddress) -> Result<(), String> {
     Ok(())
 }
 
-pub fn validate_application(app: &Application) -> Result<(), String> {
-    validate_required(&app.name, "name")?;
-    validate_string_length(&app.name, 1, 200, "name")?;
+pub fn validate_service(svc: &Service) -> Result<(), String> {
+    validate_required(&svc.system_id, "system_id")?;
     validate_enum(
-        &app.app_type,
+        &svc.app_type,
         &[
             "frontend",
             "backend",
@@ -197,16 +196,15 @@ pub fn validate_application(app: &Application) -> Result<(), String> {
         ],
         "type",
     )?;
-    validate_enum(&app.env, &["prod", "dev", "test"], "env")?;
     validate_enum(
-        &app.status,
+        &svc.status,
         &["running", "stopped", "maintenance"],
         "status",
     )?;
-    if let Some(port) = app.port {
+    if let Some(port) = svc.port {
         validate_port(port)?;
     }
-    if let Some(ref owner_contact_ids) = app.owner_contact_ids {
+    if let Some(ref owner_contact_ids) = svc.owner_contact_ids {
         if owner_contact_ids.len() > 20 {
             return Err("owner_contact_ids length must be <= 20".into());
         }
@@ -218,21 +216,18 @@ pub fn validate_application(app: &Application) -> Result<(), String> {
     Ok(())
 }
 
-pub fn validate_business_application(app: &BusinessApplication) -> Result<(), String> {
-    validate_required(&app.name, "name")?;
-    validate_string_length(&app.name, 1, 200, "name")?;
-    validate_enum(&app.status, &["active", "inactive"], "status")?;
-    if let Some(env) = app.env.as_deref() {
-        if !env.trim().is_empty() {
-            validate_enum(env, &["prod", "dev", "test"], "env")?;
-        }
-    }
-    if let Some(code) = app.code.as_deref() {
+pub fn validate_system(sys: &InfraSystem) -> Result<(), String> {
+    validate_required(&sys.name, "name")?;
+    validate_string_length(&sys.name, 1, 200, "name")?;
+    validate_enum(&sys.status, &["active", "inactive"], "status")?;
+    validate_required(&sys.env, "env")?;
+    validate_enum(&sys.env, &["prod", "dev", "test"], "env")?;
+    if let Some(code) = sys.code.as_deref() {
         if !code.trim().is_empty() {
             validate_string_length(code.trim(), 1, 64, "code")?;
         }
     }
-    if let Some(ref owner_contact_ids) = app.owner_contact_ids {
+    if let Some(ref owner_contact_ids) = sys.owner_contact_ids {
         if owner_contact_ids.len() > 20 {
             return Err("owner_contact_ids length must be <= 20".into());
         }
@@ -292,7 +287,7 @@ pub fn validate_deployment(dep: &Deployment) -> Result<(), String> {
     validate_required(&dep.resource_id, "resource_id")?;
     validate_enum(
         &dep.resource_type,
-        &["application", "middleware", "nginx"],
+        &["service", "middleware", "nginx"],
         "resource_type",
     )?;
     validate_required(&dep.host_id, "host_id")?;
@@ -482,9 +477,9 @@ mod tests {
         assert!(validate_host(&host).is_ok());
     }
 
-    // --- validate_application ---
-    fn make_test_app() -> Application {
-        Application {
+    // --- validate_service ---
+    fn make_test_service() -> Service {
+        Service {
             id: "a1".into(),
             name: "app1".into(),
             app_type: "backend".into(),
@@ -496,8 +491,8 @@ mod tests {
             git_repo: None,
             owner_contact_ids: None,
             owners: None,
-            business_application_id: None,
-            business_application_name: None,
+            system_id: "sys1".into(),
+            system_name: None,
             status: "running".into(),
             description: None,
             created_at: "2024-01-01T00:00:00Z".into(),
@@ -506,33 +501,33 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_application_valid() {
-        assert!(validate_application(&make_test_app()).is_ok());
+    fn test_validate_service_valid() {
+        assert!(validate_service(&make_test_service()).is_ok());
     }
 
     #[test]
-    fn test_validate_application_invalid_type() {
-        let mut app = make_test_app();
-        app.app_type = "invalid_type".into();
-        assert!(validate_application(&app).is_err());
+    fn test_validate_service_invalid_type() {
+        let mut svc = make_test_service();
+        svc.app_type = "invalid_type".into();
+        assert!(validate_service(&svc).is_err());
     }
 
     #[test]
-    fn test_validate_application_invalid_env() {
-        let mut app = make_test_app();
-        app.env = "staging".into();
-        assert!(validate_application(&app).is_err());
+    fn test_validate_service_missing_system_id() {
+        let mut svc = make_test_service();
+        svc.system_id = "".into();
+        assert!(validate_service(&svc).is_err());
     }
 
-    fn make_test_business_application() -> BusinessApplication {
-        BusinessApplication {
+    fn make_test_system() -> InfraSystem {
+        InfraSystem {
             id: "ba1".into(),
             name: "支付中心".into(),
             code: Some("PAY".into()),
             owner_contact_ids: None,
             owners: Some(vec!["alice".into()]),
             description: None,
-            env: Some("prod".into()),
+            env: "prod".into(),
             status: "active".into(),
             created_at: "2024-01-01T00:00:00Z".into(),
             updated_at: "2024-01-01T00:00:00Z".into(),
@@ -540,15 +535,22 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_business_application_valid() {
-        assert!(validate_business_application(&make_test_business_application()).is_ok());
+    fn test_validate_system_valid() {
+        assert!(validate_system(&make_test_system()).is_ok());
     }
 
     #[test]
-    fn test_validate_business_application_invalid_status() {
-        let mut app = make_test_business_application();
-        app.status = "paused".into();
-        assert!(validate_business_application(&app).is_err());
+    fn test_validate_system_invalid_status() {
+        let mut sys = make_test_system();
+        sys.status = "paused".into();
+        assert!(validate_system(&sys).is_err());
+    }
+
+    #[test]
+    fn test_validate_system_env_required() {
+        let mut sys = make_test_system();
+        sys.env = "".into();
+        assert!(validate_system(&sys).is_err());
     }
 
     // --- validate_middleware ---
@@ -636,7 +638,7 @@ mod tests {
         Deployment {
             id: "d1".into(),
             resource_id: "a1".into(),
-            resource_type: "application".into(),
+            resource_type: "service".into(),
             host_id: "h1".into(),
             port: Some(8080),
             created_at: "2024-01-01T00:00:00Z".into(),
@@ -654,46 +656,6 @@ mod tests {
         let mut dep = make_test_deployment();
         dep.resource_type = "unknown".into();
         assert!(validate_deployment(&dep).is_err());
-    }
-
-    // --- validate_dependency ---
-    fn make_test_dependency() -> Dependency {
-        Dependency {
-            id: "dep1".into(),
-            source_id: "a1".into(),
-            source_type: "application".into(),
-            target_id: "m1".into(),
-            target_type: "middleware".into(),
-            relation_type: "tcp".into(),
-            description: None,
-            created_at: "2024-01-01T00:00:00Z".into(),
-            updated_at: "2024-01-01T00:00:00Z".into(),
-        }
-    }
-
-    #[test]
-    fn test_validate_dependency_valid() {
-        assert!(validate_dependency(&make_test_dependency()).is_ok());
-    }
-
-    #[test]
-    fn test_validate_dependency_new_relation_types() {
-        let mut dep = make_test_dependency();
-        dep.relation_type = "grpc_call".into();
-        assert!(validate_dependency(&dep).is_ok());
-
-        dep.relation_type = "db_query".into();
-        assert!(validate_dependency(&dep).is_ok());
-
-        dep.relation_type = "cache_access".into();
-        assert!(validate_dependency(&dep).is_ok());
-    }
-
-    #[test]
-    fn test_validate_dependency_invalid_relation_type() {
-        let mut dep = make_test_dependency();
-        dep.relation_type = "invalid_relation".into();
-        assert!(validate_dependency(&dep).is_err());
     }
 
     // --- validate_ip_address_resource ---

@@ -28,12 +28,12 @@ export const STATUS_LABELS = {
   maintenance: "维护中",
 } as const;
 
-export const BUSINESS_APPLICATION_STATUS_OPTIONS = [
+export const SYSTEM_STATUS_OPTIONS = [
   { label: "激活", value: "active" },
   { label: "停用", value: "inactive" },
 ] as const;
 
-export const BUSINESS_APPLICATION_STATUS_LABELS = {
+export const SYSTEM_STATUS_LABELS = {
   active: "激活",
   inactive: "停用",
 } as const;
@@ -51,8 +51,8 @@ export function getStatusLabel(status?: string): string {
   return getLabelValue(STATUS_LABELS, status);
 }
 
-export function getBusinessApplicationStatusLabel(status?: string): string {
-  return getLabelValue(BUSINESS_APPLICATION_STATUS_LABELS, status);
+export function getSystemStatusLabel(status?: string): string {
+  return getLabelValue(SYSTEM_STATUS_LABELS, status);
 }
 
 export const DEPLOY_MODE_OPTIONS = [

@@ -11,9 +11,9 @@ import type {
 const selectedNode: TopologyNode = {
   id: "node-1",
   name: "订单服务",
-  node_type: "application",
+  node_type: "service",
   env: "prod",
-  group_kind: "application_service",
+  group_kind: "service",
   importance: 1,
   status: "maintenance",
   host_name: "host-a",
@@ -27,7 +27,7 @@ const troubleshootReport: TopologyTroubleshootReport = {
   node: {
     id: "node-1",
     name: "订单服务",
-    nodeType: "application",
+    nodeType: "service",
     env: "prod",
     status: "maintenance",
   },
@@ -38,8 +38,8 @@ const troubleshootReport: TopologyTroubleshootReport = {
     recentAuditCount: 2,
     statusSeverity: "warning",
   },
-  upstream: [{ id: "node-up-1", name: "网关服务", nodeType: "application", env: "prod" }],
-  downstream: [{ id: "node-down-1", name: "库存服务", nodeType: "application", env: "prod" }],
+  upstream: [{ id: "node-up-1", name: "网关服务", nodeType: "service", env: "prod" }],
+  downstream: [{ id: "node-down-1", name: "库存服务", nodeType: "service", env: "prod" }],
   evidence: {
     total: 1,
     items: [
@@ -70,7 +70,7 @@ const pathResult: TopologyPathsResponse = {
 };
 
 const impactResult: TopologyImpactResponse = {
-  affectedNodes: [{ id: "node-up-1", name: "网关服务", nodeType: "application", depth: 1 }],
+  affectedNodes: [{ id: "node-up-1", name: "网关服务", nodeType: "service", depth: 1 }],
   totalCount: 1,
   maxDepth: 1,
 };

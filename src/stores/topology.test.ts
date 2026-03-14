@@ -6,9 +6,9 @@ const { getTopologySnapshotMock, getTopologyTaskViewMock } = vi.hoisted(() => ({
   getTopologyTaskViewMock: vi.fn(),
 }));
 
-vi.mock("@/api/topology", () => ({
-  getTopologySnapshot: getTopologySnapshotMock,
-  getTopologyTaskView: getTopologyTaskViewMock,
+vi.mock("@/api/topologyV3", () => ({
+  getTopologySnapshotV3: getTopologySnapshotMock,
+  getTopologyTaskViewV3: getTopologyTaskViewMock,
 }));
 
 import { useTopologyStore } from "@/stores/topology";
@@ -27,8 +27,8 @@ function createSnapshot() {
       {
         id: "node-1",
         name: "订单服务",
-        nodeType: "application",
-        groupKind: "application_service",
+        nodeType: "service",
+        groupKind: "service",
         env: "prod",
         importance: 1,
       },
@@ -36,9 +36,9 @@ function createSnapshot() {
     edges: [],
     legendStats: {
       envCounts: [{ env: "prod", count: 1, appCount: 1 }],
-      nodeTypeCounts: [{ kind: "application", count: 1 }],
+      nodeTypeCounts: [{ kind: "service", count: 1 }],
       edgeTypeCounts: [],
-      applicationServiceCount: 1,
+      serviceCount: 1,
       currentEnv: "prod",
       externalNodeCount: 0,
       crossEnvEdgeCount: 0,
@@ -68,7 +68,7 @@ describe("useTopologyStore", () => {
       taskView: "explore",
       maxDepth: 3,
     });
-    expect(result?.nodes[0]?.nodeType).toBe("application");
+    expect(result?.nodes[0]?.nodeType).toBe("service");
     expect(store.taskInsights).toEqual([]);
   });
 

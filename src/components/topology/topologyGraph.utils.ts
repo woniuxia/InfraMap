@@ -105,9 +105,9 @@ function createExternalNode(nodeId: string, sourceNode: TopologyNode | undefined
   return {
     id: toExternalNodeId(nodeId),
     name: `外部节点 ${nodeId}`,
-    nodeType: "application",
+    nodeType: "service",
     env: "test",
-    groupKind: "application_service",
+    groupKind: "service",
     importance: 0.5,
     isExternal: true,
     externalRefId: nodeId,
@@ -141,7 +141,7 @@ function buildLanes(
   const laneMap = new Map(sourceLanes.map((lane) => [lane.id, lane]));
   return TOPOLOGY_ENV_ORDER.map((env, order) => {
     const sameEnvNodes = nodes.filter((node) => node.env === env);
-    const appCount = sameEnvNodes.filter((node) => node.groupKind === "application_service").length;
+    const appCount = sameEnvNodes.filter((node) => node.groupKind === "service").length;
     const lane = laneMap.get(env);
     return {
       id: env,
@@ -160,7 +160,7 @@ export function computeLegendStats(
 ): TopologyLegendStats {
   const envCounts = TOPOLOGY_ENV_ORDER.map((env) => {
     const inEnv = nodes.filter((node) => node.env === env);
-    const appCount = inEnv.filter((node) => node.groupKind === "application_service").length;
+    const appCount = inEnv.filter((node) => node.groupKind === "service").length;
     return {
       env,
       count: inEnv.length,
@@ -189,8 +189,7 @@ export function computeLegendStats(
     envCounts: envCounts,
     nodeTypeCounts: nodeTypeCounts,
     edgeTypeCounts: edgeTypeCounts,
-    applicationServiceCount: nodes.filter((node) => node.groupKind === "application_service")
-      .length,
+    serviceCount: nodes.filter((node) => node.groupKind === "service").length,
     currentEnv: currentEnv,
     externalNodeCount: externalNodeCount,
     crossEnvEdgeCount: crossEnvEdgeCount,

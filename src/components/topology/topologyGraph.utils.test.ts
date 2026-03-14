@@ -24,9 +24,9 @@ function createGraphFixture(): TopologyGraph {
     createNode({
       id: "app-prod-1",
       name: "订单服务",
-      nodeType: "application",
+      nodeType: "service",
       env: "prod",
-      groupKind: "application_service",
+      groupKind: "service",
       hostId: "host-prod-1",
       status: "running",
       extra: { address: "10.0.0.1" },
@@ -43,9 +43,9 @@ function createGraphFixture(): TopologyGraph {
     createNode({
       id: "app-test-1",
       name: "支付服务",
-      nodeType: "application",
+      nodeType: "service",
       env: "test",
-      groupKind: "application_service",
+      groupKind: "service",
       hostId: "host-test-1",
       status: "running",
       extra: { address: "10.0.1.1" },
@@ -157,7 +157,7 @@ describe("topologyGraph utils", () => {
     const graph = createGraphFixture();
     const filtered = filterTopologyGraph(graph, {
       env: "prod",
-      nodeKinds: ["application_service"],
+      nodeKinds: ["service"],
       edgeTypes: ["http_call"],
       showAllEdges: true,
     });
@@ -173,18 +173,18 @@ describe("topologyGraph utils", () => {
     const mainNode = createNode({
       id: "app-prod-main",
       name: "main",
-      nodeType: "application",
+      nodeType: "service",
       env: "prod",
-      groupKind: "application_service",
+      groupKind: "service",
     });
 
     const extraNodes = Array.from({ length: 320 }, (_, index) =>
       createNode({
         id: `app-test-${index}`,
         name: `test-${index}`,
-        nodeType: "application",
+        nodeType: "service",
         env: "test",
-        groupKind: "application_service",
+        groupKind: "service",
       }),
     );
 
@@ -255,9 +255,9 @@ describe("topologyGraph utils", () => {
       createNode({
         id: "app-1",
         name: "app",
-        nodeType: "application",
+        nodeType: "service",
         env: "prod",
-        groupKind: "application_service",
+        groupKind: "service",
         hostId: "host-opaque-id",
         hostName: "payment-host",
         hostIpDisplay: "10.6.1.8",

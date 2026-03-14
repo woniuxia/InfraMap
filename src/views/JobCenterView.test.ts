@@ -23,7 +23,8 @@ const ElButtonStub = defineComponent({
     },
   },
   emits: ["click"],
-  template: '<button type="button" :disabled="disabled" @click="$emit(\'click\')"><slot /></button>',
+  template:
+    '<button type="button" :disabled="disabled" @click="$emit(\'click\')"><slot /></button>',
 });
 
 const PassThroughStub = defineComponent({
@@ -85,7 +86,7 @@ function createJobDetail(): SystemJobDetail {
     import_rows: [
       {
         row_no: 2,
-        resource_type: "application",
+        resource_type: "service",
         name: "应用 A",
         env: "prod",
         status: "failed",
@@ -140,8 +141,12 @@ describe("JobCenterView", () => {
     await flushPromises();
 
     expect(getSystemJobDetailMock).toHaveBeenCalledWith("job-1");
-    expect(wrapper.get('[data-testid="job-detail"]').text()).toContain("导入失败：存在重复应用编码");
-    expect(wrapper.get('[data-testid="payload-json"]').text()).toContain('"file_name": "applications.xlsx"');
+    expect(wrapper.get('[data-testid="job-detail"]').text()).toContain(
+      "导入失败：存在重复应用编码",
+    );
+    expect(wrapper.get('[data-testid="payload-json"]').text()).toContain(
+      '"file_name": "applications.xlsx"',
+    );
     expect(wrapper.get('[data-testid="import-rows"]').text()).toContain("应用 A");
     expect(wrapper.get('[data-testid="import-issues"]').text()).toContain("重复应用编码");
   });

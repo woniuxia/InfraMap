@@ -90,7 +90,7 @@ const impactByDepth = computed(() => {
   const nodes = props.impactResult.affectedNodes || props.impactResult.affected_nodes || [];
   const depthMap: Record<number, { id: string; name: string; node_type: string }[]> = {};
   nodes.forEach((node) => {
-    const nodeType = node.nodeType || node.node_type || "application";
+    const nodeType = node.nodeType || node.node_type || "service";
     if (!depthMap[node.depth]) {
       depthMap[node.depth] = [];
     }

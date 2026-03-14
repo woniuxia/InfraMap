@@ -10,9 +10,9 @@ function createNode(
   return {
     id: partial.id,
     name: partial.name,
-    nodeType: partial.nodeType ?? "application",
+    nodeType: partial.nodeType ?? "service",
     env: partial.env ?? "prod",
-    groupKind: partial.groupKind ?? "application_service",
+    groupKind: partial.groupKind ?? "service",
     importance: partial.importance ?? 1,
     extra: partial.extra,
   };
@@ -25,14 +25,14 @@ const statsFixture: TopologyLegendStats = {
     { env: "dev", count: 0, appCount: 0 },
   ],
   nodeTypeCounts: [
-    { kind: "application", count: 2 },
+    { kind: "service", count: 2 },
     { kind: "middleware", count: 1 },
   ],
   edgeTypeCounts: [
     { kind: "http_call", count: 2 },
     { kind: "tcp", count: 1 },
   ],
-  applicationServiceCount: 2,
+  serviceCount: 2,
   currentEnv: "prod",
   externalNodeCount: 1,
   crossEnvEdgeCount: 1,

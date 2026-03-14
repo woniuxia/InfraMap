@@ -1,10 +1,6 @@
 import { tauriInvoke } from "@/utils/invoke";
 
-export type TaxonomyResourceType =
-  | "host"
-  | "ip_address"
-  | "application"
-  | "business_application";
+export type TaxonomyResourceType = "host" | "ip_address" | "service" | "system";
 export type TaxonomyFieldKey = "tags" | "owner" | "tech_stack" | "os_type" | "cpu_model";
 export type TaxonomySortBy = "alpha" | "recent" | "count";
 export type TaxonomyRecencyScope = "global" | "resource_type";
@@ -94,9 +90,9 @@ export function listIpTagTerms(limit = 200): Promise<string[]> {
   });
 }
 
-export function listApplicationOwnerTerms(limit = 100): Promise<string[]> {
+export function listServiceOwnerTerms(limit = 100): Promise<string[]> {
   return listTaxonomyTerms({
-    resource_type: "application",
+    resource_type: "service",
     field_key: "owner",
     limit,
     sort_by: "recent",
@@ -104,9 +100,9 @@ export function listApplicationOwnerTerms(limit = 100): Promise<string[]> {
   });
 }
 
-export function listBusinessApplicationOwnerTerms(limit = 100): Promise<string[]> {
+export function listSystemOwnerTerms(limit = 100): Promise<string[]> {
   return listTaxonomyTerms({
-    resource_type: "business_application",
+    resource_type: "system",
     field_key: "owner",
     limit,
     sort_by: "recent",
@@ -114,17 +110,17 @@ export function listBusinessApplicationOwnerTerms(limit = 100): Promise<string[]
   });
 }
 
-export interface ListApplicationTechStackTermsParams {
+export interface ListServiceTechStackTermsParams {
   app_type: TaxonomyAppType;
   limit?: number;
 }
 
-export function listApplicationTechStackTerms(
-  params: ListApplicationTechStackTermsParams
+export function listServiceTechStackTerms(
+  params: ListServiceTechStackTermsParams,
 ): Promise<string[]> {
   const { app_type, limit = 10 } = params;
   return listTaxonomyTerms({
-    resource_type: "application",
+    resource_type: "service",
     field_key: "tech_stack",
     limit,
     sort_by: "recent",

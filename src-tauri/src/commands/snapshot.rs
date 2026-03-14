@@ -18,11 +18,11 @@ const SNAPSHOT_TABLES: [(&str, bool); 16] = [
     ("hosts", true),
     ("ip_addresses", true),
     ("host_ip_bindings", true),
-    ("business_applications", true),
-    ("applications", true),
+    ("systems", true),
+    ("services", true),
     ("contacts", true),
-    ("application_owner_contacts", true),
-    ("business_application_owner_contacts", true),
+    ("service_owner_contacts", true),
+    ("system_owner_contacts", true),
     ("middlewares", true),
     ("nginx_configs", true),
     ("deployments", true),
@@ -254,16 +254,16 @@ fn import_snapshot_payload(
         "call_relations",
         "deployments",
         "host_ip_bindings",
-        "application_owner_contacts",
-        "business_application_owner_contacts",
+        "service_owner_contacts",
+        "system_owner_contacts",
         "contacts",
         "taxonomy_bindings",
         "taxonomy_term_stats",
         "taxonomy_terms",
-        "applications",
+        "services",
         "middlewares",
         "nginx_configs",
-        "business_applications",
+        "systems",
         "ip_addresses",
         "hosts",
         "system_settings",
@@ -277,11 +277,11 @@ fn import_snapshot_payload(
         "system_settings",
         "hosts",
         "ip_addresses",
-        "business_applications",
-        "applications",
+        "systems",
+        "services",
         "contacts",
-        "application_owner_contacts",
-        "business_application_owner_contacts",
+        "service_owner_contacts",
+        "system_owner_contacts",
         "middlewares",
         "nginx_configs",
         "host_ip_bindings",
@@ -294,11 +294,25 @@ fn import_snapshot_payload(
 
     let mut counts = Vec::new();
     let mut total_rows = 0u64;
+
+    // Mapping old snapshot table names to new names for backward compatibility
+    let table_name_aliases: &[(&str, &str)] = &[
+        ("business_applications", "systems"),
+        ("applications", "services"),
+        ("application_owner_contacts", "service_owner_contacts"),
+        ("business_application_owner_contacts", "system_owner_contacts"),
+    ];
+
     for table in import_order {
         let rows = payload
             .tables
             .iter()
-            .find(|item| item.table == table)
+            .find(|item| {
+                item.table == table
+                    || table_name_aliases
+                        .iter()
+                        .any(|(old, new)| *new == table && item.table == *old)
+            })
             .map(|item| item.rows.as_slice())
             .unwrap_or(&[]);
         let imported = import_table_rows(conn, table, rows)?;
@@ -463,7 +477,7 @@ pub fn import_snapshot_v2(
 #[cfg(test)]
 mod tests {
     use super::{import_snapshot_payload, preview_snapshot_v2_inner};
-    use crate::test_helpers::{insert_test_application, insert_test_host, setup_test_db};
+    use crate::test_helpers::{insert_test_service, insert_test_host, setup_test_db};
 
     #[test]
     fn preview_snapshot_v2_inner_should_read_manifest_and_counts() {
@@ -483,13 +497,13 @@ mod tests {
     }
 
     #[test]
-    fn import_snapshot_payload_should_restore_hosts_and_applications() {
+    fn import_snapshot_payload_should_restore_hosts_and_services() {
         let conn = setup_test_db();
         insert_test_host(&conn, "host-1", "host-1", "10.0.0.1");
-        insert_test_application(&conn, "app-1", "orders-api", "prod");
+        insert_test_service(&conn, "app-1", "orders-api", "prod", "");
         let payload = super::build_snapshot_payload(&conn).expect("build snapshot").0;
 
-        conn.execute("DELETE FROM applications", []).expect("clear applications");
+        conn.execute("DELETE FROM services", []).expect("clear services");
         conn.execute("DELETE FROM hosts", []).expect("clear hosts");
         conn.execute("DELETE FROM ip_addresses", []).expect("clear ips");
         conn.execute("DELETE FROM host_ip_bindings", []).expect("clear bindings");
@@ -502,8 +516,8 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM hosts WHERE is_deleted = 0", [], |row| row.get(0))
             .expect("count hosts");
         let app_count: u64 = conn
-            .query_row("SELECT COUNT(*) FROM applications WHERE is_deleted = 0", [], |row| row.get(0))
-            .expect("count applications");
+            .query_row("SELECT COUNT(*) FROM services WHERE is_deleted = 0", [], |row| row.get(0))
+            .expect("count services");
         assert_eq!(host_count, 1);
         assert_eq!(app_count, 1);
     }

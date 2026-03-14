@@ -9,16 +9,16 @@ import {
   getTopologyPathsV3,
   getTopologyTroubleshootReportV3,
 } from "@/api/topologyV3";
-import { getApplication } from "@/api/applications";
+import { getService } from "@/api/services";
 import { getMiddleware } from "@/api/middlewares";
 import { getNginxConfig } from "@/api/nginx-configs";
 import { useTopologyStore } from "@/stores/topology";
 import { useEnvStore } from "@/stores/env";
-import ApplicationEditorDialog from "@/components/resource-editors/ApplicationEditorDialog.vue";
+import ServiceEditorDialog from "@/components/resource-editors/ServiceEditorDialog.vue";
 import MiddlewareEditorDialog from "@/components/resource-editors/MiddlewareEditorDialog.vue";
 import NginxConfigEditorDialog from "@/components/resource-editors/NginxConfigEditorDialog.vue";
 import type {
-  Application,
+  Service,
   Middleware,
   NginxConfig,
   TopologyImpactResponse,
@@ -88,10 +88,10 @@ const pathTraceHint = ref("");
 const contextMenuVisible = ref(false);
 const contextMenuPos = ref({ x: 0, y: 0 });
 const contextMenuNode = ref<TopologyNode | null>(null);
-const applicationEditorVisible = ref(false);
+const serviceEditorVisible = ref(false);
 const middlewareEditorVisible = ref(false);
 const nginxEditorVisible = ref(false);
-const applicationEditorDraft = ref<Partial<Application>>({});
+const serviceEditorDraft = ref<Partial<Service>>({});
 const middlewareEditorDraft = ref<Partial<Middleware>>({});
 const nginxEditorDraft = ref<Partial<NginxConfig>>({});
 
@@ -306,7 +306,7 @@ function closeContextMenu() {
 }
 
 function closeNodeEditors() {
-  applicationEditorVisible.value = false;
+  serviceEditorVisible.value = false;
   middlewareEditorVisible.value = false;
   nginxEditorVisible.value = false;
 }
@@ -330,13 +330,13 @@ async function handleEditNode(targetNode?: TopologyNode | Event | null) {
   closeNodeEditors();
 
   try {
-    if (node.nodeType === "application") {
-      const detail = await getApplication(node.id);
-      applicationEditorDraft.value = {
+    if (node.nodeType === "service") {
+      const detail = await getService(node.id);
+      serviceEditorDraft.value = {
         ...detail,
         owners: Array.isArray(detail.owners) ? [...detail.owners] : detail.owners,
       };
-      applicationEditorVisible.value = true;
+      serviceEditorVisible.value = true;
       return;
     }
 
@@ -447,7 +447,7 @@ async function analyzeImpactForNode(node: TopologyNode | null) {
     const affectedNodes = (result.affectedNodes || result.affected_nodes || []).map((item) => ({
       id: item.id,
       name: item.name,
-      node_type: item.nodeType || item.node_type || "application",
+      node_type: item.nodeType || item.node_type || "service",
       depth: item.depth,
     }));
 
@@ -810,10 +810,10 @@ onBeforeUnmount(() => {
       </div>
     </teleport>
 
-    <ApplicationEditorDialog
-      v-model="applicationEditorVisible"
+    <ServiceEditorDialog
+      v-model="serviceEditorVisible"
       mode="edit"
-      :initial-draft="applicationEditorDraft"
+      :initial-draft="serviceEditorDraft"
       @saved="handleNodeEditorSaved"
     />
     <MiddlewareEditorDialog

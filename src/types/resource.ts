@@ -58,8 +58,10 @@ export interface HostIpBindingPayload {
   ip_id: string;
 }
 
-export interface Application {
+export interface Service {
   id: string;
+  system_id: string;
+  system_name?: string;
   name: string;
   type: "frontend" | "backend" | "gateway" | "batch_job" | "microservice" | "other";
   address?: string;
@@ -70,42 +72,34 @@ export interface Application {
   git_repo?: string;
   owners?: string[];
   owner_contact_ids?: string[];
-  business_application_id?: string;
-  business_application_name?: string;
   status: "running" | "stopped" | "maintenance";
   description?: string;
   created_at: string;
   updated_at: string;
 }
 
-export interface BusinessApplication {
+export interface InfraSystem {
   id: string;
   name: string;
   code?: string;
   owners?: string[];
   owner_contact_ids?: string[];
   description?: string;
-  env?: "prod" | "dev" | "test";
+  env: "prod" | "dev" | "test";
   status: "active" | "inactive";
   created_at: string;
   updated_at: string;
 }
 
-export interface AttachServicesResult {
-  attached_count: number;
-  skipped_count: number;
+export interface SystemServices {
+  frontend: Service[];
+  backend: Service[];
 }
 
-export interface ReplaceServicesResult {
-  attached_count: number;
-  detached_count: number;
-  unchanged_count: number;
-}
-
-export interface BusinessApplicationServices {
-  frontend: Application[];
-  backend: Application[];
-}
+/** @deprecated Use Service instead */
+export type Application = Service;
+/** @deprecated Use InfraSystem instead */
+export type BusinessApplication = InfraSystem;
 
 export interface Middleware {
   id: string;
@@ -141,14 +135,14 @@ export interface NginxConfig {
 export interface Deployment {
   id: string;
   resource_id: string;
-  resource_type: "application" | "middleware" | "nginx";
+  resource_type: "service" | "middleware" | "nginx";
   host_id: string;
   port?: number;
   created_at: string;
   updated_at: string;
 }
 
-export type DeploymentResourceType = "application" | "middleware" | "nginx";
+export type DeploymentResourceType = "service" | "middleware" | "nginx";
 
 export interface ResourceDeployContext {
   resource_type: DeploymentResourceType;
@@ -176,9 +170,9 @@ export interface CallRelation {
   id: string;
   pair_key: string;
   owner_id: string;
-  owner_type: "application" | "middleware" | "nginx";
+  owner_type: "service" | "middleware" | "nginx";
   peer_id: string;
-  peer_type: "application" | "middleware" | "nginx";
+  peer_type: "service" | "middleware" | "nginx";
   direction: CallDirection;
   relation_type: CallRelationType;
   description?: string;
@@ -188,7 +182,7 @@ export interface CallRelation {
 
 export interface ReplaceCallRelationItem {
   peer_id: string;
-  peer_type: "application" | "middleware" | "nginx";
+  peer_type: "service" | "middleware" | "nginx";
   direction: CallDirection;
   relation_type: CallRelationType;
   description?: string;
@@ -196,7 +190,7 @@ export interface ReplaceCallRelationItem {
 
 export interface ReplaceResourceCallRelationsParams {
   resource_id: string;
-  resource_type: "application" | "middleware" | "nginx";
+  resource_type: "service" | "middleware" | "nginx";
   items: ReplaceCallRelationItem[];
 }
 

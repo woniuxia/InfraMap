@@ -17,7 +17,7 @@ pub const RECENCY_SCOPE_GLOBAL: &str = "global";
 pub const RECENCY_SCOPE_RESOURCE_TYPE: &str = "resource_type";
 
 const ALLOWED_RESOURCE_TYPES: [&str; 4] =
-    ["host", "ip_address", "application", "business_application"];
+    ["host", "ip_address", "service", "system"];
 const ALLOWED_SORT_BY: [&str; 3] = [SORT_ALPHA, SORT_RECENT, SORT_COUNT];
 const ALLOWED_RECENCY_SCOPE: [&str; 2] = [RECENCY_SCOPE_GLOBAL, RECENCY_SCOPE_RESOURCE_TYPE];
 const ALLOWED_APP_TYPES: [&str; 2] = ["frontend", "backend"];
@@ -45,15 +45,15 @@ const TAXONOMY_FIELD_SPECS: [TaxonomyFieldSpec; 7] = [
         field_key: FIELD_TAGS,
     },
     TaxonomyFieldSpec {
-        resource_type: "application",
+        resource_type: "service",
         field_key: FIELD_OWNER,
     },
     TaxonomyFieldSpec {
-        resource_type: "application",
+        resource_type: "service",
         field_key: FIELD_TECH_STACK,
     },
     TaxonomyFieldSpec {
-        resource_type: "business_application",
+        resource_type: "system",
         field_key: FIELD_OWNER,
     },
 ];
@@ -393,9 +393,9 @@ fn list_terms_by_scope_alpha(
             "SELECT DISTINCT tt.display_name
              FROM taxonomy_bindings tb
              INNER JOIN taxonomy_terms tt ON tt.id = tb.term_id
-             INNER JOIN applications a ON a.id = tb.resource_id
+             INNER JOIN services a ON a.id = tb.resource_id
              WHERE tt.field_key = 'tech_stack'
-               AND tb.resource_type = 'application'
+               AND tb.resource_type = 'service'
                AND tb.is_deleted = 0
                AND tt.is_deleted = 0
                AND a.is_deleted = 0
@@ -448,10 +448,10 @@ fn list_terms_by_scope_recent(
             "SELECT tt.display_name
              FROM taxonomy_bindings tb
              INNER JOIN taxonomy_terms tt ON tt.id = tb.term_id
-             INNER JOIN applications a ON a.id = tb.resource_id
+             INNER JOIN services a ON a.id = tb.resource_id
              WHERE tb.is_deleted = 0
                AND tt.is_deleted = 0
-               AND tb.resource_type = 'application'
+               AND tb.resource_type = 'service'
                AND tt.field_key = 'tech_stack'
                AND a.is_deleted = 0
                AND {}
@@ -523,10 +523,10 @@ fn list_terms_by_scope_count(
             "SELECT tt.display_name
              FROM taxonomy_bindings tb
              INNER JOIN taxonomy_terms tt ON tt.id = tb.term_id
-             INNER JOIN applications a ON a.id = tb.resource_id
+             INNER JOIN services a ON a.id = tb.resource_id
              WHERE tb.is_deleted = 0
                AND tt.is_deleted = 0
-               AND tb.resource_type = 'application'
+               AND tb.resource_type = 'service'
                AND tt.field_key = 'tech_stack'
                AND a.is_deleted = 0
                AND {}
@@ -717,10 +717,10 @@ pub fn list_taxonomy_terms(
     if let Some(side) = app_type.as_deref() {
         validate_enum(side, &ALLOWED_APP_TYPES, "app_type")
             .map_err(|e| AppError::validation(command, e))?;
-        if resource_type != "application" || field_key != FIELD_TECH_STACK {
+        if resource_type != "service" || field_key != FIELD_TECH_STACK {
             return Err(AppError::validation(
                 command,
-                "app_type is only supported for resource_type=application and field_key=tech_stack",
+                "app_type is only supported for resource_type=service and field_key=tech_stack",
             ));
         }
     }
@@ -837,7 +837,7 @@ mod tests {
         let now = chrono::Utc::now().to_rfc3339();
         save_resource_terms(
             &conn,
-            "application",
+            "service",
             "app-1",
             FIELD_OWNER,
             &["alice".to_string()],
@@ -846,7 +846,7 @@ mod tests {
         .expect("save owners");
         save_resource_terms(
             &conn,
-            "application",
+            "service",
             "app-1",
             FIELD_TECH_STACK,
             &["Rust".to_string()],
@@ -855,14 +855,14 @@ mod tests {
         .expect("save tech stack");
 
         let owners =
-            list_terms_by_scope(&conn, "application", FIELD_OWNER, 100).expect("list owners");
+            list_terms_by_scope(&conn, "service", FIELD_OWNER, 100).expect("list owners");
         assert_eq!(owners, vec!["alice".to_string()]);
     }
 
     #[test]
-    fn validate_resource_field_should_allow_business_application_owner_only() {
-        assert!(validate_resource_field("test", "business_application", FIELD_OWNER).is_ok());
-        assert!(validate_resource_field("test", "business_application", FIELD_TECH_STACK).is_err());
+    fn validate_resource_field_should_allow_system_owner_only() {
+        assert!(validate_resource_field("test", "system", FIELD_OWNER).is_ok());
+        assert!(validate_resource_field("test", "system", FIELD_TECH_STACK).is_err());
     }
 
     #[test]
@@ -1173,21 +1173,21 @@ mod tests {
         let conn = setup_test_db();
         let now = chrono::Utc::now().to_rfc3339();
         conn.execute(
-            "INSERT INTO applications (id, name, type, env, status, is_deleted, created_at, updated_at)
-             VALUES ('app-fe', 'frontend-app', 'frontend', 'prod', 'running', 0, ?1, ?1)",
+            "INSERT INTO services (id, name, type, env, system_id, status, is_deleted, created_at, updated_at)
+             VALUES ('app-fe', 'frontend-app', 'frontend', 'prod', '', 'running', 0, ?1, ?1)",
             rusqlite::params![now],
         )
         .expect("insert frontend app");
         conn.execute(
-            "INSERT INTO applications (id, name, type, env, status, is_deleted, created_at, updated_at)
-             VALUES ('app-be', 'backend-app', 'backend', 'prod', 'running', 0, ?1, ?1)",
+            "INSERT INTO services (id, name, type, env, system_id, status, is_deleted, created_at, updated_at)
+             VALUES ('app-be', 'backend-app', 'backend', 'prod', '', 'running', 0, ?1, ?1)",
             rusqlite::params![now],
         )
         .expect("insert backend app");
 
         save_resource_terms(
             &conn,
-            "application",
+            "service",
             "app-fe",
             FIELD_TECH_STACK,
             &["Vue".to_string()],
@@ -1196,7 +1196,7 @@ mod tests {
         .expect("save frontend stack");
         save_resource_terms(
             &conn,
-            "application",
+            "service",
             "app-be",
             FIELD_TECH_STACK,
             &["Rust".to_string()],
@@ -1206,7 +1206,7 @@ mod tests {
 
         let frontend_terms = list_terms_by_scope_with_options(
             &conn,
-            "application",
+            "service",
             FIELD_TECH_STACK,
             100,
             SORT_RECENT,
@@ -1218,7 +1218,7 @@ mod tests {
 
         let backend_terms = list_terms_by_scope_with_options(
             &conn,
-            "application",
+            "service",
             FIELD_TECH_STACK,
             100,
             SORT_RECENT,
@@ -1234,33 +1234,33 @@ mod tests {
         let conn = setup_test_db();
         let now = chrono::Utc::now().to_rfc3339();
         conn.execute(
-            "INSERT INTO applications (id, name, type, env, status, is_deleted, created_at, updated_at)
-             VALUES ('app-fe-1', 'frontend-app-1', 'frontend', 'prod', 'running', 0, ?1, ?1)",
+            "INSERT INTO services (id, name, type, env, system_id, status, is_deleted, created_at, updated_at)
+             VALUES ('app-fe-1', 'frontend-app-1', 'frontend', 'prod', '', 'running', 0, ?1, ?1)",
             rusqlite::params![now],
         )
         .expect("insert frontend app 1");
         conn.execute(
-            "INSERT INTO applications (id, name, type, env, status, is_deleted, created_at, updated_at)
-             VALUES ('app-fe-2', 'frontend-app-2', 'frontend', 'prod', 'running', 0, ?1, ?1)",
+            "INSERT INTO services (id, name, type, env, system_id, status, is_deleted, created_at, updated_at)
+             VALUES ('app-fe-2', 'frontend-app-2', 'frontend', 'prod', '', 'running', 0, ?1, ?1)",
             rusqlite::params![now],
         )
         .expect("insert frontend app 2");
         conn.execute(
-            "INSERT INTO applications (id, name, type, env, status, is_deleted, created_at, updated_at)
-             VALUES ('app-be-1', 'backend-app-1', 'backend', 'prod', 'running', 0, ?1, ?1)",
+            "INSERT INTO services (id, name, type, env, system_id, status, is_deleted, created_at, updated_at)
+             VALUES ('app-be-1', 'backend-app-1', 'backend', 'prod', '', 'running', 0, ?1, ?1)",
             rusqlite::params![now],
         )
         .expect("insert backend app 1");
         conn.execute(
-            "INSERT INTO applications (id, name, type, env, status, is_deleted, created_at, updated_at)
-             VALUES ('app-be-2', 'backend-app-2', 'backend', 'prod', 'running', 0, ?1, ?1)",
+            "INSERT INTO services (id, name, type, env, system_id, status, is_deleted, created_at, updated_at)
+             VALUES ('app-be-2', 'backend-app-2', 'backend', 'prod', '', 'running', 0, ?1, ?1)",
             rusqlite::params![now],
         )
         .expect("insert backend app 2");
 
         save_resource_terms(
             &conn,
-            "application",
+            "service",
             "app-fe-1",
             FIELD_TECH_STACK,
             &["Vue".to_string()],
@@ -1269,7 +1269,7 @@ mod tests {
         .expect("save first frontend stack");
         save_resource_terms(
             &conn,
-            "application",
+            "service",
             "app-fe-2",
             FIELD_TECH_STACK,
             &["Vue".to_string(), "React".to_string()],
@@ -1278,7 +1278,7 @@ mod tests {
         .expect("save second frontend stacks");
         save_resource_terms(
             &conn,
-            "application",
+            "service",
             "app-be-1",
             FIELD_TECH_STACK,
             &["Rust".to_string()],
@@ -1287,7 +1287,7 @@ mod tests {
         .expect("save first backend stack");
         save_resource_terms(
             &conn,
-            "application",
+            "service",
             "app-be-2",
             FIELD_TECH_STACK,
             &["Rust".to_string(), "Go".to_string()],
@@ -1297,7 +1297,7 @@ mod tests {
 
         let frontend_terms = list_terms_by_scope_with_options(
             &conn,
-            "application",
+            "service",
             FIELD_TECH_STACK,
             100,
             "count",
@@ -1309,7 +1309,7 @@ mod tests {
 
         let backend_terms = list_terms_by_scope_with_options(
             &conn,
-            "application",
+            "service",
             FIELD_TECH_STACK,
             100,
             "count",

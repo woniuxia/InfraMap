@@ -21,8 +21,8 @@ pub struct DashboardOverview {
 pub struct DashboardTotals {
     pub host_total: u64,
     pub host_abnormal: u64,
-    pub application_total: u64,
-    pub application_abnormal: u64,
+    pub service_total: u64,
+    pub service_abnormal: u64,
     pub middleware_total: u64,
     pub nginx_total: u64,
     pub nginx_abnormal: u64,
@@ -47,7 +47,7 @@ pub struct DashboardCoverage {
     pub related_total: u64,
     pub isolated_total: u64,
     pub relation_coverage: f64,
-    pub undeployed_application_total: u64,
+    pub undeployed_service_total: u64,
     pub undeployed_middleware_total: u64,
     pub undeployed_nginx_total: u64,
 }

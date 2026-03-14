@@ -183,10 +183,10 @@ function resolveAppTypeColor(data: Record<string, unknown>, theme: GraphTheme): 
 }
 
 function resolveNodeBaseColor(data: Record<string, unknown>, theme: GraphTheme): string {
-  const nodeType = String(data.nodeType || "application");
+  const nodeType = String(data.nodeType || "service");
   const status = String(data.status || "");
 
-  if (nodeType === "application") {
+  if (nodeType === "service") {
     return resolveAppTypeColor(data, theme);
   }
   if (nodeType === "middleware") {
@@ -206,7 +206,7 @@ function resolveNodeStroke(data: Record<string, unknown>, theme: GraphTheme): st
 }
 
 function resolveNodeBorderWidth(data: Record<string, unknown>): number {
-  const groupKind = String(data.groupKind || "application_service");
+  const groupKind = String(data.groupKind || "service");
   if (groupKind === "nginx") return 2.8;
   if (groupKind === "middleware") return 2.2;
   return 2.6;
@@ -215,7 +215,7 @@ function resolveNodeBorderWidth(data: Record<string, unknown>): number {
 function resolveEdgeStroke(data: Record<string, unknown>, theme: GraphTheme): string {
   if (data.crossEnv) return theme.impact;
   const sourceNodeType = String(data.source_nodeType || "");
-  if (sourceNodeType === "application") {
+  if (sourceNodeType === "service") {
     const appType = String(data.source_app_type_key || "other");
     const color = theme.applicationTypeColors[appType as keyof GraphTheme["applicationTypeColors"]];
     if (color) return color;

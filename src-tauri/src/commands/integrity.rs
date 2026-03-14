@@ -21,10 +21,10 @@ fn route_for_resource(resource_type: &str) -> &'static str {
     match resource_type {
         "host" => "Hosts",
         "ip_address" => "IpAddresses",
-        "application" => "Applications",
+        "service" => "Services",
         "middleware" => "Middlewares",
         "nginx" => "NginxConfigs",
-        "business_application" => "BusinessApplications",
+        "system" => "Systems",
         _ => "Topology",
     }
 }
@@ -58,14 +58,14 @@ fn resource_display_name(
             )
             .optional()
             .map_err(|err| format!("query ip display name failed: {}", err)),
-        "application" => conn
+        "service" => conn
             .query_row(
-                "SELECT name FROM applications WHERE id = ?1 AND is_deleted = 0",
+                "SELECT name FROM services WHERE id = ?1 AND is_deleted = 0",
                 params![resource_id],
                 |row| row.get(0),
             )
             .optional()
-            .map_err(|err| format!("query application display name failed: {}", err)),
+            .map_err(|err| format!("query service display name failed: {}", err)),
         "middleware" => conn
             .query_row(
                 "SELECT name FROM middlewares WHERE id = ?1 AND is_deleted = 0",
@@ -82,14 +82,14 @@ fn resource_display_name(
             )
             .optional()
             .map_err(|err| format!("query nginx display name failed: {}", err)),
-        "business_application" => conn
+        "system" => conn
             .query_row(
-                "SELECT name FROM business_applications WHERE id = ?1 AND is_deleted = 0",
+                "SELECT name FROM systems WHERE id = ?1 AND is_deleted = 0",
                 params![resource_id],
                 |row| row.get(0),
             )
             .optional()
-            .map_err(|err| format!("query business application display name failed: {}", err)),
+            .map_err(|err| format!("query system display name failed: {}", err)),
         _ => Ok(None),
     }
 }
@@ -98,10 +98,10 @@ fn resource_label(resource_type: &str) -> &'static str {
     match resource_type {
         "host" => "服务器",
         "ip_address" => "IP 资源",
-        "application" => "应用服务",
+        "service" => "服务",
         "middleware" => "中间件",
         "nginx" => "负载均衡",
-        "business_application" => "业务应用",
+        "system" => "系统",
         _ => "资源",
     }
 }
@@ -371,17 +371,17 @@ fn collect_orphan_taxonomy_bindings(
     Ok(())
 }
 
-fn collect_dangling_business_application_refs(
+fn collect_dangling_system_refs(
     conn: &Connection,
     findings: &mut Vec<IntegrityFinding>,
 ) -> Result<(), String> {
     let mut stmt = conn
         .prepare(
-            "SELECT id, name, business_application_id
-             FROM applications
-             WHERE is_deleted = 0 AND business_application_id IS NOT NULL AND TRIM(business_application_id) <> ''",
+            "SELECT id, name, system_id
+             FROM services
+             WHERE is_deleted = 0 AND system_id IS NOT NULL AND TRIM(system_id) <> ''",
         )
-        .map_err(|err| format!("prepare dangling business app refs failed: {}", err))?;
+        .map_err(|err| format!("prepare dangling system refs failed: {}", err))?;
     let rows = stmt
         .query_map([], |row| {
             Ok((
@@ -390,11 +390,11 @@ fn collect_dangling_business_application_refs(
                 row.get::<_, String>(2)?,
             ))
         })
-        .map_err(|err| format!("query dangling business app refs failed: {}", err))?;
+        .map_err(|err| format!("query dangling system refs failed: {}", err))?;
 
     for row in rows {
-        let (id, name, business_application_id) = row.map_err(|err| err.to_string())?;
-        if resource_display_name(conn, "business_application", &business_application_id)?.is_some()
+        let (id, name, system_id) = row.map_err(|err| err.to_string())?;
+        if resource_display_name(conn, "system", &system_id)?.is_some()
         {
             continue;
         }
@@ -402,20 +402,20 @@ fn collect_dangling_business_application_refs(
         push_finding(
             findings,
             IntegrityFinding {
-                id: format!("application_business_binding:{}", id),
-                key: "dangling_business_application_ref".to_string(),
+                id: format!("service_system_binding:{}", id),
+                key: "dangling_system_ref".to_string(),
                 category: "integrity".to_string(),
                 severity: "critical".to_string(),
-                title: "应用挂载了不存在的业务应用".to_string(),
+                title: "服务挂载了不存在的系统".to_string(),
                 description: format!(
-                    "应用服务 {} 引用了不存在的业务应用 {}。",
-                    name, business_application_id
+                    "服务 {} 引用了不存在的系统 {}。",
+                    name, system_id
                 ),
-                resource_type: Some("application".to_string()),
+                resource_type: Some("service".to_string()),
                 resource_id: Some(id.clone()),
                 resource_name: Some(name),
                 topology_node_id: Some(id.clone()),
-                target_route: "Applications".to_string(),
+                target_route: "Services".to_string(),
                 target_filters: make_filters(&[("resourceId", id)]),
                 repair_supported: true,
             },
@@ -431,13 +431,13 @@ fn collect_undeployed_resources(
 ) -> Result<(), String> {
     let definitions = [
         (
-            "application",
-            "Applications",
-            "应用服务",
-            "SELECT id, name FROM applications WHERE is_deleted = 0
+            "service",
+            "Services",
+            "服务",
+            "SELECT id, name FROM services WHERE is_deleted = 0
              AND NOT EXISTS (
                 SELECT 1 FROM deployments d
-                WHERE d.resource_id = applications.id AND d.resource_type = 'application' AND d.is_deleted = 0
+                WHERE d.resource_id = services.id AND d.resource_type = 'service' AND d.is_deleted = 0
              )",
         ),
         (
@@ -503,15 +503,15 @@ fn collect_isolated_resources(
 ) -> Result<(), String> {
     let definitions = [
         (
-            "application",
-            "Applications",
-            "应用服务",
-            "SELECT id, name FROM applications WHERE is_deleted = 0
+            "service",
+            "Services",
+            "服务",
+            "SELECT id, name FROM services WHERE is_deleted = 0
              AND NOT EXISTS (
                 SELECT 1 FROM call_relations cr
                 WHERE cr.is_deleted = 0
-                  AND ((cr.owner_type = 'application' AND cr.owner_id = applications.id)
-                    OR (cr.peer_type = 'application' AND cr.peer_id = applications.id))
+                  AND ((cr.owner_type = 'service' AND cr.owner_id = services.id)
+                    OR (cr.peer_type = 'service' AND cr.peer_id = services.id))
              )",
         ),
         (
@@ -630,7 +630,7 @@ pub(crate) fn build_integrity_report(conn: &Connection) -> Result<IntegrityRepor
     collect_orphan_call_relations(conn, &mut findings)?;
     collect_orphan_host_ip_bindings(conn, &mut findings)?;
     collect_orphan_taxonomy_bindings(conn, &mut findings)?;
-    collect_dangling_business_application_refs(conn, &mut findings)?;
+    collect_dangling_system_refs(conn, &mut findings)?;
     collect_undeployed_resources(conn, &mut findings)?;
     collect_isolated_resources(conn, &mut findings)?;
     sort_findings(&mut findings);
@@ -771,14 +771,14 @@ fn apply_repair(conn: &Connection, finding: &IntegrityFinding) -> Result<bool, S
             .map_err(|err| format!("delete taxonomy_binding failed: {}", err));
     }
 
-    if let Some(id) = finding.id.strip_prefix("application_business_binding:") {
+    if let Some(id) = finding.id.strip_prefix("service_system_binding:") {
         return conn
             .execute(
-                "UPDATE applications SET business_application_id = NULL, updated_at = ?1 WHERE id = ?2 AND is_deleted = 0",
+                "UPDATE services SET system_id = '', updated_at = ?1 WHERE id = ?2 AND is_deleted = 0",
                 params![chrono::Utc::now().to_rfc3339(), id],
             )
             .map(|affected| affected > 0)
-            .map_err(|err| format!("clear business application binding failed: {}", err));
+            .map_err(|err| format!("clear system binding failed: {}", err));
     }
 
     Ok(false)
@@ -981,7 +981,7 @@ mod tests {
     use crate::commands::system_jobs::record_system_job;
     use crate::models::integrity::{IntegrityFinding, IntegrityReport, IntegritySummary};
     use crate::models::integrity::IntegrityRepairInput;
-    use crate::test_helpers::{insert_test_application, insert_test_host, setup_test_db};
+    use crate::test_helpers::{insert_test_service, insert_test_host, setup_test_db};
     use rusqlite::params;
     use serde_json::json;
 
@@ -989,11 +989,11 @@ mod tests {
     fn get_integrity_report_inner_should_detect_orphans_and_coverage_gaps() {
         let conn = setup_test_db();
         insert_test_host(&conn, "host-1", "host-1", "10.0.0.1");
-        insert_test_application(&conn, "app-1", "orders-api", "prod");
+        insert_test_service(&conn, "app-1", "orders-api", "prod", "");
 
         conn.execute(
             "INSERT INTO deployments (id, resource_id, resource_type, host_id, is_deleted, created_at, updated_at)
-             VALUES ('dep-orphan', 'missing-app', 'application', 'host-1', 0, ?1, ?1)",
+             VALUES ('dep-orphan', 'missing-app', 'service', 'host-1', 0, ?1, ?1)",
             params![chrono::Utc::now().to_rfc3339()],
         )
         .expect("insert orphan deployment");
@@ -1031,7 +1031,7 @@ mod tests {
                 severity: "critical".to_string(),
                 title: "孤儿部署关系".to_string(),
                 description: "部署记录指向了不存在的应用。".to_string(),
-                resource_type: Some("application".to_string()),
+                resource_type: Some("service".to_string()),
                 resource_id: Some("missing-app".to_string()),
                 resource_name: Some("应用 A".to_string()),
                 topology_node_id: Some("missing-app".to_string()),
@@ -1072,7 +1072,7 @@ mod tests {
         let conn = setup_test_db();
         conn.execute(
             "INSERT INTO deployments (id, resource_id, resource_type, host_id, is_deleted, created_at, updated_at)
-             VALUES ('dep-orphan', 'missing-app', 'application', 'missing-host', 0, ?1, ?1)",
+             VALUES ('dep-orphan', 'missing-app', 'service', 'missing-host', 0, ?1, ?1)",
             params![chrono::Utc::now().to_rfc3339()],
         )
         .expect("insert orphan deployment");

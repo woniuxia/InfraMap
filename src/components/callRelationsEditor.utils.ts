@@ -9,7 +9,7 @@ export type EditorCallDirection = CallDirection | "bidirectional";
 
 export interface EditableCallRelationDraft {
   peer_id: string;
-  peer_type: "application" | "middleware" | "nginx";
+  peer_type: "service" | "middleware" | "nginx";
   direction: EditorCallDirection;
   relation_type: CallRelationType;
   description: string;
@@ -17,7 +17,7 @@ export interface EditableCallRelationDraft {
 
 interface MergeAccumulator {
   peer_id: string;
-  peer_type: "application" | "middleware" | "nginx";
+  peer_type: "service" | "middleware" | "nginx";
   relation_type: CallRelationType;
   description: string;
   has_upstream: boolean;
@@ -30,7 +30,7 @@ function buildMergeKey(relation: CallRelation): string {
 }
 
 export function mergeCallRelationsForEditor(
-  relations: CallRelation[]
+  relations: CallRelation[],
 ): EditableCallRelationDraft[] {
   const merged = new Map<string, MergeAccumulator>();
 
@@ -70,7 +70,7 @@ export function mergeCallRelationsForEditor(
 }
 
 export function expandEditorDraftsForSave(
-  rows: EditableCallRelationDraft[]
+  rows: EditableCallRelationDraft[],
 ): ReplaceCallRelationItem[] {
   const expanded: ReplaceCallRelationItem[] = [];
   for (const row of rows) {

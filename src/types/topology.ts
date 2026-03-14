@@ -1,8 +1,8 @@
 export type TopologyEnv = "prod" | "test" | "dev";
 
-export type TopologyNodeType = "application" | "middleware" | "nginx";
+export type TopologyNodeType = "service" | "middleware" | "nginx";
 
-export type TopologyGroupKind = "application_service" | "middleware" | "nginx";
+export type TopologyGroupKind = "service" | "middleware" | "nginx";
 
 export type TopologyEdgeType =
   | "http_call"
@@ -75,7 +75,7 @@ export interface TopologyLegendStats {
   envCounts: TopologyEnvCount[];
   nodeTypeCounts: TopologyKindCount[];
   edgeTypeCounts: TopologyKindCount[];
-  applicationServiceCount: number;
+  serviceCount: number;
   currentEnv?: TopologyEnv;
   externalNodeCount?: number;
   crossEnvEdgeCount?: number;

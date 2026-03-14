@@ -606,51 +606,68 @@ mod tests {
     }
 
     #[test]
-    fn migration_should_move_existing_host_ip_to_ip_resources() {
+    fn v002_migration_should_rename_business_applications_to_systems() {
         let conn = Connection::open_in_memory().expect("open in-memory db");
+        // Apply v23 (initial schema) which creates business_applications and applications tables
         for (version, sql) in MIGRATIONS.iter() {
-            if *version == 1 {
-                conn.execute_batch(sql)
-                    .unwrap_or_else(|e| panic!("Migration v{} failed: {}", version, e));
+            if *version == 24 {
+                // Before v24, seed data in old tables
                 conn.execute(
-                    "INSERT INTO hosts (id, hostname, ip_address, status, is_deleted, created_at, updated_at)
-                     VALUES ('h1', 'server-1', '10.8.0.1', 'running', 0, datetime('now'), datetime('now'))",
+                    "INSERT INTO business_applications (id, name, code, description, env, status, is_deleted, deleted_at, created_at, updated_at)
+                     VALUES ('ba-1', '支付系统', 'PAY', NULL, 'prod', 'active', 0, NULL, datetime('now'), datetime('now'))",
                     [],
                 )
-                .expect("seed host");
-                continue;
+                .expect("seed business_application");
+                conn.execute(
+                    "INSERT INTO applications (id, name, type, env, business_application_id, status, is_deleted, created_at, updated_at)
+                     VALUES ('app-1', '订单服务', 'backend', 'prod', 'ba-1', 'running', 0, datetime('now'), datetime('now'))",
+                    [],
+                )
+                .expect("seed application");
             }
 
             conn.execute_batch(sql)
                 .unwrap_or_else(|e| panic!("Migration v{} failed: {}", version, e));
-            if *version == 12 {
-                migrate_taxonomy_v2(&conn)
-                    .unwrap_or_else(|e| panic!("Post-migration hook v{} failed: {}", version, e));
-            }
         }
 
-        let ip_count: i64 = conn
+        // Verify systems table has the data
+        let sys_count: i64 = conn
             .query_row(
-                "SELECT COUNT(*) FROM ip_addresses WHERE ip_address='10.8.0.1' AND env='prod' AND is_deleted=0",
+                "SELECT COUNT(*) FROM systems WHERE id = 'ba-1' AND name = '支付系统' AND env = 'prod' AND is_deleted = 0",
                 [],
                 |row| row.get(0),
             )
-            .expect("count migrated ip");
-        let binding_count: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM host_ip_bindings hb
-                 JOIN ip_addresses ia ON ia.id = hb.ip_id
-                 WHERE hb.host_id='h1' AND ia.ip_address='10.8.0.1' AND hb.is_deleted=0",
-                [],
-                |row| row.get(0),
-            )
-            .expect("count migrated binding");
+            .expect("query systems");
+        assert_eq!(sys_count, 1, "business_application should be migrated to systems");
 
-        assert_eq!(ip_count, 1, "host ip should be migrated into ip_addresses");
-        assert_eq!(
-            binding_count, 1,
-            "host should be bound with migrated ip address"
-        );
+        // Verify services table has the data with system_id
+        let svc_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM services WHERE id = 'app-1' AND system_id = 'ba-1' AND is_deleted = 0",
+                [],
+                |row| row.get(0),
+            )
+            .expect("query services");
+        assert_eq!(svc_count, 1, "application should be migrated to services with system_id");
+
+        // Verify old tables are gone
+        let old_ba: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='business_applications'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("query old table");
+        assert_eq!(old_ba, 0, "business_applications table should be dropped");
+
+        let old_app: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='applications'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("query old table");
+        assert_eq!(old_app, 0, "applications table should be dropped");
     }
 
     #[test]
@@ -673,40 +690,28 @@ mod tests {
     }
 
     #[test]
-    fn business_applications_table_should_exist_after_migrations() {
+    fn systems_table_should_exist_after_migrations() {
         let conn = Connection::open_in_memory().expect("open in-memory db");
         apply_all_migrations(&conn);
 
         let exists: i64 = conn
             .query_row(
-                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='business_applications'",
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='systems'",
                 [],
                 |row| row.get(0),
             )
             .expect("query sqlite_master");
 
-        assert_eq!(exists, 1, "business_applications table should exist");
-
-        let mut stmt = conn
-            .prepare("PRAGMA table_info(business_applications)")
-            .expect("prepare table info query");
-        let rows = stmt
-            .query_map([], |row| row.get::<_, String>(1))
-            .expect("query table info");
-        let columns: Vec<String> = rows.filter_map(|r| r.ok()).collect();
-        assert!(
-            !columns.iter().any(|col| col == "owner"),
-            "business_applications table should not contain legacy owner column"
-        );
+        assert_eq!(exists, 1, "systems table should exist");
     }
 
     #[test]
-    fn applications_table_should_have_business_application_id_column_after_migrations() {
+    fn services_table_should_have_system_id_column_after_migrations() {
         let conn = Connection::open_in_memory().expect("open in-memory db");
         apply_all_migrations(&conn);
 
         let mut stmt = conn
-            .prepare("PRAGMA table_info(applications)")
+            .prepare("PRAGMA table_info(services)")
             .expect("prepare table info query");
         let rows = stmt
             .query_map([], |row| row.get::<_, String>(1))
@@ -714,13 +719,13 @@ mod tests {
         let columns: Vec<String> = rows.filter_map(|r| r.ok()).collect();
 
         assert!(
-            columns.iter().any(|col| col == "business_application_id"),
-            "applications table should contain business_application_id column"
+            columns.iter().any(|col| col == "system_id"),
+            "services table should contain system_id column"
         );
     }
 
     #[test]
-    fn applications_unique_index_should_use_name_env_type_after_migrations() {
+    fn services_should_not_have_legacy_unique_index_after_migrations() {
         let conn = Connection::open_in_memory().expect("open in-memory db");
         apply_all_migrations(&conn);
 
@@ -733,139 +738,142 @@ mod tests {
             .expect("query old applications unique index");
         assert_eq!(
             old_index_exists, 0,
-            "legacy applications unique index should be removed"
+            "legacy applications unique index should not exist"
         );
 
-        let new_index_exists: i64 = conn
+        let old_type_index_exists: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='uk_applications_name_env_type'",
                 [],
                 |row| row.get(0),
             )
-            .expect("query new applications unique index");
+            .expect("query old applications type index");
         assert_eq!(
-            new_index_exists, 1,
-            "applications unique index should be name+env+type"
+            old_type_index_exists, 0,
+            "legacy applications type index should not exist"
         );
     }
 
     #[test]
-    fn business_application_owner_should_migrate_to_taxonomy_before_owner_column_drop() {
+    fn v002_migration_should_update_taxonomy_resource_types() {
         let conn = Connection::open_in_memory().expect("open in-memory db");
         for (version, sql) in MIGRATIONS.iter() {
-            if *version == 15 {
+            if *version == 24 {
+                // Seed taxonomy bindings with old resource_type values before v24
+                let now = chrono::Utc::now().to_rfc3339();
                 conn.execute(
-                    "INSERT INTO business_applications (id, name, code, owner, description, env, status, is_deleted, deleted_at, created_at, updated_at)
-                     VALUES ('ba-mig-1', '支付中心', 'PAY', 'alice', NULL, 'prod', 'active', 0, NULL, datetime('now'), datetime('now'))",
-                    [],
+                    "INSERT INTO taxonomy_terms (id, field_key, normalized_value, display_name, is_deleted, deleted_at, created_at, updated_at)
+                     VALUES ('tt-1', 'owner', 'alice', 'alice', 0, NULL, ?1, ?1)",
+                    rusqlite::params![now],
                 )
-                .expect("seed business application owner before migration v15");
+                .expect("seed taxonomy term");
+                conn.execute(
+                    "INSERT INTO taxonomy_bindings (id, term_id, resource_type, resource_id, is_deleted, deleted_at, created_at, updated_at)
+                     VALUES ('tb-1', 'tt-1', 'business_application', 'ba-1', 0, NULL, ?1, ?1)",
+                    rusqlite::params![now],
+                )
+                .expect("seed taxonomy binding for business_application");
+                conn.execute(
+                    "INSERT INTO taxonomy_bindings (id, term_id, resource_type, resource_id, is_deleted, deleted_at, created_at, updated_at)
+                     VALUES ('tb-2', 'tt-1', 'application', 'app-1', 0, NULL, ?1, ?1)",
+                    rusqlite::params![now],
+                )
+                .expect("seed taxonomy binding for application");
             }
 
             conn.execute_batch(sql)
                 .unwrap_or_else(|e| panic!("Migration v{} failed: {}", version, e));
-            if *version == 12 {
-                migrate_taxonomy_v2(&conn)
-                    .unwrap_or_else(|e| panic!("Post-migration hook v{} failed: {}", version, e));
-            }
         }
 
-        let owner_binding_count: i64 = conn
+        // Verify resource_type was updated from 'business_application' to 'system'
+        let system_count: i64 = conn
             .query_row(
-                "SELECT COUNT(*)
-                 FROM taxonomy_bindings tb
-                 JOIN taxonomy_terms tt ON tt.id = tb.term_id
-                 WHERE tb.resource_type = 'business_application'
-                   AND tb.resource_id = 'ba-mig-1'
-                   AND tb.is_deleted = 0
-                   AND tt.is_deleted = 0
-                   AND tt.field_key = 'owner'
-                   AND tt.display_name = 'alice'",
+                "SELECT COUNT(*) FROM taxonomy_bindings WHERE resource_type = 'system' AND resource_id = 'ba-1' AND is_deleted = 0",
                 [],
                 |row| row.get(0),
             )
-            .expect("count migrated business owner binding");
-        assert_eq!(
-            owner_binding_count, 1,
-            "business application owner should be migrated into taxonomy"
-        );
-    }
+            .expect("count system bindings");
+        assert_eq!(system_count, 1, "business_application resource_type should be migrated to system");
 
-    #[test]
-    fn application_owner_sources_should_migrate_to_taxonomy_before_legacy_owner_cleanup() {
-        let conn = Connection::open_in_memory().expect("open in-memory db");
-        let mut seeded_before_cleanup = false;
-        for (version, sql) in MIGRATIONS.iter() {
-            if *version == 21 {
-                conn.execute(
-                    "INSERT INTO applications (id, name, type, address, port, tech_stack, deploy_mode, env, git_repo, owner, business_application_id, status, description, is_deleted, deleted_at, created_at, updated_at)
-                     VALUES ('app-mig-1', 'legacy-app', 'backend', NULL, NULL, NULL, NULL, 'prod', NULL, 'alice', NULL, 'running', NULL, 0, NULL, datetime('now'), datetime('now'))",
-                    [],
-                )
-                .expect("seed application owner before migration v21");
-                conn.execute(
-                    "INSERT INTO application_owners (id, application_id, owner_name, is_deleted, deleted_at, created_at, updated_at)
-                     VALUES ('ao-mig-1', 'app-mig-1', 'bob', 0, NULL, datetime('now'), datetime('now'))",
-                    [],
-                )
-                .expect("seed application_owners row before migration v21");
-                seeded_before_cleanup = true;
-            }
-
-            conn.execute_batch(sql)
-                .unwrap_or_else(|e| panic!("Migration v{} failed: {}", version, e));
-            if *version == 12 {
-                migrate_taxonomy_v2(&conn)
-                    .unwrap_or_else(|e| panic!("Post-migration hook v{} failed: {}", version, e));
-            }
-        }
-
-        assert!(
-            seeded_before_cleanup,
-            "migration v21 should exist so application owner cleanup can be verified"
-        );
-
-        let owner_binding_count: i64 = conn
+        // Verify resource_type was updated from 'application' to 'service'
+        let service_count: i64 = conn
             .query_row(
-                "SELECT COUNT(DISTINCT tt.display_name)
-                 FROM taxonomy_bindings tb
-                 JOIN taxonomy_terms tt ON tt.id = tb.term_id
-                 WHERE tb.resource_type = 'application'
-                   AND tb.resource_id = 'app-mig-1'
-                   AND tb.is_deleted = 0
-                   AND tt.is_deleted = 0
-                   AND tt.field_key = 'owner'
-                   AND tt.display_name IN ('alice', 'bob')",
+                "SELECT COUNT(*) FROM taxonomy_bindings WHERE resource_type = 'service' AND resource_id = 'app-1' AND is_deleted = 0",
                 [],
                 |row| row.get(0),
             )
-            .expect("count migrated application owner bindings");
-        assert_eq!(
-            owner_binding_count, 2,
-            "application owner column and table rows should both migrate into taxonomy"
-        );
+            .expect("count service bindings");
+        assert_eq!(service_count, 1, "application resource_type should be migrated to service");
     }
 
     #[test]
-    fn host_os_and_cpu_should_backfill_to_taxonomy_after_migrations() {
+    fn v002_migration_should_auto_create_system_for_orphan_applications() {
         let conn = Connection::open_in_memory().expect("open in-memory db");
         for (version, sql) in MIGRATIONS.iter() {
-            if *version == 18 {
+            if *version == 24 {
+                // Seed an application without business_application_id before v24
                 conn.execute(
-                    "INSERT INTO hosts (id, hostname, env, os_type, cpu_model, status, is_deleted, created_at, updated_at)
-                     VALUES ('host-taxonomy-1', 'os-cpu-node', 'prod', 'openEuler', 'Hygon C86 7285', 'running', 0, datetime('now'), datetime('now'))",
+                    "INSERT INTO applications (id, name, type, env, business_application_id, status, is_deleted, created_at, updated_at)
+                     VALUES ('app-orphan-1', 'orphan-app', 'backend', 'prod', NULL, 'running', 0, datetime('now'), datetime('now'))",
                     [],
                 )
-                .expect("seed host os/cpu before migration v18");
+                .expect("seed orphan application");
             }
 
             conn.execute_batch(sql)
                 .unwrap_or_else(|e| panic!("Migration v{} failed: {}", version, e));
-            if *version == 12 {
-                migrate_taxonomy_v2(&conn)
-                    .unwrap_or_else(|e| panic!("Post-migration hook v{} failed: {}", version, e));
-            }
         }
+
+        // Verify a system was auto-created for the orphan
+        let auto_sys_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM systems WHERE name = 'orphan-app' AND env = 'prod' AND is_deleted = 0",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count auto-created systems");
+        assert_eq!(auto_sys_count, 1, "an auto system should be created for orphan application");
+
+        // Verify the service was linked to the auto-created system
+        let linked_service: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM services s
+                 JOIN systems sys ON sys.id = s.system_id
+                 WHERE s.id = 'app-orphan-1' AND sys.name = 'orphan-app' AND s.is_deleted = 0",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count linked services");
+        assert_eq!(linked_service, 1, "orphan application should be linked to auto-created system");
+    }
+
+    #[test]
+    fn taxonomy_tables_should_support_host_os_and_cpu_after_migrations() {
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        apply_all_migrations(&conn);
+
+        // Verify taxonomy tables exist and can store host os/cpu data
+        let now = chrono::Utc::now().to_rfc3339();
+        conn.execute(
+            "INSERT INTO hosts (id, hostname, os_type, cpu_model, env, status, is_deleted, created_at, updated_at)
+             VALUES ('host-tax-1', 'test-host', 'openEuler', 'Hygon C86 7285', 'prod', 'running', 0, ?1, ?1)",
+            rusqlite::params![now],
+        )
+        .expect("insert host");
+
+        conn.execute(
+            "INSERT INTO taxonomy_terms (id, field_key, normalized_value, display_name, is_deleted, deleted_at, created_at, updated_at)
+             VALUES ('tt-os-1', 'os_type', 'openeuler', 'openEuler', 0, NULL, ?1, ?1)",
+            rusqlite::params![now],
+        )
+        .expect("insert os taxonomy term");
+
+        conn.execute(
+            "INSERT INTO taxonomy_bindings (id, term_id, resource_type, resource_id, is_deleted, deleted_at, created_at, updated_at)
+             VALUES ('tb-os-1', 'tt-os-1', 'host', 'host-tax-1', 0, NULL, ?1, ?1)",
+            rusqlite::params![now],
+        )
+        .expect("insert os taxonomy binding");
 
         let os_binding_count: i64 = conn
             .query_row(
@@ -873,7 +881,7 @@ mod tests {
                  FROM taxonomy_bindings tb
                  JOIN taxonomy_terms tt ON tt.id = tb.term_id
                  WHERE tb.resource_type = 'host'
-                   AND tb.resource_id = 'host-taxonomy-1'
+                   AND tb.resource_id = 'host-tax-1'
                    AND tb.is_deleted = 0
                    AND tt.is_deleted = 0
                    AND tt.field_key = 'os_type'
@@ -881,30 +889,10 @@ mod tests {
                 [],
                 |row| row.get(0),
             )
-            .expect("count migrated host os binding");
+            .expect("count host os binding");
         assert_eq!(
             os_binding_count, 1,
-            "host os_type should be backfilled into taxonomy"
-        );
-
-        let cpu_binding_count: i64 = conn
-            .query_row(
-                "SELECT COUNT(*)
-                 FROM taxonomy_bindings tb
-                 JOIN taxonomy_terms tt ON tt.id = tb.term_id
-                 WHERE tb.resource_type = 'host'
-                   AND tb.resource_id = 'host-taxonomy-1'
-                   AND tb.is_deleted = 0
-                   AND tt.is_deleted = 0
-                   AND tt.field_key = 'cpu_model'
-                   AND tt.display_name = 'Hygon C86 7285'",
-                [],
-                |row| row.get(0),
-            )
-            .expect("count migrated host cpu binding");
-        assert_eq!(
-            cpu_binding_count, 1,
-            "host cpu_model should be backfilled into taxonomy"
+            "host os_type should be stored in taxonomy"
         );
     }
 

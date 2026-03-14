@@ -21,9 +21,9 @@ function createGraphFixture(): TopologyGraph {
     createNode({
       id: "app-prod-1",
       name: "订单服务",
-      nodeType: "application",
+      nodeType: "service",
       env: "prod",
-      groupKind: "application_service",
+      groupKind: "service",
       hostId: "host-prod-1",
       status: "running",
       extra: { address: "10.0.0.1", type: "frontend" },
@@ -40,9 +40,9 @@ function createGraphFixture(): TopologyGraph {
     createNode({
       id: "app-test-1",
       name: "支付服务",
-      nodeType: "application",
+      nodeType: "service",
       env: "test",
-      groupKind: "application_service",
+      groupKind: "service",
       hostId: "host-test-1",
       status: "running",
     }),
@@ -165,7 +165,7 @@ describe("topologyCytoscape utils", () => {
     expect(String(middlewareNode?.data?.icon_src || "")).toContain("data:image/svg+xml");
     expect(String(middlewareNode?.data?.icon_key || "")).toContain("redis");
     expect(String(middlewareNode?.data?.icon_key || "")).not.toBe("heroicons:window");
-    expect(edge?.data?.source_nodeType).toBe("application");
+    expect(edge?.data?.source_nodeType).toBe("service");
     expect(edge?.data?.source_app_type_key).toBe("frontend");
   });
 });

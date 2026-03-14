@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { defineComponent, h } from "vue";
 import { flushPromises, mount } from "@vue/test-utils";
-import ApplicationEditorDialog from "@/components/resource-editors/ApplicationEditorDialog.vue";
-import { saveApplication } from "@/api/applications";
+import ServiceEditorDialog from "@/components/resource-editors/ServiceEditorDialog.vue";
+import { saveService } from "@/api/services";
 
 vi.mock("element-plus", () => ({
   ElMessage: {
@@ -13,12 +13,12 @@ vi.mock("element-plus", () => ({
   },
 }));
 
-vi.mock("@/api/applications", () => ({
-  saveApplication: vi.fn(async () => "app-1"),
+vi.mock("@/api/services", () => ({
+  saveService: vi.fn(async () => "svc-1"),
 }));
 
-vi.mock("@/api/business-applications", () => ({
-  listBusinessApplications: vi.fn(async () => ({
+vi.mock("@/api/systems", () => ({
+  listSystems: vi.fn(async () => ({
     data: [],
     total: 0,
     page: 1,
@@ -43,7 +43,7 @@ vi.mock("@/api/contacts", () => ({
 }));
 
 vi.mock("@/api/taxonomy", () => ({
-  listApplicationTechStackTerms: vi.fn(async () => []),
+  listServiceTechStackTerms: vi.fn(async () => []),
 }));
 
 vi.mock("@/api/call-relations", () => ({
@@ -138,7 +138,7 @@ const DeploymentPanelStub = defineComponent({
 });
 
 function mountDialog(initialDraft: Record<string, unknown>) {
-  return mount(ApplicationEditorDialog, {
+  return mount(ServiceEditorDialog, {
     props: {
       modelValue: true,
       mode: "create",
@@ -162,7 +162,7 @@ function mountDialog(initialDraft: Record<string, unknown>) {
   });
 }
 
-describe("ApplicationEditorDialog", () => {
+describe("ServiceEditorDialog", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -170,6 +170,7 @@ describe("ApplicationEditorDialog", () => {
   it("initializes empty owner_contact_ids when hydrating and saving", async () => {
     const wrapper = mountDialog({
       id: "draft-empty-owners",
+      system_id: "sys-1",
       name: "empty-owners-app",
       type: "backend",
       env: "prod",
@@ -183,8 +184,8 @@ describe("ApplicationEditorDialog", () => {
     await buttons[buttons.length - 1].trigger("click");
     await flushPromises();
 
-    expect(vi.mocked(saveApplication)).toHaveBeenCalledTimes(1);
-    const payload = vi.mocked(saveApplication).mock.calls[0][0] as Record<string, unknown>;
+    expect(vi.mocked(saveService)).toHaveBeenCalledTimes(1);
+    const payload = vi.mocked(saveService).mock.calls[0][0] as Record<string, unknown>;
     expect(payload.owner_contact_ids).toEqual([]);
   });
 });

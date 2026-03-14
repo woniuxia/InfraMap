@@ -48,7 +48,7 @@ pub struct BackupEntry {
 #[derive(Debug, Serialize)]
 pub struct DbPreviewSummary {
     pub hosts: u64,
-    pub applications: u64,
+    pub services: u64,
     pub middlewares: u64,
     pub nginx_configs: u64,
     pub deployments: u64,
@@ -73,7 +73,8 @@ pub struct ExportMetadata {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ExportPayload {
     pub hosts: Vec<serde_json::Value>,
-    pub applications: Vec<serde_json::Value>,
+    #[serde(alias = "applications")]
+    pub services: Vec<serde_json::Value>,
     pub middlewares: Vec<serde_json::Value>,
     pub nginx_configs: Vec<serde_json::Value>,
     pub deployments: Vec<serde_json::Value>,
@@ -83,7 +84,7 @@ pub struct ExportPayload {
 #[derive(Debug, Serialize)]
 pub struct ImportResult {
     pub hosts_imported: u64,
-    pub applications_imported: u64,
+    pub services_imported: u64,
     pub middlewares_imported: u64,
     pub nginx_configs_imported: u64,
     pub deployments_imported: u64,

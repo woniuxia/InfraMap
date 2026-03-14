@@ -42,7 +42,7 @@ const activeRows = computed(() =>
   rows.value
     .map((item) => ({
       ...item,
-      resource_type: item.resource_type?.trim() || "application",
+      resource_type: item.resource_type?.trim() || "service",
       name: item.name?.trim(),
       env: item.env || "prod",
       type: item.type?.trim() || "backend",
@@ -50,12 +50,12 @@ const activeRows = computed(() =>
       address: item.address?.trim(),
       description: item.description?.trim(),
     }))
-    .filter((item) => !!item.name)
+    .filter((item) => !!item.name),
 );
 
 function createEmptyRow(): ImportDraftRow {
   return {
-    resource_type: "application",
+    resource_type: "service",
     name: "",
     env: "prod",
     type: "backend",
@@ -84,7 +84,7 @@ function removeRow(index: number) {
 function loadDemoRows() {
   rows.value = [
     {
-      resource_type: "application",
+      resource_type: "service",
       name: "order-api",
       env: "prod",
       type: "backend",
@@ -94,7 +94,7 @@ function loadDemoRows() {
       description: "订单服务",
     },
     {
-      resource_type: "application",
+      resource_type: "service",
       name: "payment-api",
       env: "prod",
       type: "backend",
@@ -122,7 +122,16 @@ function parsePastedRows() {
     return;
   }
 
-  const known = new Set(["resource_type", "name", "env", "type", "status", "address", "port", "description"]);
+  const known = new Set([
+    "resource_type",
+    "name",
+    "env",
+    "type",
+    "status",
+    "address",
+    "port",
+    "description",
+  ]);
   const firstCells = lines[0].split("\t").map((cell) => cell.trim().toLowerCase());
   const hasHeader = firstCells.some((item) => known.has(item));
 
@@ -131,11 +140,14 @@ function parsePastedRows() {
     const cells = line.split("\t");
     const portRaw = cells[6]?.trim();
     return {
-      resource_type: (cells[0] || "application").trim() || "application",
+      resource_type: (cells[0] || "service").trim() || "service",
       name: (cells[1] || "").trim(),
       env: ((cells[2] || "prod").trim() || "prod") as "prod" | "dev" | "test",
       type: (cells[3] || "backend").trim() || "backend",
-      status: ((cells[4] || "running").trim() || "running") as "running" | "stopped" | "maintenance",
+      status: ((cells[4] || "running").trim() || "running") as
+        | "running"
+        | "stopped"
+        | "maintenance",
       address: (cells[5] || "").trim(),
       port: portRaw ? Number(portRaw) : undefined,
       description: (cells[7] || "").trim(),
@@ -256,7 +268,7 @@ onMounted(() => {
         <el-table-column label="resource_type" width="130">
           <template #default="{ row }">
             <el-select v-model="row.resource_type" class="w-full">
-              <el-option label="application" value="application" />
+              <el-option label="service" value="service" />
             </el-select>
           </template>
         </el-table-column>
@@ -329,11 +341,7 @@ onMounted(() => {
       <div class="strategy-row">
         <span class="label">冲突策略</span>
         <el-radio-group v-model="strategy">
-          <el-radio-button
-            v-for="item in strategyOptions"
-            :key="item.value"
-            :label="item.value"
-          >
+          <el-radio-button v-for="item in strategyOptions" :key="item.value" :label="item.value">
             {{ item.label }}
           </el-radio-button>
         </el-radio-group>
@@ -344,7 +352,9 @@ onMounted(() => {
 
       <div class="actions">
         <el-button :loading="previewLoading" @click="handlePreview">预检</el-button>
-        <el-button type="primary" :loading="executeLoading" @click="handleExecute">执行录入</el-button>
+        <el-button type="primary" :loading="executeLoading" @click="handleExecute">
+          执行录入
+        </el-button>
       </div>
     </el-card>
 
@@ -399,8 +409,10 @@ onMounted(() => {
         class="result-alert"
       >
         <template #title>
-          最新执行：created={{ executeResult.created_count }} / updated={{ executeResult.updated_count }} /
-          skipped={{ executeResult.skipped_count }} / failed={{ executeResult.failed_count }}
+          最新执行：created={{ executeResult.created_count }} / updated={{
+            executeResult.updated_count
+          }}
+          / skipped={{ executeResult.skipped_count }} / failed={{ executeResult.failed_count }}
         </template>
       </el-alert>
 
@@ -432,7 +444,9 @@ onMounted(() => {
           <el-descriptions-item label="任务ID">{{ jobDetail.summary.id }}</el-descriptions-item>
           <el-descriptions-item label="状态">{{ jobDetail.summary.status }}</el-descriptions-item>
           <el-descriptions-item label="策略">{{ jobDetail.summary.strategy }}</el-descriptions-item>
-          <el-descriptions-item label="总行数">{{ jobDetail.summary.total_rows }}</el-descriptions-item>
+          <el-descriptions-item label="总行数">
+            {{ jobDetail.summary.total_rows }}
+          </el-descriptions-item>
         </el-descriptions>
 
         <el-table v-if="jobDetail" :data="jobDetail.rows" border size="small" max-height="260">
@@ -441,7 +455,12 @@ onMounted(() => {
           <el-table-column prop="name" label="名称" min-width="180" />
           <el-table-column prop="env" label="环境" width="90" />
           <el-table-column prop="status" label="结果" width="130" />
-          <el-table-column prop="error_message" label="错误" min-width="220" show-overflow-tooltip />
+          <el-table-column
+            prop="error_message"
+            label="错误"
+            min-width="220"
+            show-overflow-tooltip
+          />
         </el-table>
 
         <el-table

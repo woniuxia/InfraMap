@@ -202,14 +202,14 @@ fn validate_and_normalize(
     let app_type = normalize_app_type(row.item_type.as_deref());
     let status = normalize_status(row.status.as_deref());
 
-    if resource_type != "application" {
+    if resource_type != "service" {
         push_issue(
             &mut issues,
             row_no,
             Some("resource_type"),
             ISSUE_ERROR,
             "unsupported_resource_type",
-            "当前版本仅支持 application 批量录入",
+            "当前版本仅支持 service 批量录入",
         );
     }
 
@@ -275,7 +275,7 @@ fn validate_and_normalize(
     if !has_error && !name.is_empty() {
         conflict_id = conn
             .query_row(
-                "SELECT id FROM applications
+                "SELECT id FROM services
                  WHERE name = ?1 AND env = ?2 AND type = ?3 AND is_deleted = 0
                  LIMIT 1",
                 rusqlite::params![name, env, app_type],
@@ -288,8 +288,8 @@ fn validate_and_normalize(
                 row_no,
                 Some("name"),
                 ISSUE_CONFLICT,
-                "application_conflict",
-                "应用名称+环境+类型组合已存在",
+                "service_conflict",
+                "服务名称+环境+类型组合已存在",
             );
         }
     }
@@ -356,7 +356,7 @@ fn preview_import_rows_inner(
     })
 }
 
-fn persist_application(
+fn persist_service(
     conn: &Connection,
     row: &ImportNormalizedRow,
     overwrite: bool,
@@ -365,7 +365,7 @@ fn persist_application(
     if overwrite {
         if let Some(existing_id) = row.conflict_id.as_ref() {
             conn.execute(
-                "UPDATE applications
+                "UPDATE services
                  SET name = ?1, type = ?2, address = ?3, port = ?4, env = ?5, status = ?6, description = ?7, updated_at = ?8
                  WHERE id = ?9 AND is_deleted = 0",
                 rusqlite::params![
@@ -384,7 +384,7 @@ fn persist_application(
             insert_audit_log(
                 conn,
                 "update",
-                "application",
+                "service",
                 existing_id,
                 Some(&row.name),
                 Some("import overwrite"),
@@ -395,8 +395,8 @@ fn persist_application(
 
     let id = uuid::Uuid::new_v4().to_string();
     conn.execute(
-        "INSERT INTO applications (id, name, type, address, port, tech_stack, deploy_mode, env, git_repo, business_application_id, status, description, is_deleted, deleted_at, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, NULL, NULL, ?6, NULL, NULL, ?7, ?8, 0, NULL, ?9, ?9)",
+        "INSERT INTO services (id, name, type, address, port, tech_stack, deploy_mode, env, git_repo, system_id, status, description, is_deleted, deleted_at, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, NULL, NULL, ?6, NULL, '', ?7, ?8, 0, NULL, ?9, ?9)",
         rusqlite::params![
             id,
             row.name,
@@ -413,7 +413,7 @@ fn persist_application(
     insert_audit_log(
         conn,
         "create",
-        "application",
+        "service",
         &id,
         Some(&row.name),
         Some("import create"),
@@ -545,7 +545,7 @@ fn execute_import_rows_inner(
                     row_error = Some("存在冲突且策略为 block".to_string());
                     failed_count += 1;
                 }
-                ExecutionStrategy::Overwrite => match persist_application(conn, row, true) {
+                ExecutionStrategy::Overwrite => match persist_service(conn, row, true) {
                     Ok(true) => {
                         row_status = "updated";
                         updated_count += 1;
@@ -562,7 +562,7 @@ fn execute_import_rows_inner(
                 },
             }
         } else {
-            match persist_application(conn, row, false) {
+            match persist_service(conn, row, false) {
                 Ok(true) => {
                     row_status = "updated";
                     updated_count += 1;
@@ -862,11 +862,11 @@ pub fn get_import_job_detail(pool: State<DbPool>, job_id: String) -> AppResult<I
 mod tests {
     use super::*;
     use crate::models::common::QueryParams;
-    use crate::test_helpers::{insert_test_application, setup_test_db};
+    use crate::test_helpers::{insert_test_service, setup_test_db};
 
     fn make_app_row(name: &str) -> ImportDraftRow {
         ImportDraftRow {
-            resource_type: "application".to_string(),
+            resource_type: "service".to_string(),
             name: Some(name.to_string()),
             env: Some("prod".to_string()),
             item_type: Some("backend".to_string()),
@@ -880,7 +880,7 @@ mod tests {
 
     fn make_app_row_with_type(name: &str, app_type: &str) -> ImportDraftRow {
         ImportDraftRow {
-            resource_type: "application".to_string(),
+            resource_type: "service".to_string(),
             name: Some(name.to_string()),
             env: Some("prod".to_string()),
             item_type: Some(app_type.to_string()),
@@ -895,7 +895,7 @@ mod tests {
     #[test]
     fn preview_import_rows_should_detect_existing_conflict() {
         let conn = setup_test_db();
-        insert_test_application(&conn, "app-1", "orders-api", "prod");
+        insert_test_service(&conn, "app-1", "orders-api", "prod", "");
 
         let preview = preview_import_rows_inner(
             "test",
@@ -913,7 +913,7 @@ mod tests {
     #[test]
     fn preview_import_rows_should_not_conflict_when_type_is_different() {
         let conn = setup_test_db();
-        insert_test_application(&conn, "app-1", "orders-api", "prod");
+        insert_test_service(&conn, "app-1", "orders-api", "prod", "");
 
         let preview = preview_import_rows_inner(
             "test",
@@ -931,7 +931,7 @@ mod tests {
     #[test]
     fn execute_import_rows_should_skip_conflict_by_default() {
         let conn = setup_test_db();
-        insert_test_application(&conn, "app-1", "orders-api", "prod");
+        insert_test_service(&conn, "app-1", "orders-api", "prod", "");
 
         let result = execute_import_rows_inner(
             "test",
@@ -967,7 +967,7 @@ mod tests {
 
         let count: i64 = conn
             .query_row(
-                "SELECT COUNT(*) FROM applications WHERE name='billing-api' AND env='prod' AND is_deleted=0",
+                "SELECT COUNT(*) FROM services WHERE name='billing-api' AND env='prod' AND is_deleted=0",
                 [],
                 |row| row.get(0),
             )

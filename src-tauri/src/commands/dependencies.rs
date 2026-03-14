@@ -94,7 +94,7 @@ fn validate_replace_item(command: &str, item: &ReplaceCallRelationItem) -> AppRe
     validate_required(&item.peer_id, "peer_id").map_err(|e| AppError::validation(command, e))?;
     validate_enum(
         &item.peer_type,
-        &["application", "middleware", "nginx"],
+        &["service", "middleware", "nginx"],
         "peer_type",
     )
     .map_err(|e| AppError::validation(command, e))?;
@@ -184,8 +184,8 @@ fn resource_exists(
     resource_id: &str,
 ) -> Result<bool, rusqlite::Error> {
     let count: i64 = match resource_type {
-        "application" => conn.query_row(
-            "SELECT COUNT(*) FROM applications WHERE id = ?1 AND is_deleted = 0",
+        "service" => conn.query_row(
+            "SELECT COUNT(*) FROM services WHERE id = ?1 AND is_deleted = 0",
             rusqlite::params![resource_id],
             |row| row.get(0),
         )?,
@@ -300,7 +300,7 @@ fn replace_resource_call_relations_inner(
         .map_err(|e| AppError::validation(command, e))?;
     validate_enum(
         &params.resource_type,
-        &["application", "middleware", "nginx"],
+        &["service", "middleware", "nginx"],
         "resource_type",
     )
     .map_err(|e| AppError::validation(command, e))?;
@@ -462,15 +462,15 @@ mod tests {
         ReplaceResourceCallRelationsParams,
     };
     use crate::error::AppErrorCode;
-    use crate::test_helpers::{insert_test_application, setup_test_db};
+    use crate::test_helpers::{insert_test_service, setup_test_db};
 
     fn base_params() -> ReplaceResourceCallRelationsParams {
         ReplaceResourceCallRelationsParams {
             resource_id: "app-a".into(),
-            resource_type: "application".into(),
+            resource_type: "service".into(),
             items: vec![ReplaceCallRelationItem {
                 peer_id: "app-b".into(),
-                peer_type: "application".into(),
+                peer_type: "service".into(),
                 direction: "upstream".into(),
                 relation_type: "http_call".into(),
                 description: Some("A calls B".into()),
@@ -481,8 +481,8 @@ mod tests {
     #[test]
     fn replace_resource_call_relations_should_create_bidirectional_rows() {
         let conn = setup_test_db();
-        insert_test_application(&conn, "app-a", "App-A", "prod");
-        insert_test_application(&conn, "app-b", "App-B", "prod");
+        insert_test_service(&conn, "app-a", "App-A", "prod", "");
+        insert_test_service(&conn, "app-b", "App-B", "prod", "");
 
         let result = replace_resource_call_relations_inner("test", &conn, base_params())
             .expect("replace call relations should succeed");
@@ -508,9 +508,9 @@ mod tests {
     #[test]
     fn replace_resource_call_relations_should_replace_existing_pairs_for_owner() {
         let conn = setup_test_db();
-        insert_test_application(&conn, "app-a", "App-A", "prod");
-        insert_test_application(&conn, "app-b", "App-B", "prod");
-        insert_test_application(&conn, "app-c", "App-C", "prod");
+        insert_test_service(&conn, "app-a", "App-A", "prod", "");
+        insert_test_service(&conn, "app-b", "App-B", "prod", "");
+        insert_test_service(&conn, "app-c", "App-C", "prod", "");
 
         replace_resource_call_relations_inner("test", &conn, base_params())
             .expect("seed first relations");
@@ -520,10 +520,10 @@ mod tests {
             &conn,
             ReplaceResourceCallRelationsParams {
                 resource_id: "app-a".into(),
-                resource_type: "application".into(),
+                resource_type: "service".into(),
                 items: vec![ReplaceCallRelationItem {
                     peer_id: "app-c".into(),
-                    peer_type: "application".into(),
+                    peer_type: "service".into(),
                     direction: "downstream".into(),
                     relation_type: "tcp".into(),
                     description: None,
@@ -559,26 +559,26 @@ mod tests {
     #[test]
     fn replace_resource_call_relations_should_allow_multiple_relation_types_between_same_pair() {
         let conn = setup_test_db();
-        insert_test_application(&conn, "app-a", "App-A", "prod");
-        insert_test_application(&conn, "app-b", "App-B", "prod");
+        insert_test_service(&conn, "app-a", "App-A", "prod", "");
+        insert_test_service(&conn, "app-b", "App-B", "prod", "");
 
         let result = replace_resource_call_relations_inner(
             "test",
             &conn,
             ReplaceResourceCallRelationsParams {
                 resource_id: "app-a".into(),
-                resource_type: "application".into(),
+                resource_type: "service".into(),
                 items: vec![
                     ReplaceCallRelationItem {
                         peer_id: "app-b".into(),
-                        peer_type: "application".into(),
+                        peer_type: "service".into(),
                         direction: "upstream".into(),
                         relation_type: "http_call".into(),
                         description: None,
                     },
                     ReplaceCallRelationItem {
                         peer_id: "app-b".into(),
-                        peer_type: "application".into(),
+                        peer_type: "service".into(),
                         direction: "upstream".into(),
                         relation_type: "grpc_call".into(),
                         description: None,
@@ -604,26 +604,26 @@ mod tests {
     #[test]
     fn replace_resource_call_relations_should_deduplicate_duplicate_rows() {
         let conn = setup_test_db();
-        insert_test_application(&conn, "app-a", "App-A", "prod");
-        insert_test_application(&conn, "app-b", "App-B", "prod");
+        insert_test_service(&conn, "app-a", "App-A", "prod", "");
+        insert_test_service(&conn, "app-b", "App-B", "prod", "");
 
         let result = replace_resource_call_relations_inner(
             "test",
             &conn,
             ReplaceResourceCallRelationsParams {
                 resource_id: "app-a".into(),
-                resource_type: "application".into(),
+                resource_type: "service".into(),
                 items: vec![
                     ReplaceCallRelationItem {
                         peer_id: "app-b".into(),
-                        peer_type: "application".into(),
+                        peer_type: "service".into(),
                         direction: "upstream".into(),
                         relation_type: "http_call".into(),
                         description: None,
                     },
                     ReplaceCallRelationItem {
                         peer_id: "app-b".into(),
-                        peer_type: "application".into(),
+                        peer_type: "service".into(),
                         direction: "upstream".into(),
                         relation_type: "http_call".into(),
                         description: Some("dup".into()),
@@ -640,7 +640,7 @@ mod tests {
     #[test]
     fn replace_resource_call_relations_should_reject_missing_owner_resource() {
         let conn = setup_test_db();
-        insert_test_application(&conn, "app-b", "App-B", "prod");
+        insert_test_service(&conn, "app-b", "App-B", "prod", "");
 
         let err = replace_resource_call_relations_inner("test", &conn, base_params())
             .expect_err("missing owner resource should fail");
@@ -650,7 +650,7 @@ mod tests {
     #[test]
     fn replace_resource_call_relations_should_reject_missing_peer_resource() {
         let conn = setup_test_db();
-        insert_test_application(&conn, "app-a", "App-A", "prod");
+        insert_test_service(&conn, "app-a", "App-A", "prod", "");
 
         let err = replace_resource_call_relations_inner("test", &conn, base_params())
             .expect_err("missing peer resource should fail");

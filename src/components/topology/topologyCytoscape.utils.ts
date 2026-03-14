@@ -54,7 +54,7 @@ function getNodeSize(node: TopologyNode, isLargeGraph: boolean): number {
 function getNodeLabelFontSize(node: TopologyNode, isLargeGraph: boolean): number {
   if (isLargeGraph) return 9;
   if (node.groupKind === "nginx") return 12;
-  return node.groupKind === "application_service" ? 11 : 10;
+  return node.groupKind === "service" ? 11 : 10;
 }
 
 function getExtraString(node: TopologyNode | undefined, key: string): string | undefined {
@@ -143,7 +143,7 @@ export function buildTopologyCyElements(
     const customIconSrc = customIconKey ? resolveIconDataUri(customIconKey) : undefined;
 
     const appIcon =
-      node.nodeType === "application" ? resolveApplicationNodeIcon(appType, customIconKey) : null;
+      node.nodeType === "service" ? resolveApplicationNodeIcon(appType, customIconKey) : null;
     const middlewareIcon =
       node.nodeType === "middleware" ? resolveMiddlewareNodeIcon(node.extra) : null;
     const resolvedIcon = appIcon || middlewareIcon;
@@ -172,8 +172,7 @@ export function buildTopologyCyElements(
         isExternal: isExternal,
         externalRefId: node.externalRefId || node.extra?.externalRefId,
         extra: node.extra,
-        app_type_key:
-          node.nodeType === "application" ? resolveApplicationTypeKey(appType) : undefined,
+        app_type_key: node.nodeType === "service" ? resolveApplicationTypeKey(appType) : undefined,
         icon_key: resolvedIcon?.iconKey || customIconKey,
         icon_src: resolvedIcon?.src || customIconSrc,
         icon_alt: resolvedIcon?.alt || (node.nodeType === "nginx" ? "Nginx" : node.name),
@@ -196,7 +195,7 @@ export function buildTopologyCyElements(
     const sourceNode = nodeById.get(edge.source);
     const sourceNodeType = sourceNode?.nodeType || "";
     const sourceAppType =
-      sourceNodeType === "application"
+      sourceNodeType === "service"
         ? resolveApplicationTypeKey(getExtraString(sourceNode, "type"))
         : undefined;
 

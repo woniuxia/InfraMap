@@ -27,7 +27,7 @@ const emit = defineEmits<{
 }>();
 
 const NODE_KIND_LABELS: Record<TopologyGroupKind, string> = {
-  application_service: "应用服务",
+  service: "服务",
   middleware: "中间件",
   nginx: "Nginx",
 };
@@ -42,7 +42,7 @@ const EDGE_LABELS: Record<TopologyEdgeType, string> = {
   cache_access: "缓存访问",
 };
 
-const NODE_KIND_ORDER: TopologyGroupKind[] = ["application_service", "middleware", "nginx"];
+const NODE_KIND_ORDER: TopologyGroupKind[] = ["service", "middleware", "nginx"];
 const EDGE_KIND_ORDER: TopologyEdgeType[] = [
   "http_call",
   "tcp",
@@ -77,8 +77,8 @@ const externalNodeCount = computed(() => props.stats?.externalNodeCount ?? 0);
 const crossEnvEdgeCount = computed(() => props.stats?.crossEnvEdgeCount ?? 0);
 
 function normalizeNodeKind(kind: string): TopologyGroupKind | null {
-  if (kind === "application") return "application_service";
-  if (kind === "application_service" || kind === "middleware" || kind === "nginx") return kind;
+  if (kind === "service") return "service";
+  if (kind === "service" || kind === "middleware" || kind === "nginx") return kind;
   return null;
 }
 

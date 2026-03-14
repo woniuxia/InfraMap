@@ -150,7 +150,7 @@ pub fn preview_restore(
 
     Ok(DbPreviewSummary {
         hosts: count("hosts"),
-        applications: count("applications"),
+        services: count("services"),
         middlewares: count("middlewares"),
         nginx_configs: count("nginx_configs"),
         deployments: count("deployments"),
@@ -226,7 +226,7 @@ pub fn export_json(pool: State<DbPool>, filepath: String) -> AppResult<()> {
 
     let tables = [
         "hosts",
-        "applications",
+        "services",
         "middlewares",
         "nginx_configs",
         "deployments",
@@ -241,10 +241,10 @@ pub fn export_json(pool: State<DbPool>, filepath: String) -> AppResult<()> {
     }
 
     let hosts = table_data.remove(0);
-    let mut applications = table_data.remove(0);
-    let owner_map = load_application_owner_map(&conn)
-        .map_err(|e| AppError::from_backup_error(command, "load application owner terms", e))?;
-    attach_application_owners(&mut applications, &owner_map);
+    let mut services = table_data.remove(0);
+    let owner_map = load_service_owner_map(&conn)
+        .map_err(|e| AppError::from_backup_error(command, "load service owner terms", e))?;
+    attach_service_owners(&mut services, &owner_map);
 
     let export = ExportData {
         metadata: ExportMetadata {
@@ -254,7 +254,7 @@ pub fn export_json(pool: State<DbPool>, filepath: String) -> AppResult<()> {
         },
         data: ExportPayload {
             hosts,
-            applications,
+            services,
             middlewares: table_data.remove(0),
             nginx_configs: table_data.remove(0),
             deployments: table_data.remove(0),
@@ -306,7 +306,7 @@ pub fn import_json(
             "deployments",
             "nginx_configs",
             "middlewares",
-            "applications",
+            "services",
             "hosts",
             "audit_logs",
         ];
@@ -319,18 +319,18 @@ pub fn import_json(
         let hosts_count = import_table_rows(&conn, "hosts", &export.data.hosts)
             .map_err(|e| AppError::from_backup_error(command, "import hosts", e))?;
         conn.execute(
-            "DELETE FROM taxonomy_bindings WHERE resource_type = 'application'",
+            "DELETE FROM taxonomy_bindings WHERE resource_type = 'service'",
             [],
         )
-        .map_err(|e| AppError::from_db_error(command, "clear application taxonomy bindings", e))?;
-        let (application_rows, application_terms) =
-            split_application_rows_for_import(&export.data.applications).map_err(|e| {
-                AppError::from_backup_error(command, "parse applications import payload", e)
+        .map_err(|e| AppError::from_db_error(command, "clear service taxonomy bindings", e))?;
+        let (service_rows, service_terms) =
+            split_service_rows_for_import(&export.data.services).map_err(|e| {
+                AppError::from_backup_error(command, "parse services import payload", e)
             })?;
-        let apps_count = import_table_rows(&conn, "applications", &application_rows)
-            .map_err(|e| AppError::from_backup_error(command, "import applications", e))?;
-        sync_imported_application_terms(&conn, &application_terms).map_err(|e| {
-            AppError::from_backup_error(command, "sync application taxonomy terms", e)
+        let apps_count = import_table_rows(&conn, "services", &service_rows)
+            .map_err(|e| AppError::from_backup_error(command, "import services", e))?;
+        sync_imported_service_terms(&conn, &service_terms).map_err(|e| {
+            AppError::from_backup_error(command, "sync service taxonomy terms", e)
         })?;
         let mw_count = import_table_rows(&conn, "middlewares", &export.data.middlewares)
             .map_err(|e| AppError::from_backup_error(command, "import middlewares", e))?;
@@ -346,7 +346,7 @@ pub fn import_json(
 
         Ok(ImportResult {
             hosts_imported: hosts_count,
-            applications_imported: apps_count,
+            services_imported: apps_count,
             middlewares_imported: mw_count,
             nginx_configs_imported: nginx_count,
             deployments_imported: dep_count,
@@ -449,7 +449,7 @@ fn read_table_rows(
     Ok(result)
 }
 
-fn load_application_owner_map(
+fn load_service_owner_map(
     conn: &rusqlite::Connection,
 ) -> Result<HashMap<String, Vec<String>>, String> {
     let mut stmt = conn
@@ -459,31 +459,31 @@ fn load_application_owner_map(
              JOIN taxonomy_terms tt ON tt.id = tb.term_id
              WHERE tb.is_deleted = 0
                AND tt.is_deleted = 0
-               AND tb.resource_type = 'application'
+               AND tb.resource_type = 'service'
                AND tt.field_key = 'owner'
              ORDER BY tb.resource_id ASC, tt.display_name ASC",
         )
-        .map_err(|e| format!("Prepare failed for application owners: {}", e))?;
+        .map_err(|e| format!("Prepare failed for service owners: {}", e))?;
 
     let rows = stmt
         .query_map([], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
         })
-        .map_err(|e| format!("Query failed for application owners: {}", e))?;
+        .map_err(|e| format!("Query failed for service owners: {}", e))?;
 
     let mut owner_map: HashMap<String, Vec<String>> = HashMap::new();
     for row in rows {
-        let (application_id, owner_name) =
-            row.map_err(|e| format!("Row read error in application owners: {}", e))?;
+        let (service_id, owner_name) =
+            row.map_err(|e| format!("Row read error in service owners: {}", e))?;
         owner_map
-            .entry(application_id)
+            .entry(service_id)
             .or_default()
             .push(owner_name);
     }
     Ok(owner_map)
 }
 
-fn attach_application_owners(
+fn attach_service_owners(
     rows: &mut [serde_json::Value],
     owner_map: &HashMap<String, Vec<String>>,
 ) {
@@ -491,11 +491,11 @@ fn attach_application_owners(
         let Some(object) = row.as_object_mut() else {
             continue;
         };
-        let Some(application_id) = object.get("id").and_then(|value| value.as_str()) else {
+        let Some(service_id) = object.get("id").and_then(|value| value.as_str()) else {
             continue;
         };
         let owners = owner_map
-            .get(application_id)
+            .get(service_id)
             .cloned()
             .unwrap_or_default()
             .into_iter()
@@ -506,15 +506,15 @@ fn attach_application_owners(
 }
 
 #[derive(Debug, Default)]
-struct ImportedApplicationTermSync {
+struct ImportedServiceTermSync {
     id: String,
     owners: Vec<String>,
     tech_stack_terms: Vec<String>,
 }
 
-fn split_application_rows_for_import(
+fn split_service_rows_for_import(
     rows: &[serde_json::Value],
-) -> Result<(Vec<serde_json::Value>, Vec<ImportedApplicationTermSync>), String> {
+) -> Result<(Vec<serde_json::Value>, Vec<ImportedServiceTermSync>), String> {
     let mut stripped_rows = Vec::with_capacity(rows.len());
     let mut term_sync = Vec::with_capacity(rows.len());
 
@@ -522,11 +522,11 @@ fn split_application_rows_for_import(
         let object = row
             .as_object()
             .cloned()
-            .ok_or_else(|| "Invalid row data in applications".to_string())?;
-        let application_id = object
+            .ok_or_else(|| "Invalid row data in services".to_string())?;
+        let service_id = object
             .get("id")
             .and_then(|value| value.as_str())
-            .ok_or_else(|| "Missing id in applications import row".to_string())?
+            .ok_or_else(|| "Missing id in services import row".to_string())?
             .to_string();
         let owners = normalize_owner_names(object.get("owners").cloned());
         let tech_stack_terms = object
@@ -536,8 +536,8 @@ fn split_application_rows_for_import(
             .unwrap_or_default();
 
         stripped_rows.push(serde_json::Value::Object(object));
-        term_sync.push(ImportedApplicationTermSync {
-            id: application_id,
+        term_sync.push(ImportedServiceTermSync {
+            id: service_id,
             owners,
             tech_stack_terms,
         });
@@ -568,30 +568,30 @@ fn normalize_owner_names(value: Option<serde_json::Value>) -> Vec<String> {
     owners
 }
 
-fn sync_imported_application_terms(
+fn sync_imported_service_terms(
     conn: &rusqlite::Connection,
-    items: &[ImportedApplicationTermSync],
+    items: &[ImportedServiceTermSync],
 ) -> Result<(), String> {
     let now = chrono::Utc::now().to_rfc3339();
     for item in items {
         save_resource_terms(
             conn,
-            "application",
+            "service",
             &item.id,
             FIELD_OWNER,
             &item.owners,
             &now,
         )
-        .map_err(|e| format!("Sync application owners failed: {}", e))?;
+        .map_err(|e| format!("Sync service owners failed: {}", e))?;
         save_resource_terms(
             conn,
-            "application",
+            "service",
             &item.id,
             FIELD_TECH_STACK,
             &item.tech_stack_terms,
             &now,
         )
-        .map_err(|e| format!("Sync application tech stacks failed: {}", e))?;
+        .map_err(|e| format!("Sync service tech stacks failed: {}", e))?;
     }
     Ok(())
 }

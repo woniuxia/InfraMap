@@ -71,14 +71,24 @@ pub fn insert_test_host(conn: &Connection, id: &str, hostname: &str, ip: &str) {
     .unwrap_or_else(|e| panic!("insert_test_host binding insert failed: {}", e));
 }
 
-pub fn insert_test_application(conn: &Connection, id: &str, name: &str, env: &str) {
+pub fn insert_test_system(conn: &Connection, id: &str, name: &str, env: &str) {
     let now = chrono::Utc::now().to_rfc3339();
     conn.execute(
-        "INSERT INTO applications (id, name, type, env, status, is_deleted, created_at, updated_at)
-         VALUES (?1, ?2, 'backend', ?3, 'running', 0, ?4, ?5)",
+        "INSERT INTO systems (id, name, code, description, env, status, is_deleted, created_at, updated_at)
+         VALUES (?1, ?2, NULL, NULL, ?3, 'active', 0, ?4, ?5)",
         rusqlite::params![id, name, env, now, now],
     )
-    .unwrap_or_else(|e| panic!("insert_test_application failed: {}", e));
+    .unwrap_or_else(|e| panic!("insert_test_system failed: {}", e));
+}
+
+pub fn insert_test_service(conn: &Connection, id: &str, name: &str, env: &str, system_id: &str) {
+    let now = chrono::Utc::now().to_rfc3339();
+    conn.execute(
+        "INSERT INTO services (id, name, type, env, system_id, status, is_deleted, created_at, updated_at)
+         VALUES (?1, ?2, 'backend', ?3, ?4, 'running', 0, ?5, ?6)",
+        rusqlite::params![id, name, env, system_id, now, now],
+    )
+    .unwrap_or_else(|e| panic!("insert_test_service failed: {}", e));
 }
 
 pub fn insert_test_middleware(conn: &Connection, id: &str, name: &str, category: &str) {

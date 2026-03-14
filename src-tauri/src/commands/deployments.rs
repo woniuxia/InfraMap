@@ -109,9 +109,9 @@ fn query_resource_address_env(
     resource_id: &str,
 ) -> AppResult<(Option<String>, Option<String>)> {
     match resource_type {
-        "application" => conn
+        "service" => conn
             .query_row(
-                "SELECT address, env FROM applications WHERE id = ?1 AND is_deleted = 0",
+                "SELECT address, env FROM services WHERE id = ?1 AND is_deleted = 0",
                 rusqlite::params![resource_id],
                 |row| {
                     Ok((
@@ -120,7 +120,7 @@ fn query_resource_address_env(
                     ))
                 },
             )
-            .map_err(|e| AppError::not_found(command, "应用不存在或已删除。", Some(e.to_string()))),
+            .map_err(|e| AppError::not_found(command, "服务不存在或已删除。", Some(e.to_string()))),
         "middleware" => conn
             .query_row(
                 "SELECT address, env FROM middlewares WHERE id = ?1 AND is_deleted = 0",
@@ -161,7 +161,7 @@ fn query_resource_address_env(
         _ => Err(AppError::validation(
             command,
             format!(
-                "resource_type must be one of application/middleware/nginx, got {}",
+                "resource_type must be one of service/middleware/nginx, got {}",
                 resource_type
             ),
         )),
@@ -249,8 +249,8 @@ fn deployment_resource_exists(
     resource_id: &str,
 ) -> Result<bool, rusqlite::Error> {
     let count: i64 = match resource_type {
-        "application" => conn.query_row(
-            "SELECT COUNT(*) FROM applications WHERE id = ?1 AND is_deleted = 0",
+        "service" => conn.query_row(
+            "SELECT COUNT(*) FROM services WHERE id = ?1 AND is_deleted = 0",
             rusqlite::params![resource_id],
             |row| row.get(0),
         )?,
@@ -441,7 +441,7 @@ mod tests {
     use crate::error::AppErrorCode;
     use crate::models::deployment::Deployment;
     use crate::test_helpers::{
-        insert_test_application, insert_test_host, insert_test_middleware,
+        insert_test_service, insert_test_host, insert_test_middleware,
         insert_test_nginx_config, setup_test_db,
     };
 
@@ -534,17 +534,17 @@ mod tests {
     }
 
     #[test]
-    fn build_resource_deploy_context_should_allow_non_ip_application_address() {
+    fn build_resource_deploy_context_should_allow_non_ip_service_address() {
         let conn = setup_test_db();
-        insert_test_application(&conn, "app1", "payment", "prod");
+        insert_test_service(&conn, "app1", "payment", "prod", "");
         conn.execute(
-            "UPDATE applications SET address = 'https://api.example.com' WHERE id = 'app1'",
+            "UPDATE services SET address = 'https://api.example.com' WHERE id = 'app1'",
             [],
         )
         .expect("update app address");
 
         let context =
-            build_resource_deploy_context("test", &conn, "application", "app1", None, None)
+            build_resource_deploy_context("test", &conn, "service", "app1", None, None)
                 .expect("build context");
         assert_eq!(context.address.as_deref(), Some("https://api.example.com"));
         assert_eq!(context.parsed_ip, None);
@@ -670,12 +670,12 @@ mod tests {
     #[test]
     fn save_deployment_inner_should_reject_missing_host() {
         let conn = setup_test_db();
-        insert_test_application(&conn, "app-1", "payment", "prod");
+        insert_test_service(&conn, "app-1", "payment", "prod", "");
 
         let err = save_deployment_inner(
             "test",
             &conn,
-            make_deployment("app-1", "application", "host-missing"),
+            make_deployment("app-1", "service", "host-missing"),
         )
         .expect_err("missing host should fail");
         assert_eq!(err.code, AppErrorCode::NotFound);
@@ -689,7 +689,7 @@ mod tests {
         let err = save_deployment_inner(
             "test",
             &conn,
-            make_deployment("app-missing", "application", "host-1"),
+            make_deployment("app-missing", "service", "host-1"),
         )
         .expect_err("missing resource should fail");
         assert_eq!(err.code, AppErrorCode::NotFound);

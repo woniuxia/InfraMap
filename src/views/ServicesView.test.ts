@@ -2,8 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { defineComponent, h, inject, provide } from "vue";
 import { flushPromises, mount } from "@vue/test-utils";
 import { createPinia } from "pinia";
-import ApplicationsView from "@/views/ApplicationsView.vue";
-import { listApplications } from "@/api/applications";
+import ServicesView from "@/views/ServicesView.vue";
+import { listServices } from "@/api/services";
 
 const editorState = vi.hoisted(() => ({
   visible: false,
@@ -11,11 +11,13 @@ const editorState = vi.hoisted(() => ({
   initialDraft: {} as Record<string, unknown>,
 }));
 
-vi.mock("@/api/applications", () => ({
-  listApplications: vi.fn(async () => ({
+vi.mock("@/api/services", () => ({
+  listServices: vi.fn(async () => ({
     data: [
       {
-        id: "app-1",
+        id: "svc-1",
+        system_id: "sys-1",
+        system_name: "订单系统",
         name: "订单服务",
         type: "backend",
         address: "10.0.0.11",
@@ -30,7 +32,7 @@ vi.mock("@/api/applications", () => ({
     page: 1,
     page_size: 20,
   })),
-  deleteApplication: vi.fn(async () => undefined),
+  deleteService: vi.fn(async () => undefined),
 }));
 
 const tableDataKey = Symbol("tableDataKey");
@@ -85,8 +87,8 @@ const ElTableColumnStub = defineComponent({
   },
 });
 
-const ApplicationEditorDialogStub = defineComponent({
-  name: "ApplicationEditorDialog",
+const ServiceEditorDialogStub = defineComponent({
+  name: "ServiceEditorDialog",
   props: {
     modelValue: {
       type: Boolean,
@@ -107,12 +109,12 @@ const ApplicationEditorDialogStub = defineComponent({
       editorState.visible = props.modelValue;
       editorState.mode = props.mode;
       editorState.initialDraft = props.initialDraft as Record<string, unknown>;
-      return h("div", { "data-testid": "application-editor-dialog" }, [
+      return h("div", { "data-testid": "service-editor-dialog" }, [
         h(
           "button",
           {
             "data-testid": "emit-editor-saved",
-            onClick: () => emit("saved", { id: "app-1", mode: props.mode }),
+            onClick: () => emit("saved", { id: "svc-1", mode: props.mode }),
           },
           "emit-editor-saved",
         ),
@@ -126,7 +128,7 @@ const PassThroughStub = defineComponent({
 });
 
 function mountView() {
-  return mount(ApplicationsView, {
+  return mount(ServicesView, {
     global: {
       plugins: [createPinia()],
       stubs: {
@@ -136,7 +138,7 @@ function mountView() {
         ElTableColumn: ElTableColumnStub,
         ElTag: PassThroughStub,
         ElPagination: PassThroughStub,
-        ApplicationEditorDialog: ApplicationEditorDialogStub,
+        ServiceEditorDialog: ServiceEditorDialogStub,
       },
       directives: {
         loading: () => undefined,
@@ -149,7 +151,7 @@ function findButtonByText(wrapper: ReturnType<typeof mount>, text: string) {
   return wrapper.findAll("button").find((item) => item.text().trim() === text);
 }
 
-describe("ApplicationsView", () => {
+describe("ServicesView", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     editorState.visible = false;
@@ -161,14 +163,13 @@ describe("ApplicationsView", () => {
     const wrapper = mountView();
     await flushPromises();
 
-    const addButton = findButtonByText(wrapper, "新增应用");
+    const addButton = findButtonByText(wrapper, "新增服务");
     expect(addButton).toBeDefined();
     await addButton!.trigger("click");
 
     expect(editorState.visible).toBe(true);
     expect(editorState.mode).toBe("create");
-    expect(String(editorState.initialDraft.id || "")).toMatch(/^app-/);
-    expect(editorState.initialDraft.env).toBe("prod");
+    expect(String(editorState.initialDraft.id || "")).toMatch(/^svc-/);
   });
 
   it("opens edit editor when clicking edit button", async () => {
@@ -181,14 +182,16 @@ describe("ApplicationsView", () => {
 
     expect(editorState.visible).toBe(true);
     expect(editorState.mode).toBe("edit");
-    expect(editorState.initialDraft.id).toBe("app-1");
+    expect(editorState.initialDraft.id).toBe("svc-1");
   });
 
   it("does not render owner tags when owners are missing", async () => {
-    vi.mocked(listApplications).mockResolvedValueOnce({
+    vi.mocked(listServices).mockResolvedValueOnce({
       data: [
         {
-          id: "app-empty-owners",
+          id: "svc-empty-owners",
+          system_id: "sys-1",
+          system_name: "系统",
           name: "empty-owners-app",
           type: "backend",
           env: "prod",
@@ -209,10 +212,12 @@ describe("ApplicationsView", () => {
   });
 
   it("opens edit editor with owners preserved", async () => {
-    vi.mocked(listApplications).mockResolvedValueOnce({
+    vi.mocked(listServices).mockResolvedValueOnce({
       data: [
         {
-          id: "app-edit-owners",
+          id: "svc-edit-owners",
+          system_id: "sys-1",
+          system_name: "系统",
           name: "edit-owners-app",
           type: "backend",
           env: "prod",
@@ -248,21 +253,21 @@ describe("ApplicationsView", () => {
 
     expect(editorState.visible).toBe(true);
     expect(editorState.mode).toBe("copy");
-    expect(editorState.initialDraft.id).not.toBe("app-1");
+    expect(editorState.initialDraft.id).not.toBe("svc-1");
     expect(String(editorState.initialDraft.name || "")).toContain("副本 ");
   });
 
   it("refreshes list after editor emits saved", async () => {
     const wrapper = mountView();
     await flushPromises();
-    expect(vi.mocked(listApplications)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(listServices)).toHaveBeenCalledTimes(1);
 
-    const addButton = findButtonByText(wrapper, "新增应用");
+    const addButton = findButtonByText(wrapper, "新增服务");
     expect(addButton).toBeDefined();
     await addButton!.trigger("click");
     await wrapper.get('[data-testid="emit-editor-saved"]').trigger("click");
     await flushPromises();
 
-    expect(vi.mocked(listApplications)).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(listServices)).toHaveBeenCalledTimes(2);
   });
 });

@@ -11,12 +11,12 @@ use crate::db::crud::{
 use crate::db::transaction::with_transaction;
 use crate::db::{get_conn, DbPool};
 use crate::error::{AppError, AppResult};
-use crate::models::application::Application;
+use crate::models::service::Service;
 use crate::models::common::{PagedResult, QueryParams};
-use crate::validation::validate_application;
+use crate::validation::validate_service;
 
-fn row_to_application(row: &rusqlite::Row) -> rusqlite::Result<Application> {
-    Ok(Application {
+fn row_to_service(row: &rusqlite::Row) -> rusqlite::Result<Service> {
+    Ok(Service {
         id: row.get(0)?,
         name: row.get(1)?,
         app_type: row.get(2)?,
@@ -28,8 +28,8 @@ fn row_to_application(row: &rusqlite::Row) -> rusqlite::Result<Application> {
         git_repo: row.get(8)?,
         owner_contact_ids: Some(Vec::new()),
         owners: Some(Vec::new()),
-        business_application_id: row.get(9)?,
-        business_application_name: row.get(10)?,
+        system_id: row.get(9)?,
+        system_name: row.get(10)?,
         status: row.get(11)?,
         description: row.get(12)?,
         created_at: row.get(13)?,
@@ -38,8 +38,8 @@ fn row_to_application(row: &rusqlite::Row) -> rusqlite::Result<Application> {
 }
 
 const SELECT_COLUMNS: &str = "id, name, type, address, port, tech_stack, deploy_mode, \
-     env, git_repo, business_application_id, \
-     (SELECT ba.name FROM business_applications ba WHERE ba.id = applications.business_application_id AND ba.is_deleted = 0) AS business_application_name, \
+     env, git_repo, system_id, \
+     (SELECT s.name FROM systems s WHERE s.id = services.system_id AND s.is_deleted = 0) AS system_name, \
      status, description, created_at, updated_at";
 
 #[cfg(test)]
@@ -103,25 +103,25 @@ fn normalize_owner_contact_ids(owner_contact_ids: Option<Vec<String>>) -> Vec<St
 
 fn load_owner_contacts_map(
     conn: &rusqlite::Connection,
-    app_ids: &[String],
+    svc_ids: &[String],
 ) -> Result<HashMap<String, Vec<(String, String)>>, rusqlite::Error> {
-    if app_ids.is_empty() {
+    if svc_ids.is_empty() {
         return Ok(HashMap::new());
     }
 
-    let placeholders = vec!["?"; app_ids.len()].join(", ");
+    let placeholders = vec!["?"; svc_ids.len()].join(", ");
     let sql = format!(
-        "SELECT aoc.application_id, c.id, c.name
-         FROM application_owner_contacts aoc
-         JOIN contacts c ON c.id = aoc.contact_id
-         WHERE aoc.is_deleted = 0
+        "SELECT soc.service_id, c.id, c.name
+         FROM service_owner_contacts soc
+         JOIN contacts c ON c.id = soc.contact_id
+         WHERE soc.is_deleted = 0
            AND c.is_deleted = 0
-           AND aoc.application_id IN ({})
+           AND soc.service_id IN ({})
          ORDER BY c.name COLLATE NOCASE ASC, c.id ASC",
         placeholders
     );
 
-    let param_refs: Vec<&dyn rusqlite::types::ToSql> = app_ids
+    let param_refs: Vec<&dyn rusqlite::types::ToSql> = svc_ids
         .iter()
         .map(|id| id as &dyn rusqlite::types::ToSql)
         .collect();
@@ -136,8 +136,8 @@ fn load_owner_contacts_map(
 
     let mut map: HashMap<String, Vec<(String, String)>> = HashMap::new();
     for row in rows {
-        let (app_id, contact_id, contact_name) = row?;
-        map.entry(app_id)
+        let (svc_id, contact_id, contact_name) = row?;
+        map.entry(svc_id)
             .or_default()
             .push((contact_id, contact_name));
     }
@@ -146,55 +146,55 @@ fn load_owner_contacts_map(
 }
 
 fn merge_owner_fields(
-    app: &mut Application,
+    svc: &mut Service,
     owner_map: &HashMap<String, Vec<(String, String)>>,
 ) {
-    if let Some(items) = owner_map.get(&app.id) {
-        app.owner_contact_ids = Some(items.iter().map(|(id, _)| id.clone()).collect());
-        app.owners = Some(items.iter().map(|(_, name)| name.clone()).collect());
+    if let Some(items) = owner_map.get(&svc.id) {
+        svc.owner_contact_ids = Some(items.iter().map(|(id, _)| id.clone()).collect());
+        svc.owners = Some(items.iter().map(|(_, name)| name.clone()).collect());
     } else {
-        app.owner_contact_ids = Some(Vec::new());
-        app.owners = Some(Vec::new());
+        svc.owner_contact_ids = Some(Vec::new());
+        svc.owners = Some(Vec::new());
     }
 }
 
-fn build_applications_where_clause(params: &QueryParams) -> (String, Vec<SqlParam>) {
+fn build_services_where_clause(params: &QueryParams) -> (String, Vec<SqlParam>) {
     let owner_name_search_clause = build_exists_like_clause(
-        "application_owner_contacts aoc JOIN contacts c ON c.id = aoc.contact_id",
+        "service_owner_contacts soc JOIN contacts c ON c.id = soc.contact_id",
         &[
-            "aoc.application_id = applications.id",
-            "aoc.is_deleted = 0",
+            "soc.service_id = services.id",
+            "soc.is_deleted = 0",
             "c.is_deleted = 0",
         ],
         "c.name",
     );
     let owner_phone_search_clause = build_exists_like_clause(
-        "application_owner_contacts aoc JOIN contacts c ON c.id = aoc.contact_id",
+        "service_owner_contacts soc JOIN contacts c ON c.id = soc.contact_id",
         &[
-            "aoc.application_id = applications.id",
-            "aoc.is_deleted = 0",
+            "soc.service_id = services.id",
+            "soc.is_deleted = 0",
             "c.is_deleted = 0",
         ],
         "c.phone",
     );
     let owner_email_search_clause = build_exists_like_clause(
-        "application_owner_contacts aoc JOIN contacts c ON c.id = aoc.contact_id",
+        "service_owner_contacts soc JOIN contacts c ON c.id = soc.contact_id",
         &[
-            "aoc.application_id = applications.id",
-            "aoc.is_deleted = 0",
+            "soc.service_id = services.id",
+            "soc.is_deleted = 0",
             "c.is_deleted = 0",
         ],
         "c.email",
     );
 
     let (mut where_clause, mut sql_params) = build_resource_where_clause(
-        &["applications.is_deleted = 0"],
+        &["services.is_deleted = 0"],
         params,
         &[
-            "applications.name",
-            "applications.address",
-            "applications.tech_stack",
-            "applications.git_repo",
+            "services.name",
+            "services.address",
+            "services.tech_stack",
+            "services.git_repo",
         ],
         &[
             owner_name_search_clause,
@@ -202,10 +202,10 @@ fn build_applications_where_clause(params: &QueryParams) -> (String, Vec<SqlPara
             owner_email_search_clause,
         ],
         &[
-            ("type", "applications.type"),
-            ("env", "applications.env"),
-            ("status", "applications.status"),
-            ("deploy_mode", "applications.deploy_mode"),
+            ("type", "services.type"),
+            ("env", "services.env"),
+            ("status", "services.status"),
+            ("deploy_mode", "services.deploy_mode"),
         ],
         &[],
     );
@@ -218,12 +218,12 @@ fn build_applications_where_clause(params: &QueryParams) -> (String, Vec<SqlPara
                 where_clause.push_str(&format!(
                     " AND EXISTS (
                         SELECT 1
-                        FROM application_owner_contacts aoc
-                        JOIN contacts c ON c.id = aoc.contact_id
-                        WHERE aoc.application_id = applications.id
-                          AND aoc.is_deleted = 0
+                        FROM service_owner_contacts soc
+                        JOIN contacts c ON c.id = soc.contact_id
+                        WHERE soc.service_id = services.id
+                          AND soc.is_deleted = 0
                           AND c.is_deleted = 0
-                          AND aoc.contact_id IN ({})
+                          AND soc.contact_id IN ({})
                     )",
                     placeholders
                 ));
@@ -238,19 +238,19 @@ fn build_applications_where_clause(params: &QueryParams) -> (String, Vec<SqlPara
 }
 
 #[tauri::command]
-pub fn list_applications(
+pub fn list_services(
     pool: State<DbPool>,
     params: QueryParams,
-) -> AppResult<PagedResult<Application>> {
-    let command = "list_applications";
+) -> AppResult<PagedResult<Service>> {
+    let command = "list_services";
     let conn = get_conn(pool.inner(), command)?;
 
-    let (where_clause, sql_params) = build_applications_where_clause(&params);
+    let (where_clause, sql_params) = build_services_where_clause(&params);
     let total = count_query(
         command,
-        "查询应用数量",
+        "查询服务数量",
         &conn,
-        "applications",
+        "services",
         &where_clause,
         &sql_params,
     )?;
@@ -260,7 +260,7 @@ pub fn list_applications(
     let offset = (page - 1) * page_size;
 
     let sql = format!(
-        "SELECT {} FROM applications {} ORDER BY applications.created_at DESC LIMIT ? OFFSET ?",
+        "SELECT {} FROM services {} ORDER BY services.created_at DESC LIMIT ? OFFSET ?",
         SELECT_COLUMNS, where_clause
     );
     let mut query_params = sql_params;
@@ -271,19 +271,19 @@ pub fn list_applications(
 
     let mut stmt = conn
         .prepare(&sql)
-        .map_err(|e| AppError::from_db_error(command, "查询应用列表", e))?;
+        .map_err(|e| AppError::from_db_error(command, "查询服务列表", e))?;
     let rows = stmt
-        .query_map(param_refs.as_slice(), row_to_application)
-        .map_err(|e| AppError::from_db_error(command, "读取应用列表", e))?;
-    let mut data: Vec<Application> = rows
+        .query_map(param_refs.as_slice(), row_to_service)
+        .map_err(|e| AppError::from_db_error(command, "读取服务列表", e))?;
+    let mut data: Vec<Service> = rows
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| AppError::from_db_error(command, "读取应用列表", e))?;
+        .map_err(|e| AppError::from_db_error(command, "读取服务列表", e))?;
 
-    let app_ids: Vec<String> = data.iter().map(|app| app.id.clone()).collect();
-    let owner_map = load_owner_contacts_map(&conn, &app_ids)
-        .map_err(|e| AppError::from_db_error(command, "读取应用负责人", e))?;
-    for app in &mut data {
-        merge_owner_fields(app, &owner_map);
+    let svc_ids: Vec<String> = data.iter().map(|svc| svc.id.clone()).collect();
+    let owner_map = load_owner_contacts_map(&conn, &svc_ids)
+        .map_err(|e| AppError::from_db_error(command, "读取服务负责人", e))?;
+    for svc in &mut data {
+        merge_owner_fields(svc, &owner_map);
     }
 
     Ok(PagedResult {
@@ -295,43 +295,41 @@ pub fn list_applications(
 }
 
 #[tauri::command]
-pub fn get_application(pool: State<DbPool>, id: String) -> AppResult<Application> {
-    let command = "get_application";
+pub fn get_service(pool: State<DbPool>, id: String) -> AppResult<Service> {
+    let command = "get_service";
     let conn = get_conn(pool.inner(), command)?;
 
     let sql = format!(
-        "SELECT {} FROM applications WHERE id = ?1 AND is_deleted = 0",
+        "SELECT {} FROM services WHERE id = ?1 AND is_deleted = 0",
         SELECT_COLUMNS
     );
-    let mut app = conn
-        .query_row(&sql, rusqlite::params![id], row_to_application)
-        .map_err(|e| AppError::not_found(command, "应用不存在或已删除。", Some(e.to_string())))?;
+    let mut svc = conn
+        .query_row(&sql, rusqlite::params![id], row_to_service)
+        .map_err(|e| AppError::not_found(command, "服务不存在或已删除。", Some(e.to_string())))?;
 
-    let owner_map = load_owner_contacts_map(&conn, &[app.id.clone()])
-        .map_err(|e| AppError::from_db_error(command, "读取应用负责人", e))?;
-    merge_owner_fields(&mut app, &owner_map);
-    Ok(app)
+    let owner_map = load_owner_contacts_map(&conn, &[svc.id.clone()])
+        .map_err(|e| AppError::from_db_error(command, "读取服务负责人", e))?;
+    merge_owner_fields(&mut svc, &owner_map);
+    Ok(svc)
 }
 
-fn sync_application_owner_contacts(
+fn sync_service_owner_contacts(
     command: &str,
     conn: &rusqlite::Connection,
-    application_id: &str,
+    service_id: &str,
     owner_contact_ids: &[String],
     now: &str,
 ) -> AppResult<()> {
-    // 这里使用物理删除的方式同步绑定关系：实现简单、可重复执行，且与 host_ip_bindings 的处理方式一致。
     conn.execute(
-        "DELETE FROM application_owner_contacts WHERE application_id = ?1",
-        rusqlite::params![application_id],
+        "DELETE FROM service_owner_contacts WHERE service_id = ?1",
+        rusqlite::params![service_id],
     )
-    .map_err(|e| AppError::from_db_error(command, "清理应用负责人绑定", e))?;
+    .map_err(|e| AppError::from_db_error(command, "清理服务负责人绑定", e))?;
 
     if owner_contact_ids.is_empty() {
         return Ok(());
     }
 
-    // 防御式校验：要求所有 contact_id 均存在且未删除，避免写入脏数据。
     let placeholders = vec!["?"; owner_contact_ids.len()].join(", ");
     let sql = format!(
         "SELECT id FROM contacts WHERE is_deleted = 0 AND id IN ({})",
@@ -366,35 +364,47 @@ fn sync_application_owner_contacts(
 
     for contact_id in owner_contact_ids {
         conn.execute(
-            "INSERT INTO application_owner_contacts (id, application_id, contact_id, is_deleted, deleted_at, created_at, updated_at)
+            "INSERT INTO service_owner_contacts (id, service_id, contact_id, is_deleted, deleted_at, created_at, updated_at)
              VALUES (?1, ?2, ?3, 0, NULL, ?4, ?4)",
-            rusqlite::params![uuid::Uuid::new_v4().to_string(), application_id, contact_id, now],
+            rusqlite::params![uuid::Uuid::new_v4().to_string(), service_id, contact_id, now],
         )
-        .map_err(|e| AppError::from_db_error(command, "创建应用负责人绑定", e))?;
+        .map_err(|e| AppError::from_db_error(command, "创建服务负责人绑定", e))?;
     }
 
     Ok(())
 }
 
-fn save_application_inner(
+fn save_service_inner(
     command: &str,
     conn: &rusqlite::Connection,
-    data: Application,
+    data: Service,
 ) -> AppResult<String> {
     let mut normalized_data = data.clone();
     let normalized_owner_contact_ids = normalize_owner_contact_ids(data.owner_contact_ids.clone());
     normalized_data.owner_contact_ids = Some(normalized_owner_contact_ids.clone());
     let tech_stack_terms = parse_tech_stack_terms(normalized_data.tech_stack.as_deref());
-    validate_application(&normalized_data).map_err(|e| AppError::validation(command, e))?;
+    validate_service(&normalized_data).map_err(|e| AppError::validation(command, e))?;
+
+    // Auto-fill name and env from the parent system
+    let (sys_name, sys_env): (String, String) = conn
+        .query_row(
+            "SELECT name, env FROM systems WHERE id = ?1 AND is_deleted = 0",
+            rusqlite::params![normalized_data.system_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(|_| AppError::validation(command, "所属系统不存在或已删除。"))?;
+    normalized_data.name = sys_name;
+    normalized_data.env = sys_env;
+
     let now = chrono::Utc::now().to_rfc3339();
     let (persisted_id, is_new) =
-        resolve_upsert_state(command, conn, "applications", &normalized_data.id)?;
+        resolve_upsert_state(command, conn, "services", &normalized_data.id)?;
 
     with_transaction(conn, command, |conn| {
         if is_new {
             conn.execute(
-                "INSERT INTO applications (id, name, type, address, port, tech_stack, deploy_mode,
-                                           env, git_repo, business_application_id, status, description, is_deleted, deleted_at, created_at, updated_at)
+                "INSERT INTO services (id, name, type, address, port, tech_stack, deploy_mode,
+                                       env, git_repo, system_id, status, description, is_deleted, deleted_at, created_at, updated_at)
                  VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,0,NULL,?13,?13)",
                 rusqlite::params![
                     &persisted_id,
@@ -406,14 +416,14 @@ fn save_application_inner(
                     normalized_data.deploy_mode,
                     normalized_data.env,
                     normalized_data.git_repo,
-                    normalized_data.business_application_id,
+                    normalized_data.system_id,
                     normalized_data.status,
                     normalized_data.description,
                     now
                 ],
             )
-            .map_err(|e| AppError::from_db_error(command, "创建应用", e))?;
-            sync_application_owner_contacts(
+            .map_err(|e| AppError::from_db_error(command, "创建服务", e))?;
+            sync_service_owner_contacts(
                 command,
                 conn,
                 &persisted_id,
@@ -422,7 +432,7 @@ fn save_application_inner(
             )?;
             save_resource_terms(
                 conn,
-                "application",
+                "service",
                 &persisted_id,
                 FIELD_TECH_STACK,
                 &tech_stack_terms,
@@ -433,15 +443,15 @@ fn save_application_inner(
                 command,
                 conn,
                 "create",
-                "application",
+                "service",
                 &persisted_id,
                 Some(&normalized_data.name),
             )?;
             Ok(persisted_id)
         } else {
             conn.execute(
-                "UPDATE applications SET name=?1, type=?2, address=?3, port=?4, tech_stack=?5, deploy_mode=?6,
-                                         env=?7, git_repo=?8, business_application_id=?9, status=?10, description=?11, updated_at=?12
+                "UPDATE services SET name=?1, type=?2, address=?3, port=?4, tech_stack=?5, deploy_mode=?6,
+                                     env=?7, git_repo=?8, system_id=?9, status=?10, description=?11, updated_at=?12
                  WHERE id=?13 AND is_deleted=0",
                 rusqlite::params![
                     normalized_data.name,
@@ -452,15 +462,15 @@ fn save_application_inner(
                     normalized_data.deploy_mode,
                     normalized_data.env,
                     normalized_data.git_repo,
-                    normalized_data.business_application_id,
+                    normalized_data.system_id,
                     normalized_data.status,
                     normalized_data.description,
                     now,
                     normalized_data.id
                 ],
             )
-            .map_err(|e| AppError::from_db_error(command, "更新应用", e))?;
-            sync_application_owner_contacts(
+            .map_err(|e| AppError::from_db_error(command, "更新服务", e))?;
+            sync_service_owner_contacts(
                 command,
                 conn,
                 &normalized_data.id,
@@ -469,7 +479,7 @@ fn save_application_inner(
             )?;
             save_resource_terms(
                 conn,
-                "application",
+                "service",
                 &normalized_data.id,
                 FIELD_TECH_STACK,
                 &tech_stack_terms,
@@ -480,7 +490,7 @@ fn save_application_inner(
                 command,
                 conn,
                 "update",
-                "application",
+                "service",
                 &normalized_data.id,
                 Some(&normalized_data.name),
             )?;
@@ -490,20 +500,20 @@ fn save_application_inner(
 }
 
 #[tauri::command]
-pub fn save_application(pool: State<DbPool>, data: Application) -> AppResult<String> {
-    let command = "save_application";
+pub fn save_service(pool: State<DbPool>, data: Service) -> AppResult<String> {
+    let command = "save_service";
     let conn = get_conn(pool.inner(), command)?;
-    save_application_inner(command, &conn, data)
+    save_service_inner(command, &conn, data)
 }
 
 #[tauri::command]
-pub fn delete_application(pool: State<DbPool>, id: String) -> AppResult<()> {
-    let command = "delete_application";
+pub fn delete_service(pool: State<DbPool>, id: String) -> AppResult<()> {
+    let command = "delete_service";
     let conn = get_conn(pool.inner(), command)?;
 
     let name: Option<String> = conn
         .query_row(
-            "SELECT name FROM applications WHERE id = ?1 AND is_deleted = 0",
+            "SELECT name FROM services WHERE id = ?1 AND is_deleted = 0",
             rusqlite::params![id],
             |row| row.get(0),
         )
@@ -513,20 +523,20 @@ pub fn delete_application(pool: State<DbPool>, id: String) -> AppResult<()> {
     with_transaction(&conn, command, |conn| {
         delete_with_audit(
             command,
-            "删除应用",
+            "删除服务",
             conn,
-            "applications",
-            "application",
+            "services",
+            "service",
             &id,
             name.as_deref(),
         )?;
         conn.execute(
-            "DELETE FROM application_owner_contacts WHERE application_id = ?1",
+            "DELETE FROM service_owner_contacts WHERE service_id = ?1",
             rusqlite::params![id],
         )
-        .map_err(|e| AppError::from_db_error(command, "删除应用负责人绑定", e))?;
-        delete_resource_terms(conn, "application", &id, &now)
-            .map_err(|e| AppError::from_db_error(command, "删除应用词条绑定", e))?;
+        .map_err(|e| AppError::from_db_error(command, "删除服务负责人绑定", e))?;
+        delete_resource_terms(conn, "service", &id, &now)
+            .map_err(|e| AppError::from_db_error(command, "删除服务词条绑定", e))?;
         Ok(())
     })
 }
@@ -534,11 +544,11 @@ pub fn delete_application(pool: State<DbPool>, id: String) -> AppResult<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_applications_where_clause, collect_top_tech_stacks, merge_owner_fields,
-        normalize_owner_contact_ids, row_to_application, save_application_inner, SELECT_COLUMNS,
+        build_services_where_clause, collect_top_tech_stacks, merge_owner_fields,
+        normalize_owner_contact_ids, row_to_service, save_service_inner, SELECT_COLUMNS,
     };
     use crate::error::AppErrorCode;
-    use crate::models::application::Application;
+    use crate::models::service::Service;
     use crate::models::common::QueryParams;
     use crate::test_helpers::setup_test_db;
     use serde_json::json;
@@ -584,7 +594,7 @@ mod tests {
     }
 
     #[test]
-    fn build_applications_where_clause_should_support_owner_contact_filter_and_search() {
+    fn build_services_where_clause_should_support_owner_contact_filter_and_search() {
         let mut filters = HashMap::new();
         filters.insert("owner".to_string(), r#"["c-alice","c-bob"]"#.to_string());
         let params = QueryParams {
@@ -593,12 +603,12 @@ mod tests {
             ..Default::default()
         };
 
-        let (where_clause, sql_params) = build_applications_where_clause(&params);
+        let (where_clause, sql_params) = build_services_where_clause(&params);
         assert!(where_clause.contains("EXISTS"));
-        assert!(where_clause.contains("application_owner_contacts"));
+        assert!(where_clause.contains("service_owner_contacts"));
         assert!(where_clause.contains("contacts"));
         assert!(!where_clause.contains("taxonomy_bindings"));
-        assert!(!where_clause.contains("applications.owner"));
+        assert!(!where_clause.contains("services.owner"));
         assert!(sql_params.len() >= 9);
     }
 
@@ -606,7 +616,7 @@ mod tests {
     fn merge_owner_fields_should_default_to_empty_owner_lists_when_binding_missing() {
         let conn = rusqlite::Connection::open_in_memory().expect("open in-memory db");
         conn.execute_batch(
-            "CREATE TABLE applications (
+            "CREATE TABLE services (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
                 type TEXT NOT NULL,
@@ -616,50 +626,59 @@ mod tests {
                 deploy_mode TEXT,
                 env TEXT NOT NULL,
                 git_repo TEXT,
-                owner TEXT,
-                business_application_id TEXT,
+                system_id TEXT NOT NULL DEFAULT '',
                 status TEXT NOT NULL,
                 description TEXT,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
-            CREATE TABLE business_applications (
+            CREATE TABLE systems (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
                 is_deleted INTEGER NOT NULL DEFAULT 0
             );",
         )
-        .expect("create application tables with stale owner column");
+        .expect("create service tables");
         conn.execute(
-            "INSERT INTO applications (
+            "INSERT INTO services (
                 id, name, type, address, port, tech_stack, deploy_mode,
-                env, git_repo, owner, business_application_id, status, description, created_at, updated_at
+                env, git_repo, system_id, status, description, created_at, updated_at
              ) VALUES (
-                'app-stale-owner', 'stale-owner-app', 'backend', NULL, NULL, NULL, NULL,
-                'prod', NULL, 'ignored-owner', NULL, 'running', NULL, datetime('now'), datetime('now')
+                'svc-1', 'test-svc', 'backend', NULL, NULL, NULL, NULL,
+                'prod', NULL, 'sys-1', 'running', NULL, datetime('now'), datetime('now')
              )",
             [],
         )
-        .expect("insert application row with stale owner column");
+        .expect("insert service row");
 
         let sql = format!(
-            "SELECT {} FROM applications WHERE id = 'app-stale-owner'",
+            "SELECT {} FROM services WHERE id = 'svc-1'",
             SELECT_COLUMNS
         );
-        let mut app = conn
-            .query_row(&sql, [], row_to_application)
-            .expect("query application row with stale owner column");
+        let mut svc = conn
+            .query_row(&sql, [], row_to_service)
+            .expect("query service row");
 
-        merge_owner_fields(&mut app, &HashMap::new());
-        assert_eq!(app.owner_contact_ids, Some(Vec::<String>::new()));
-        assert_eq!(app.owners, Some(Vec::<String>::new()));
+        merge_owner_fields(&mut svc, &HashMap::new());
+        assert_eq!(svc.owner_contact_ids, Some(Vec::<String>::new()));
+        assert_eq!(svc.owners, Some(Vec::<String>::new()));
+    }
+
+    fn insert_test_system(conn: &rusqlite::Connection, id: &str, name: &str, env: &str) {
+        conn.execute(
+            "INSERT INTO systems (id, name, code, description, env, status, is_deleted, deleted_at, created_at, updated_at)
+             VALUES (?1, ?2, NULL, NULL, ?3, 'active', 0, NULL, datetime('now'), datetime('now'))",
+            rusqlite::params![id, name, env],
+        )
+        .expect("insert system");
     }
 
     #[test]
-    fn save_application_inner_should_sync_owner_contact_bindings_when_owner_contact_ids_provided()
+    fn save_service_inner_should_sync_owner_contact_bindings_when_owner_contact_ids_provided()
     {
         let conn = setup_test_db();
         let now = chrono::Utc::now().to_rfc3339();
+        insert_test_system(&conn, "sys-1", "test-system", "prod");
         conn.execute(
             "INSERT INTO contacts (id, name, phone, email, remark, is_deleted, deleted_at, created_at, updated_at)
              VALUES ('c-alice', 'alice', NULL, NULL, NULL, 0, NULL, ?1, ?1)",
@@ -667,23 +686,24 @@ mod tests {
         )
         .expect("seed contact");
 
-        let app: Application = serde_json::from_value(json!({
+        let svc: Service = serde_json::from_value(json!({
             "id": "",
-            "name": "owners-missing",
+            "name": "",
             "type": "backend",
             "env": "prod",
+            "system_id": "sys-1",
             "status": "running",
             "owner_contact_ids": ["c-alice"]
         }))
-        .expect("deserialize application");
+        .expect("deserialize service");
 
-        let created_id = save_application_inner("test", &conn, app).expect("create application");
+        let created_id = save_service_inner("test", &conn, svc).expect("create service");
 
         let owner_binding_count: i64 = conn
             .query_row(
                 "SELECT COUNT(*)
-                 FROM application_owner_contacts
-                 WHERE application_id = ?1 AND contact_id = 'c-alice' AND is_deleted = 0",
+                 FROM service_owner_contacts
+                 WHERE service_id = ?1 AND contact_id = 'c-alice' AND is_deleted = 0",
                 rusqlite::params![created_id],
                 |row| row.get(0),
             )
@@ -691,21 +711,21 @@ mod tests {
         assert_eq!(owner_binding_count, 1);
     }
 
-    fn make_new_application(name: &str) -> Application {
-        Application {
+    fn make_new_service(system_id: &str) -> Service {
+        Service {
             id: "".into(),
-            name: name.into(),
+            name: "".into(),
             app_type: "backend".into(),
             address: Some("127.0.0.1".into()),
             port: Some(8080),
             tech_stack: Some("Rust".into()),
             deploy_mode: Some("docker".into()),
-            env: "prod".into(),
+            env: "".into(),
             git_repo: None,
             owner_contact_ids: None,
             owners: None,
-            business_application_id: None,
-            business_application_name: None,
+            system_id: system_id.into(),
+            system_name: None,
             status: "running".into(),
             description: None,
             created_at: "".into(),
@@ -714,120 +734,50 @@ mod tests {
     }
 
     #[test]
-    fn save_application_inner_should_return_generated_id_for_create() {
+    fn save_service_inner_should_return_generated_id_for_create() {
         let conn = setup_test_db();
-        let app = make_new_application("app-create");
+        insert_test_system(&conn, "sys-1", "test-system", "prod");
+        let svc = make_new_service("sys-1");
 
         let id =
-            save_application_inner("test", &conn, app).expect("create application should pass");
+            save_service_inner("test", &conn, svc).expect("create service should pass");
         assert!(!id.is_empty());
 
         let count: i64 = conn
             .query_row(
-                "SELECT COUNT(*) FROM applications WHERE id = ?1 AND is_deleted = 0",
+                "SELECT COUNT(*) FROM services WHERE id = ?1 AND is_deleted = 0",
                 rusqlite::params![id],
                 |row| row.get(0),
             )
-            .expect("query inserted app");
+            .expect("query inserted service");
         assert_eq!(count, 1);
     }
 
     #[test]
-    fn save_application_inner_should_return_original_id_for_update() {
+    fn save_service_inner_should_auto_fill_name_and_env_from_system() {
         let conn = setup_test_db();
-        let created_id = save_application_inner("test", &conn, make_new_application("app-update"))
-            .expect("create");
+        insert_test_system(&conn, "sys-1", "支付中心", "test");
+        let svc = make_new_service("sys-1");
 
-        let mut updated = make_new_application("app-update-renamed");
-        updated.id = created_id.clone();
-        updated.owner_contact_ids = None;
+        let id = save_service_inner("test", &conn, svc).expect("create service");
 
-        let returned_id = save_application_inner("test", &conn, updated).expect("update");
-        assert_eq!(returned_id, created_id);
+        let (name, env): (String, String) = conn
+            .query_row(
+                "SELECT name, env FROM services WHERE id = ?1",
+                rusqlite::params![id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("query service");
+        assert_eq!(name, "支付中心");
+        assert_eq!(env, "test");
     }
 
     #[test]
-    fn save_application_inner_should_replace_owner_contacts_on_update() {
+    fn save_service_inner_should_reject_nonexistent_system() {
         let conn = setup_test_db();
-        let now = chrono::Utc::now().to_rfc3339();
-        conn.execute(
-            "INSERT INTO contacts (id, name, phone, email, remark, is_deleted, deleted_at, created_at, updated_at)
-             VALUES ('c-alice', 'alice', NULL, NULL, NULL, 0, NULL, ?1, ?1)",
-            rusqlite::params![now],
-        )
-        .expect("seed alice");
-        conn.execute(
-            "INSERT INTO contacts (id, name, phone, email, remark, is_deleted, deleted_at, created_at, updated_at)
-             VALUES ('c-bob', 'bob', NULL, NULL, NULL, 0, NULL, ?1, ?1)",
-            rusqlite::params![now],
-        )
-        .expect("seed bob");
-
-        let mut app = make_new_application("app-owner-source");
-        app.owner_contact_ids = Some(vec!["c-alice".into()]);
-        let created_id = save_application_inner("test", &conn, app).expect("create");
-        assert!(!created_id.is_empty());
-
-        let first_count: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM application_owner_contacts WHERE application_id = ?1 AND is_deleted = 0",
-                rusqlite::params![created_id],
-                |row| row.get(0),
-            )
-            .expect("count owner bindings");
-        assert_eq!(first_count, 1);
-
-        let mut updated = make_new_application("app-owner-source");
-        updated.id = created_id.clone();
-        updated.owner_contact_ids = Some(vec!["c-bob".into()]);
-        save_application_inner("test", &conn, updated).expect("update");
-
-        let second_count: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM application_owner_contacts WHERE application_id = ?1 AND is_deleted = 0",
-                rusqlite::params![created_id],
-                |row| row.get(0),
-            )
-            .expect("count owner bindings after update");
-        assert_eq!(second_count, 1);
-
-        let current_owner: String = conn
-            .query_row(
-                "SELECT contact_id FROM application_owner_contacts WHERE application_id = ?1 AND is_deleted = 0 LIMIT 1",
-                rusqlite::params![created_id],
-                |row| row.get(0),
-            )
-            .expect("query current owner contact id");
-        assert_eq!(current_owner, "c-bob");
-    }
-
-    #[test]
-    fn save_application_inner_should_allow_same_name_env_when_type_is_different() {
-        let conn = setup_test_db();
-        let first = make_new_application("shared-name");
-        save_application_inner("test", &conn, first).expect("create first application");
-
-        let mut second = make_new_application("shared-name");
-        second.app_type = "gateway".into();
-
-        let created_id = save_application_inner("test", &conn, second)
-            .expect("same name/env with different type should be allowed");
-        assert!(!created_id.is_empty());
-    }
-
-    #[test]
-    fn save_application_inner_should_reject_same_name_env_and_type() {
-        let conn = setup_test_db();
-        let first = make_new_application("duplicate-key");
-        save_application_inner("test", &conn, first).expect("create first application");
-
-        let second = make_new_application("duplicate-key");
-        let err = save_application_inner("test", &conn, second)
-            .expect_err("same name/env/type should be rejected");
-        assert_eq!(err.code, AppErrorCode::Conflict);
-        assert_eq!(
-            err.message,
-            "保存失败，服务名称+环境+类型已存在，请调整后重试。"
-        );
+        let svc = make_new_service("nonexistent-sys");
+        let err = save_service_inner("test", &conn, svc)
+            .expect_err("should reject nonexistent system");
+        assert_eq!(err.code, AppErrorCode::ValidationError);
     }
 }

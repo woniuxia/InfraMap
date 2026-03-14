@@ -11,9 +11,9 @@ function makeRelation(input: Partial<CallRelation>): CallRelation {
     id: "r-1",
     pair_key: "p-1",
     owner_id: "app-a",
-    owner_type: "application",
+    owner_type: "service",
     peer_id: "app-b",
-    peer_type: "application",
+    peer_type: "service",
     direction: "upstream",
     relation_type: "http_call",
     description: undefined,
@@ -66,14 +66,14 @@ describe("callRelationsEditor utils", () => {
     const items = expandEditorDraftsForSave([
       {
         peer_id: "app-b",
-        peer_type: "application",
+        peer_type: "service",
         direction: "bidirectional",
         relation_type: "http_call",
         description: "AB",
       },
       {
         peer_id: "app-c",
-        peer_type: "application",
+        peer_type: "service",
         direction: "downstream",
         relation_type: "tcp",
         description: "",
@@ -83,21 +83,21 @@ describe("callRelationsEditor utils", () => {
     expect(items).toEqual([
       {
         peer_id: "app-b",
-        peer_type: "application",
+        peer_type: "service",
         direction: "upstream",
         relation_type: "http_call",
         description: "AB",
       },
       {
         peer_id: "app-b",
-        peer_type: "application",
+        peer_type: "service",
         direction: "downstream",
         relation_type: "http_call",
         description: "AB",
       },
       {
         peer_id: "app-c",
-        peer_type: "application",
+        peer_type: "service",
         direction: "downstream",
         relation_type: "tcp",
         description: undefined,
@@ -109,13 +109,13 @@ describe("callRelationsEditor utils", () => {
     const duplicates = [
       {
         peer_id: "app-b",
-        peer_type: "application" as const,
+        peer_type: "service" as const,
         direction: "upstream" as const,
         relation_type: "http_call" as const,
       },
       {
         peer_id: "app-b",
-        peer_type: "application" as const,
+        peer_type: "service" as const,
         direction: "upstream" as const,
         relation_type: "http_call" as const,
       },
@@ -125,13 +125,13 @@ describe("callRelationsEditor utils", () => {
     const unique = [
       {
         peer_id: "app-b",
-        peer_type: "application" as const,
+        peer_type: "service" as const,
         direction: "upstream" as const,
         relation_type: "http_call" as const,
       },
       {
         peer_id: "app-b",
-        peer_type: "application" as const,
+        peer_type: "service" as const,
         direction: "downstream" as const,
         relation_type: "http_call" as const,
       },

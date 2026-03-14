@@ -23,7 +23,7 @@ describe("call-relations API", () => {
         params: {
           page: 1,
           page_size: 20,
-          filters: { owner_id: "app-a", owner_type: "application" },
+          filters: { owner_id: "app-a", owner_type: "service" },
         },
       });
       return { data: [], total: 0, page: 1, page_size: 20 };
@@ -32,7 +32,7 @@ describe("call-relations API", () => {
     const result = await listCallRelations({
       page: 1,
       page_size: 20,
-      filters: { owner_id: "app-a", owner_type: "application" },
+      filters: { owner_id: "app-a", owner_type: "service" },
     });
     expect(result.total).toBe(0);
   });
@@ -42,11 +42,11 @@ describe("call-relations API", () => {
       expect(args).toEqual({
         params: {
           resource_id: "app-a",
-          resource_type: "application",
+          resource_type: "service",
           items: [
             {
               peer_id: "app-b",
-              peer_type: "application",
+              peer_type: "service",
               direction: "upstream",
               relation_type: "http_call",
               description: "A calls B",
@@ -59,11 +59,11 @@ describe("call-relations API", () => {
 
     const result = await replaceResourceCallRelations({
       resource_id: "app-a",
-      resource_type: "application",
+      resource_type: "service",
       items: [
         {
           peer_id: "app-b",
-          peer_type: "application",
+          peer_type: "service",
           direction: "upstream",
           relation_type: "http_call",
           description: "A calls B",

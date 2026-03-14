@@ -135,29 +135,29 @@ pub fn delete_contact(pool: State<DbPool>, id: String) -> AppResult<()> {
         )
         .ok();
 
-    let application_refs: i64 = conn
+    let service_refs: i64 = conn
         .query_row(
-            "SELECT COUNT(*) FROM application_owner_contacts WHERE contact_id = ?1 AND is_deleted = 0",
+            "SELECT COUNT(*) FROM service_owner_contacts WHERE contact_id = ?1 AND is_deleted = 0",
             rusqlite::params![id],
             |row| row.get(0),
         )
-        .map_err(|e| AppError::from_db_error(command, "查询应用负责人引用", e))?;
+        .map_err(|e| AppError::from_db_error(command, "查询服务负责人引用", e))?;
 
-    let business_refs: i64 = conn
+    let system_refs: i64 = conn
         .query_row(
-            "SELECT COUNT(*) FROM business_application_owner_contacts WHERE contact_id = ?1 AND is_deleted = 0",
+            "SELECT COUNT(*) FROM system_owner_contacts WHERE contact_id = ?1 AND is_deleted = 0",
             rusqlite::params![id],
             |row| row.get(0),
         )
         .map_err(|e| AppError::from_db_error(command, "查询业务应用负责人引用", e))?;
 
-    if application_refs > 0 || business_refs > 0 {
+    if service_refs > 0 || system_refs > 0 {
         return Err(AppError::dependency_conflict(
             command,
             "删除失败，联系人仍被负责人引用，请先解除引用后再删除。",
             Some(format!(
-                "application_refs={}, business_refs={}",
-                application_refs, business_refs
+                "service_refs={}, system_refs={}",
+                service_refs, system_refs
             )),
         ));
     }

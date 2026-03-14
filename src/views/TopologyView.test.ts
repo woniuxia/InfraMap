@@ -48,7 +48,7 @@ const {
       node: {
         id: "node-1",
         name: "订单服务",
-        nodeType: "application",
+        nodeType: "service",
         env: "prod",
         status: "running",
       },
@@ -120,9 +120,9 @@ const graphFixture: TopologyGraph = {
     {
       id: "node-1",
       name: "订单服务",
-      nodeType: "application",
+      nodeType: "service",
       env: "prod",
-      groupKind: "application_service",
+      groupKind: "service",
       importance: 1,
       extra: {
         address: "10.0.0.11",
@@ -131,9 +131,9 @@ const graphFixture: TopologyGraph = {
     {
       id: "node-2",
       name: "inventory-service",
-      nodeType: "application",
+      nodeType: "service",
       env: "prod",
-      groupKind: "application_service",
+      groupKind: "service",
       importance: 1,
       extra: {
         address: "10.0.0.12",
@@ -147,9 +147,9 @@ const graphFixture: TopologyGraph = {
       { env: "test", count: 0, app_count: 0 },
       { env: "dev", count: 0, app_count: 0 },
     ],
-    node_type_counts: [{ kind: "application", count: 2 }],
+    node_type_counts: [{ kind: "service", count: 2 }],
     edge_type_counts: [],
-    application_service_count: 2,
+    service_count: 2,
     current_env: "prod",
     external_node_count: 0,
     cross_env_edge_count: 0,
@@ -170,7 +170,7 @@ function createTroubleshootReport(
     node: {
       id: nodeId,
       name,
-      nodeType: "application",
+      nodeType: "service",
       env: "prod",
       status: "running",
     },
@@ -226,8 +226,14 @@ vi.mock("@/api/topologyV3", () => ({
   getTopologyTroubleshootReportV3: getTopologyTroubleshootReportV3Mock,
 }));
 
-vi.mock("@/api/applications", () => ({
-  getApplication: getApplicationMock,
+vi.mock("@/api/services", () => ({
+  getService: getApplicationMock,
+  listServices: vi.fn(async () => ({
+    data: [],
+    total: 0,
+    page: 1,
+    page_size: 20,
+  })),
 }));
 
 vi.mock("@/api/middlewares", () => ({
@@ -419,8 +425,8 @@ const TopologyDetailPanelStub = defineComponent({
   `,
 });
 
-const ApplicationEditorDialogStub = defineComponent({
-  name: "ApplicationEditorDialog",
+const ServiceEditorDialogStub = defineComponent({
+  name: "ServiceEditorDialog",
   props: {
     modelValue: {
       type: Boolean,
@@ -429,9 +435,9 @@ const ApplicationEditorDialogStub = defineComponent({
   },
   emits: ["saved", "update:modelValue"],
   template: `
-    <div v-if="modelValue" data-testid="application-editor-dialog">
-      <button data-testid="emit-application-editor-saved" @click="$emit('saved', { id: 'node-1', mode: 'edit' })">
-        emit-application-editor-saved
+    <div v-if="modelValue" data-testid="service-editor-dialog">
+      <button data-testid="emit-service-editor-saved" @click="$emit('saved', { id: 'node-1', mode: 'edit' })">
+        emit-service-editor-saved
       </button>
     </div>
   `,
@@ -482,7 +488,7 @@ function mountView(options?: {
         TopologyLegend: TopologyLegendStub,
         TopologyCanvas: TopologyCanvasStub,
         TopologyDetailPanel: TopologyDetailPanelStub,
-        ApplicationEditorDialog: ApplicationEditorDialogStub,
+        ServiceEditorDialog: ServiceEditorDialogStub,
         MiddlewareEditorDialog: MiddlewareEditorDialogStub,
         NginxConfigEditorDialog: NginxConfigEditorDialogStub,
         ElButton: true,
@@ -657,9 +663,7 @@ describe("TopologyView", () => {
       maxDepth: 3,
     });
     expect(highlightImpactMock).toHaveBeenCalledWith("node-1", {
-      affected_nodes: [],
-      total_count: 0,
-      max_depth: 0,
+      affectedNodes: [],
     });
   });
 
@@ -674,9 +678,9 @@ describe("TopologyView", () => {
     await flushPromises();
 
     expect(getApplicationMock).toHaveBeenCalledWith("node-1");
-    expect(wrapper.find('[data-testid="application-editor-dialog"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="service-editor-dialog"]').exists()).toBe(true);
 
-    await wrapper.get('[data-testid="emit-application-editor-saved"]').trigger("click");
+    await wrapper.get('[data-testid="emit-service-editor-saved"]').trigger("click");
     await flushPromises();
 
     expect(fetchGraphMock).toHaveBeenCalledTimes(2);
@@ -803,7 +807,7 @@ describe("TopologyView", () => {
       node: {
         id: "node-2",
         name: "service-2",
-        nodeType: "application",
+        nodeType: "service",
         env: "prod",
         status: "running",
       },

@@ -176,8 +176,8 @@ function handleExpandChange(_row: Host, expandedRows: Host[]) {
         :total="props.total"
         :page-sizes="[10, 20, 50]"
         layout="total, sizes, prev, pager, next"
-        @current-change="(page) => emit('page-change', page)"
-        @size-change="(size) => emit('page-size-change', size)"
+        @current-change="emit('page-change', $event)"
+        @size-change="emit('page-size-change', $event)"
       />
     </div>
   </div>

@@ -125,7 +125,7 @@ function mountEditor() {
   return mount(CallRelationsEditor, {
     props: {
       resourceId: "app-current",
-      resourceType: "application",
+      resourceType: "service",
     },
     global: {
       stubs: {
@@ -151,7 +151,7 @@ describe("CallRelationsEditor", () => {
   });
 
   it("renders target resources with type labels and excludes current resource", async () => {
-    __setMockHandler("list_applications", (_cmd, args) => {
+    __setMockHandler("list_services", (_cmd, args) => {
       expect(args).toEqual({
         params: { page: 1, page_size: 999 },
       });
@@ -185,7 +185,7 @@ describe("CallRelationsEditor", () => {
           page_size: 500,
           filters: {
             owner_id: "app-current",
-            owner_type: "application",
+            owner_type: "service",
           },
         },
       });
@@ -214,7 +214,7 @@ describe("CallRelationsEditor", () => {
   });
 
   it("uses downstream as the default direction for a newly added relation", async () => {
-    __setMockHandler("list_applications", () => ({
+    __setMockHandler("list_services", () => ({
       data: [{ id: "app-b", name: "order-api", type: "backend" }],
       total: 1,
       page: 1,

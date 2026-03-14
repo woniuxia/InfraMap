@@ -2,7 +2,7 @@
 import { computed, onMounted, ref, watch } from "vue";
 import { ElMessage } from "element-plus";
 import type {
-  Application,
+  Service,
   CallRelation,
   CallRelationType,
   Middleware,
@@ -13,7 +13,7 @@ import type {
   EditableCallRelationDraft,
   EditorCallDirection,
 } from "@/components/callRelationsEditor.utils";
-import { listApplications } from "@/api/applications";
+import { listServices } from "@/api";
 import { listMiddlewares } from "@/api/middlewares";
 import { listNginxConfigs } from "@/api/nginx-configs";
 import { listCallRelations } from "@/api/call-relations";
@@ -24,7 +24,7 @@ import {
   mergeCallRelationsForEditor,
 } from "@/components/callRelationsEditor.utils";
 
-type ResourceType = "application" | "middleware" | "nginx";
+type ResourceType = "service" | "middleware" | "nginx";
 
 interface RelationTargetOption {
   id: string;
@@ -66,7 +66,7 @@ const relationTypeOptions: Array<{ label: string; value: CallRelationType }> = [
 
 const groupedTargetOptions = computed(() => {
   return [
-    { label: "应用", type: "application" as const },
+    { label: "应用", type: "service" as const },
     { label: "中间件", type: "middleware" as const },
     { label: "网关", type: "nginx" as const },
   ].map((group) => ({
@@ -84,7 +84,7 @@ function createEmptyRow(): EditableRelationRow {
   return {
     id: nextRowId(),
     peer_id: "",
-    peer_type: "application",
+    peer_type: "service",
     direction: "downstream",
     relation_type: "http_call",
     description: "",
@@ -110,7 +110,7 @@ async function fetchTargetOptions() {
   optionsLoading.value = true;
   try {
     const [apps, mws, ngs] = await Promise.all([
-      listApplications({ page: 1, page_size: 999 }),
+      listServices({ page: 1, page_size: 999 }),
       listMiddlewares({ page: 1, page_size: 999 }),
       listNginxConfigs({ page: 1, page_size: 999 }),
     ]);
@@ -119,14 +119,14 @@ async function fetchTargetOptions() {
     const currentId = props.resourceId ?? "";
     const currentType = props.resourceType;
 
-    apps.data.forEach((item: Application) => {
-      if (!(item.id === currentId && currentType === "application")) {
+    apps.data.forEach((item: Service) => {
+      if (!(item.id === currentId && currentType === "service")) {
         options.push({
           id: item.id,
           name: item.name,
-          type: "application",
+          type: "service",
           displayLabel: formatRelationTargetLabel({
-            resourceType: "application",
+            resourceType: "service",
             name: item.name,
             appType: item.type,
           }),
@@ -281,7 +281,7 @@ onMounted(() => {
             filterable
             class="w-full"
             placeholder="选择目标资源"
-            @change="(value) => onPeerChange(row, value)"
+            @change="onPeerChange(row, $event as string)"
           >
             <el-option-group
               v-for="group in groupedTargetOptions"

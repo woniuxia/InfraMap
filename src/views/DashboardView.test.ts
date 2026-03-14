@@ -75,8 +75,8 @@ function createOverview(): DashboardOverview {
     totals: {
       host_total: 2,
       host_abnormal: 1,
-      application_total: 3,
-      application_abnormal: 1,
+      service_total: 3,
+      service_abnormal: 1,
       middleware_total: 2,
       nginx_total: 1,
       nginx_abnormal: 0,
@@ -97,7 +97,7 @@ function createOverview(): DashboardOverview {
       related_total: 3,
       isolated_total: 3,
       relation_coverage: 50,
-      undeployed_application_total: 1,
+      undeployed_service_total: 1,
       undeployed_middleware_total: 1,
       undeployed_nginx_total: 0,
     },
@@ -107,11 +107,11 @@ function createOverview(): DashboardOverview {
     ],
     risk_items: [
       {
-        key: "application_abnormal",
-        label: "异常应用服务",
+        key: "service_abnormal",
+        label: "异常服务",
         count: 1,
         severity: "critical",
-        target_route: "Applications",
+        target_route: "Services",
         target_filters: { status: "stopped,maintenance" },
       },
     ],
@@ -249,9 +249,9 @@ describe("DashboardView", () => {
 
     expect(getDashboardOverviewMock).toHaveBeenCalledTimes(1);
 
-    await wrapper.get('[data-testid="quick-action-applications"]').trigger("click");
+    await wrapper.get('[data-testid="quick-action-services"]').trigger("click");
     expect(pushMock).toHaveBeenCalledWith({
-      name: "Applications",
+      name: "Services",
       query: undefined,
     });
 

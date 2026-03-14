@@ -109,8 +109,8 @@ onUnmounted(() => {
 const mainMenuItems: { path: string; name: string; icon: Component }[] = [
   { path: "/", name: "仪表盘", icon: markRaw(DataAnalysis) },
   { path: "/hosts", name: "服务器", icon: markRaw(Monitor) },
-  { path: "/business-applications", name: "业务应用", icon: markRaw(Collection) },
-  { path: "/applications", name: "应用服务", icon: markRaw(IconMenu) },
+  { path: "/systems", name: "系统", icon: markRaw(Collection) },
+  { path: "/services", name: "服务", icon: markRaw(IconMenu) },
   { path: "/middlewares", name: "中间件", icon: markRaw(Connection) },
   { path: "/nginx-configs", name: "网关", icon: markRaw(SetUp) },
   { path: "/topology", name: "拓扑图", icon: markRaw(Share) },
