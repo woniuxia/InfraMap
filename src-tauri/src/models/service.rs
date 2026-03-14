@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 pub struct Service {
     #[serde(default)]
     pub id: String,
+    #[serde(default)]
     pub name: String,
     #[serde(rename = "type")]
     pub app_type: String,
@@ -11,6 +12,7 @@ pub struct Service {
     pub port: Option<i64>,
     pub tech_stack: Option<String>,
     pub deploy_mode: Option<String>,
+    #[serde(default)]
     pub env: String,
     pub git_repo: Option<String>,
     #[serde(default)]

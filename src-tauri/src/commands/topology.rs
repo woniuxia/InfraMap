@@ -370,7 +370,7 @@ pub fn get_topology_graph_inner(conn: &Connection) -> Result<TopologyGraph, Stri
             .map_err(|e| e.to_string())?;
 
         for row in rows {
-            let (id, source, target, edge_type, label) = row.map_err(|e| e.to_string())?;
+            let (id, target, source, edge_type, label) = row.map_err(|e| e.to_string())?;
             let key = (source.clone(), target.clone(), edge_type.clone());
             let source_env = node_env_map
                 .get(&source)
@@ -500,7 +500,7 @@ pub fn find_paths_inner(
             })
             .map_err(|e| e.to_string())?;
         for row in rows {
-            let (src, tgt) = row.map_err(|e| e.to_string())?;
+            let (tgt, src) = row.map_err(|e| e.to_string())?;
             adj.entry(src).or_default().push(tgt);
         }
     }
@@ -784,11 +784,11 @@ pub fn get_topology_drilldown_v3_inner(
     for edge in &graph.edges {
         if edge.target == query.node_id {
             inbound_edge_count += edge.strength;
-            upstream_ids.insert(edge.source.clone());
+            downstream_ids.insert(edge.source.clone());
         }
         if edge.source == query.node_id {
             outbound_edge_count += edge.strength;
-            downstream_ids.insert(edge.target.clone());
+            upstream_ids.insert(edge.target.clone());
         }
     }
 
@@ -1680,8 +1680,8 @@ mod tests {
         let result = get_topology_drilldown_v3_inner(&conn, &query).expect("drilldown query");
 
         assert_eq!(result.node.id, "C");
-        assert_eq!(result.inbound_edge_count, 2);
-        assert_eq!(result.outbound_edge_count, 1);
+        assert_eq!(result.inbound_edge_count, 1);
+        assert_eq!(result.outbound_edge_count, 2);
         assert_eq!(result.upstream.len(), 2);
         assert_eq!(result.downstream.len(), 1);
     }
@@ -1712,8 +1712,8 @@ mod tests {
         setup_graph(&conn);
 
         let query = TopologyPathsQuery {
-            source_id: "A".to_string(),
-            target_id: "D".to_string(),
+            source_id: "D".to_string(),
+            target_id: "A".to_string(),
             task_view: Some("explore".to_string()),
             env: None,
             max_depth: None,
@@ -1725,7 +1725,7 @@ mod tests {
         assert!(result.truncated);
         assert_eq!(
             result.paths[0].node_ids.first().map(String::as_str),
-            Some("A")
+            Some("D")
         );
     }
 
@@ -1933,11 +1933,11 @@ mod tests {
         let result =
             get_topology_troubleshoot_report_v3_inner(&conn, &query).expect("report query");
 
-        assert_eq!(result.summary.inbound_dependency_count, 2);
-        assert_eq!(result.summary.outbound_dependency_count, 1);
+        assert_eq!(result.summary.inbound_dependency_count, 1);
+        assert_eq!(result.summary.outbound_dependency_count, 2);
         assert!(result
             .insights
             .iter()
-            .any(|item| item.kind == "dependency" && item.description.contains("inbound=2")));
+            .any(|item| item.kind == "dependency" && item.description.contains("inbound=1")));
     }
 }

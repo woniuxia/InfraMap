@@ -65,20 +65,20 @@ export function collectDirectionalReachability(
   const highlightedNodeIds = new Set<string>([focusId]);
   const highlightedEdgeIds = new Set<string>();
 
-  const downstreamAdjacency = buildAdjacencyMap(edges, "source");
-  const upstreamAdjacency = buildAdjacencyMap(edges, "target");
+  const downstreamAdjacency = buildAdjacencyMap(edges, "target");
+  const upstreamAdjacency = buildAdjacencyMap(edges, "source");
 
   traverseDirectional(
     focusId,
     downstreamAdjacency,
-    (edge) => edge.target,
+    (edge) => edge.source,
     highlightedNodeIds,
     highlightedEdgeIds,
   );
   traverseDirectional(
     focusId,
     upstreamAdjacency,
-    (edge) => edge.source,
+    (edge) => edge.target,
     highlightedNodeIds,
     highlightedEdgeIds,
   );
