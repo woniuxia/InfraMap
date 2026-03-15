@@ -315,6 +315,7 @@ export interface TopologyTroubleshootReport {
 export interface TopologyNodePosition {
   node_id: string;
   layout_type: string;
+  focus_target?: string | null;
   x: number;
   y: number;
 }
@@ -324,3 +325,14 @@ export interface TopologyNodePositionEntry {
   x: number;
   y: number;
 }
+
+export interface SystemFocusOption {
+  systemId: string;
+  systemName: string;
+  serviceCount: number;
+  serviceIds: string[];
+  isStandalone: boolean;
+  nodeType?: string;
+}
+
+export type TopologyLayoutType = "force" | "focus";

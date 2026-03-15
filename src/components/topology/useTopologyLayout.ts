@@ -1,7 +1,7 @@
 import cytoscape, { type Core, type LayoutOptions } from "cytoscape";
 import { isDegenerateNodeDistribution } from "@/components/topology/topologyLayoutSafety.utils";
 
-export type TopologyLayoutType = "force" | "dagre";
+export type TopologyLayoutType = "force" | "focus";
 
 export interface TopologyLayoutRunResult {
   requested: TopologyLayoutType;
@@ -120,7 +120,7 @@ export function useTopologyLayout(options: UseTopologyLayoutOptions) {
   }
 
   function buildLayoutOptions(layoutType: TopologyLayoutType): LayoutOptions {
-    if (layoutType === "dagre") {
+    if (layoutType === "focus") {
       const cy = options.getCy();
       if (!cy) {
         return {
@@ -262,7 +262,7 @@ export function useTopologyLayout(options: UseTopologyLayoutOptions) {
 
   async function runLayout(layoutType: TopologyLayoutType): Promise<TopologyLayoutRunResult> {
     const primaryOk = await runLayoutOnce(layoutType);
-    if (layoutType !== "dagre") {
+    if (layoutType !== "focus") {
       return {
         requested: layoutType,
         applied: layoutType,

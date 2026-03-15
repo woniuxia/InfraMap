@@ -8,6 +8,7 @@ import {
   getTopologyImpactV3,
   getTopologyPathsV3,
   getTopologyTroubleshootReportV3,
+  getSystemsForFocus,
 } from "@/api/topologyV3";
 import { getService } from "@/api/services";
 import { getMiddleware } from "@/api/middlewares";
@@ -27,11 +28,12 @@ import type {
   TopologyTaskInsight,
   TopologyTaskViewMode,
   TopologyTroubleshootReport,
+  SystemFocusOption,
 } from "@/types";
 import {
   DEFAULT_TOPOLOGY_FILTER,
   filterTopologyGraph,
-  filterDagreFocusSubgraph,
+  filterFocusSubgraph,
   isExternalTopologyNode,
   type TopologyFilterState,
 } from "@/components/topology/topologyGraph.utils";
@@ -69,17 +71,19 @@ const effectiveFilter = computed<TopologyFilterState>(() =>
 );
 const graphData = computed(() => {
   const filtered = filterTopologyGraph(rawGraphData.value, effectiveFilter.value);
-  if (!filtered || selectedLayout.value !== "dagre" || !dagreFocusNodeId.value) return filtered;
-  return filterDagreFocusSubgraph(filtered, dagreFocusNodeId.value) ?? filtered;
+  if (!filtered || selectedLayout.value !== "focus" || focusNodeIds.value.length === 0)
+    return filtered;
+  return filterFocusSubgraph(filtered, focusNodeIds.value) ?? filtered;
 });
 const canvasRef = ref<InstanceType<typeof TopologyCanvas>>();
-const selectedLayout = ref<"force" | "dagre">("force");
+const selectedLayout = ref<"force" | "focus">("force");
 const warnedLayoutFallbackReasons = new Set<string>();
 
-const dagreFocusNodeId = ref<string | null>(null);
-const dagreFocusDialogVisible = ref(false);
-const pendingDagreSwitch = ref(false);
-const dagreFocusPendingNodeId = ref<string | null>(null);
+const focusNodeIds = ref<string[]>([]);
+const focusDialogVisible = ref(false);
+const pendingFocusSwitch = ref(false);
+const selectedFocusSystem = ref<SystemFocusOption | null>(null);
+const systemFocusOptions = ref<SystemFocusOption[]>([]);
 
 type TopologyWorkbenchTab = "overview" | "evidence" | "path" | "impact";
 
@@ -516,54 +520,92 @@ function handlePerformanceOptimizationChange(enabled: boolean) {
   persistPerformanceOptimizationPreference(enabled);
 }
 
-const selectableNodes = computed(() => {
-  const filtered = filterTopologyGraph(rawGraphData.value, effectiveFilter.value);
-  if (!filtered) return [];
-  return filtered.nodes
-    .filter((node) => !isExternalTopologyNode(node))
-    .map((node) => ({ id: node.id, name: node.name }))
-    .sort((a, b) => a.name.localeCompare(b.name));
+const focusSystemName = computed(() => {
+  if (!selectedFocusSystem.value) return null;
+  const option = selectedFocusSystem.value;
+
+  if (option.isStandalone) {
+    if (option.nodeType === "middleware") {
+      return `${option.systemName} (独立中间件)`;
+    } else if (option.nodeType === "nginx") {
+      return `${option.systemName} (独立网关)`;
+    } else {
+      return `${option.systemName} (独立服务)`;
+    }
+  }
+
+  return `${option.systemName} (${option.serviceCount}个节点)`;
 });
 
-const dagreFocusNodeName = computed(() => {
-  if (!dagreFocusNodeId.value) return null;
-  const node = graphData.value?.nodes.find((n) => n.id === dagreFocusNodeId.value);
-  if (node) return node.name;
-  const raw = rawGraphData.value?.nodes.find((n) => n.id === dagreFocusNodeId.value);
-  return raw?.name ?? null;
-});
+async function handleLayoutChange(type: "force" | "focus") {
+  if (type === "focus") {
+    pendingFocusSwitch.value = selectedLayout.value !== "focus";
 
-function handleLayoutChange(type: "force" | "dagre") {
-  if (type === "dagre") {
-    pendingDagreSwitch.value = selectedLayout.value !== "dagre";
-    dagreFocusPendingNodeId.value = dagreFocusNodeId.value;
-    dagreFocusDialogVisible.value = true;
+    // 加载系统选项
+    try {
+      systemFocusOptions.value = await getSystemsForFocus(activeFilter.value.env);
+      console.log("系统选项加载成功:", systemFocusOptions.value);
+
+      // 如果之前有选择，尝试恢复
+      if (selectedFocusSystem.value) {
+        const stillExists = systemFocusOptions.value.find(
+          (opt) =>
+            opt.systemId === selectedFocusSystem.value!.systemId &&
+            opt.systemName === selectedFocusSystem.value!.systemName,
+        );
+        if (!stillExists) {
+          selectedFocusSystem.value = null;
+        }
+      }
+    } catch (error) {
+      ElMessage.error("加载系统列表失败");
+      console.error("加载系统列表失败:", error);
+      return;
+    }
+
+    focusDialogVisible.value = true;
     return;
   }
-  dagreFocusNodeId.value = null;
+  focusNodeIds.value = [];
+  selectedFocusSystem.value = null;
   selectedLayout.value = type;
 }
 
-function handleDagreFocusConfirm() {
-  if (!dagreFocusPendingNodeId.value) return;
-  dagreFocusNodeId.value = dagreFocusPendingNodeId.value;
-  selectedLayout.value = "dagre";
-  dagreFocusDialogVisible.value = false;
-  pendingDagreSwitch.value = false;
+function handleFocusConfirm() {
+  if (!selectedFocusSystem.value) return;
+  focusNodeIds.value = selectedFocusSystem.value.serviceIds;
+  selectedLayout.value = "focus";
+  focusDialogVisible.value = false;
+  pendingFocusSwitch.value = false;
 }
 
-function handleDagreFocusCancelOrClose() {
-  dagreFocusDialogVisible.value = false;
-  if (pendingDagreSwitch.value) {
-    selectedLayout.value = "force";
-    pendingDagreSwitch.value = false;
+function handleFocusCancelOrClose() {
+  focusDialogVisible.value = false;
+  if (!pendingFocusSwitch.value) return;
+  pendingFocusSwitch.value = false;
+  selectedFocusSystem.value = null;
+}
+
+function getOptionLabel(item: SystemFocusOption): string {
+  if (item.isStandalone) {
+    if (item.nodeType === "middleware") {
+      return `${item.systemName} (独立中间件)`;
+    } else if (item.nodeType === "nginx") {
+      return `${item.systemName} (独立网关)`;
+    } else {
+      return `${item.systemName} (独立服务)`;
+    }
   }
+  return `${item.systemName} (${item.serviceCount}个节点)`;
 }
 
-function handleDagreFocusReselect() {
-  pendingDagreSwitch.value = false;
-  dagreFocusPendingNodeId.value = dagreFocusNodeId.value;
-  dagreFocusDialogVisible.value = true;
+function handleFocusReselect() {
+  selectedFocusSystem.value =
+    systemFocusOptions.value.find(
+      (opt) =>
+        JSON.stringify(opt.serviceIds.sort()) === JSON.stringify([...focusNodeIds.value].sort()),
+    ) || null;
+  focusDialogVisible.value = true;
 }
 
 function handleResetLayout() {
@@ -571,8 +613,8 @@ function handleResetLayout() {
 }
 
 function handleLayoutResolved(payload: {
-  requested: "force" | "dagre";
-  applied: "force" | "dagre";
+  requested: "force" | "focus";
+  applied: "force" | "focus";
   reason?: string;
 }) {
   selectedLayout.value = payload.applied;
@@ -582,7 +624,7 @@ function handleLayoutResolved(payload: {
   if (warnedLayoutFallbackReasons.has(reasonKey)) return;
   warnedLayoutFallbackReasons.add(reasonKey);
 
-  const layoutLabel = payload.applied === "dagre" ? "层次布局" : "力导向布局";
+  const layoutLabel = payload.applied === "focus" ? "聚焦布局" : "力导向布局";
   const reasonText = payload.reason ? `（${payload.reason}）` : "";
   ElMessage.warning(`布局已自动回退为${layoutLabel}${reasonText}`);
 }
@@ -664,14 +706,15 @@ watch(
       envStore.setEnv(newEnv);
     }
 
-    if (selectedLayout.value === "dagre" && dagreFocusNodeId.value) {
+    if (selectedLayout.value === "focus" && focusNodeIds.value.length > 0) {
       const filtered = filterTopologyGraph(rawGraphData.value, {
         ...effectiveFilter.value,
         env: newEnv,
       });
-      const stillVisible = filtered?.nodes.some((n) => n.id === dagreFocusNodeId.value);
-      if (!stillVisible) {
-        dagreFocusNodeId.value = null;
+      const allVisible = focusNodeIds.value.every((id) => filtered?.nodes.some((n) => n.id === id));
+      if (!allVisible) {
+        focusNodeIds.value = [];
+        selectedFocusSystem.value = null;
         selectedLayout.value = "force";
         ElMessage.warning("环境切换后焦点节点不可见，已切回力导向布局");
       }
@@ -680,11 +723,12 @@ watch(
 );
 
 watch(rawGraphData, (newData) => {
-  if (selectedLayout.value !== "dagre" || !dagreFocusNodeId.value) return;
+  if (selectedLayout.value !== "focus" || focusNodeIds.value.length === 0) return;
   const filtered = filterTopologyGraph(newData, effectiveFilter.value);
-  const stillExists = filtered?.nodes.some((n) => n.id === dagreFocusNodeId.value);
-  if (!stillExists) {
-    dagreFocusNodeId.value = null;
+  const allExist = focusNodeIds.value.every((id) => filtered?.nodes.some((n) => n.id === id));
+  if (!allExist) {
+    focusNodeIds.value = [];
+    selectedFocusSystem.value = null;
     selectedLayout.value = "force";
     ElMessage.warning("焦点节点已不存在，已切回力导向布局");
   }
@@ -710,7 +754,7 @@ onBeforeUnmount(() => {
       :layout="selectedLayout"
       :focus-neighborhood-enabled="focusNeighborhoodEnabled"
       :performance-optimization-enabled="performanceOptimizationEnabled"
-      :dagre-focus-node-name="dagreFocusNodeName"
+      :focus-system-name="focusSystemName"
       @search="handleSearch"
       @filter-change="handleFilterChange"
       @performance-optimization-change="handlePerformanceOptimizationChange"
@@ -720,7 +764,7 @@ onBeforeUnmount(() => {
       @export="handleExport"
       @refresh="loadData"
       @fullscreen="toggleFullscreen"
-      @dagre-focus-reselect="handleDagreFocusReselect"
+      @focus-reselect="handleFocusReselect"
     />
 
     <div class="task-view-bar">
@@ -843,6 +887,7 @@ onBeforeUnmount(() => {
           :layout="selectedLayout"
           :performance-optimization-enabled="performanceOptimizationEnabled"
           :focus-neighborhood="focusNeighborhoodEnabled && !pathTraceMode"
+          :focus-option="selectedFocusSystem"
           @node-click="handleCanvasNodeClick"
           @canvas-blank-click="handleCanvasBlankClick"
           @node-contextmenu="handleContextMenu"
@@ -917,34 +962,30 @@ onBeforeUnmount(() => {
     />
 
     <el-dialog
-      v-model="dagreFocusDialogVisible"
-      title="选择焦点节点"
+      v-model="focusDialogVisible"
+      title="选择聚焦对象"
       width="420px"
       :close-on-click-modal="false"
-      @close="handleDagreFocusCancelOrClose"
+      @close="handleFocusCancelOrClose"
     >
-      <p class="dagre-focus-hint">层级布局将仅展示所选节点的上下游依赖链</p>
+      <p class="focus-hint">聚焦布局将仅展示所选系统/服务的上下游依赖链</p>
       <el-select
-        v-model="dagreFocusPendingNodeId"
+        v-model="selectedFocusSystem"
         filterable
-        placeholder="搜索并选择节点"
+        placeholder="搜索并选择系统或服务"
         style="width: 100%"
-        data-testid="dagre-focus-select"
+        data-testid="focus-select"
       >
         <el-option
-          v-for="item in selectableNodes"
-          :key="item.id"
-          :label="item.name"
-          :value="item.id"
+          v-for="item in systemFocusOptions"
+          :key="`${item.systemId}-${item.systemName}`"
+          :label="getOptionLabel(item)"
+          :value="item"
         />
       </el-select>
       <template #footer>
-        <el-button @click="handleDagreFocusCancelOrClose">取消</el-button>
-        <el-button
-          type="primary"
-          :disabled="!dagreFocusPendingNodeId"
-          @click="handleDagreFocusConfirm"
-        >
+        <el-button @click="handleFocusCancelOrClose">取消</el-button>
+        <el-button type="primary" :disabled="!selectedFocusSystem" @click="handleFocusConfirm">
           确认
         </el-button>
       </template>
@@ -959,6 +1000,13 @@ onBeforeUnmount(() => {
   height: 100%;
   background: var(--im-surface-1);
   position: relative;
+}
+
+.focus-hint {
+  margin: 0 0 16px 0;
+  color: var(--im-text-secondary);
+  font-size: 14px;
+  line-height: 1.5;
 }
 .task-view-bar {
   display: flex;
@@ -1173,11 +1221,6 @@ onBeforeUnmount(() => {
 .context-menu-item:hover {
   background: var(--im-surface-2);
   color: var(--im-accent);
-}
-.dagre-focus-hint {
-  margin: 0 0 12px;
-  font-size: 13px;
-  color: var(--im-text-secondary);
 }
 
 @media (max-width: 1080px) {

@@ -16,6 +16,7 @@ import type {
   TopologyTaskViewResponse,
   TopologyTroubleshootReport,
   TopologyTroubleshootReportQuery,
+  SystemFocusOption,
 } from "@/types";
 
 export function getTopologySnapshotV3(
@@ -58,21 +59,40 @@ export function getTopologyTroubleshootReportV3(
 
 // ── Node position persistence ──
 
-export function getTopologyNodePositions(layoutType: string): Promise<TopologyNodePosition[]> {
+export function getTopologyNodePositions(
+  layoutType: string,
+  focusTarget?: string | null,
+): Promise<TopologyNodePosition[]> {
   return tauriInvoke<TopologyNodePosition[]>("get_topology_node_positions", {
     layoutType,
+    focusTarget: focusTarget ?? null,
   });
 }
 
 export function saveTopologyNodePositions(
   layoutType: string,
+  focusTarget: string | null,
   positions: TopologyNodePositionEntry[],
 ): Promise<void> {
   return tauriInvoke<void>("save_topology_node_positions", {
-    data: { layout_type: layoutType, positions },
+    data: {
+      layout_type: layoutType,
+      focus_target: focusTarget,
+      positions,
+    },
   });
 }
 
-export function clearTopologyNodePositions(layoutType: string): Promise<void> {
-  return tauriInvoke<void>("clear_topology_node_positions", { layoutType });
+export function clearTopologyNodePositions(
+  layoutType: string,
+  focusTarget?: string | null,
+): Promise<void> {
+  return tauriInvoke<void>("clear_topology_node_positions", {
+    layoutType,
+    focusTarget: focusTarget ?? null,
+  });
+}
+
+export function getSystemsForFocus(env: string): Promise<SystemFocusOption[]> {
+  return tauriInvoke<SystemFocusOption[]>("get_systems_for_focus", { env });
 }

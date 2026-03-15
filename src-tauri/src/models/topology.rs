@@ -336,6 +336,18 @@ pub struct TopologyEvidenceV3 {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SystemFocusOption {
+    pub system_id: String,
+    pub system_name: String,
+    pub service_count: u32,
+    pub service_ids: Vec<String>,
+    pub is_standalone: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub node_type: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RuntimeTopologyLane {
     pub id: String,
     pub label: String,

@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 pub struct TopologyNodePosition {
     pub node_id: String,
     pub layout_type: String,
+    pub focus_target: Option<String>,
     pub x: f64,
     pub y: f64,
 }
@@ -11,6 +12,7 @@ pub struct TopologyNodePosition {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SaveTopologyPositionsInput {
     pub layout_type: String,
+    pub focus_target: Option<String>,
     pub positions: Vec<TopologyNodePositionEntry>,
 }
 

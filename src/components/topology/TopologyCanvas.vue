@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import cytoscape, { type Core } from "cytoscape";
-import type { TopologyGraph, TopologyNode } from "@/types";
+import type { TopologyGraph, TopologyNode, SystemFocusOption } from "@/types";
 import { buildNodeIconSpriteDataUri } from "@/icons/nodeIconSprite";
 import { type ZoomDensity } from "@/components/topology/topologyDensity.utils";
 import { useTopologyDensity } from "@/components/topology/useTopologyDensity";
@@ -19,13 +19,15 @@ const props = withDefaults(
   defineProps<{
     graphData: TopologyGraph | null;
     focusNeighborhood?: boolean;
-    layout?: "force" | "dagre";
+    layout?: "force" | "focus";
     performanceOptimizationEnabled?: boolean;
+    focusOption?: SystemFocusOption | null;
   }>(),
   {
     focusNeighborhood: true,
     layout: "force",
     performanceOptimizationEnabled: false,
+    focusOption: null,
   },
 );
 
@@ -36,14 +38,35 @@ const emit = defineEmits<{
   (
     e: "layout-resolved",
     payload: {
-      requested: "force" | "dagre";
-      applied: "force" | "dagre";
+      requested: "force" | "focus";
+      applied: "force" | "focus";
       reason?: string;
     },
   ): void;
 }>();
 
-type LayoutType = "force" | "dagre";
+type LayoutType = "force" | "focus";
+
+/**
+ * 根据聚焦对象生成 focus_target 字符串
+ */
+function computeFocusTarget(focusOption: SystemFocusOption | null): string | null {
+  if (!focusOption) {
+    return null;
+  }
+
+  if (focusOption.isStandalone) {
+    // 独立节点：使用 serviceIds[0] 作为节点 ID
+    const nodeId = focusOption.serviceIds[0] || "";
+    const nodeType = focusOption.nodeType || "service";
+    return `${nodeType}:${nodeId}`;
+  } else {
+    // 系统聚焦：使用 systemId
+    return `system:${focusOption.systemId}`;
+  }
+}
+
+const computedFocusTarget = computed(() => computeFocusTarget(props.focusOption));
 
 const containerRef = ref<HTMLDivElement>();
 const activeLayout = ref<LayoutType>(props.layout);
@@ -537,15 +560,16 @@ function scheduleSavePositions() {
     saveTimer = null;
     const positions = collectLeafPositions();
     if (positions.length === 0) return;
-    void saveTopologyNodePositions(activeLayout.value, positions);
+    void saveTopologyNodePositions(activeLayout.value, computedFocusTarget.value, positions);
   }, 1500);
 }
 
 async function loadSavedPositions(
   layoutType: string,
+  focusTarget: string | null,
 ): Promise<Map<string, { x: number; y: number }>> {
   try {
-    const rows = await getTopologyNodePositions(layoutType);
+    const rows = await getTopologyNodePositions(layoutType, focusTarget);
     const map = new Map<string, { x: number; y: number }>();
     for (const row of rows) {
       map.set(row.node_id, { x: row.x, y: row.y });
@@ -559,7 +583,7 @@ async function loadSavedPositions(
 watch(
   () => props.graphData,
   async () => {
-    const savedPositions = await loadSavedPositions(activeLayout.value);
+    const savedPositions = await loadSavedPositions(activeLayout.value, computedFocusTarget.value);
     if (savedPositions.size > 0) {
       await syncGraphData({ savedPositions });
     } else {
@@ -593,9 +617,27 @@ watch(
   },
 );
 
+watch(
+  () => props.focusOption,
+  async (newOption, oldOption) => {
+    const newTarget = computeFocusTarget(newOption);
+    const oldTarget = computeFocusTarget(oldOption);
+
+    if (newTarget !== oldTarget) {
+      const savedPositions = await loadSavedPositions(activeLayout.value, newTarget);
+      if (savedPositions.size > 0) {
+        await syncGraphDataImpl({ preserveViewport: true, savedPositions });
+      } else {
+        await syncGraphDataImpl({ preserveViewport: true, runLayout: true });
+      }
+      scheduleSavePositions();
+    }
+  },
+);
+
 onMounted(async () => {
   mount();
-  const savedPositions = await loadSavedPositions(activeLayout.value);
+  const savedPositions = await loadSavedPositions(activeLayout.value, computedFocusTarget.value);
   if (savedPositions.size > 0) {
     await syncGraphData({ savedPositions });
   } else {
@@ -626,7 +668,7 @@ async function setLayout(type: LayoutType) {
   if (type === activeLayout.value) return;
   activeLayout.value = type;
   applyRendererStylesImpl();
-  const savedPositions = await loadSavedPositions(type);
+  const savedPositions = await loadSavedPositions(type, computedFocusTarget.value);
   if (savedPositions.size > 0) {
     await syncGraphDataImpl({ preserveViewport: true, savedPositions });
   } else {
@@ -644,7 +686,7 @@ async function exportImage(type: "png" | "svg"): Promise<string | undefined> {
 }
 
 async function resetLayout() {
-  await clearTopologyNodePositions(activeLayout.value);
+  await clearTopologyNodePositions(activeLayout.value, computedFocusTarget.value);
   await syncGraphDataImpl({ runLayout: true });
   scheduleSavePositions();
 }

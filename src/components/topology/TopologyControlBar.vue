@@ -11,22 +11,22 @@ const props = defineProps<{
   stats: TopologyLegendStats | null;
   filter: TopologyFilterState;
   focusNeighborhoodEnabled: boolean;
-  layout: "force" | "dagre";
+  layout: "force" | "focus";
   performanceOptimizationEnabled: boolean;
-  dagreFocusNodeName: string | null;
+  focusSystemName: string | null;
 }>();
 
 const emit = defineEmits<{
   (e: "search", payload: { matchIds: string[]; focusId?: string }): void;
   (e: "filter-change", payload: Partial<TopologyFilterState>): void;
-  (e: "layout-change", type: "force" | "dagre"): void;
+  (e: "layout-change", type: "force" | "focus"): void;
   (e: "reset-layout"): void;
   (e: "export", type: "png" | "svg"): void;
   (e: "refresh"): void;
   (e: "fullscreen"): void;
   (e: "focus-mode-change", enabled: boolean): void;
   (e: "performance-optimization-change", enabled: boolean): void;
-  (e: "dagre-focus-reselect"): void;
+  (e: "focus-reselect"): void;
 }>();
 
 const NODE_KIND_LABELS: Record<TopologyGroupKind, string> = {
@@ -208,7 +208,7 @@ function updatePerformanceOptimization(event: Event) {
   emit("performance-optimization-change", Boolean(target?.checked));
 }
 
-function changeLayout(layout: "force" | "dagre") {
+function changeLayout(layout: "force" | "focus") {
   if (props.layout === layout) return;
   emit("layout-change", layout);
 }
@@ -245,13 +245,13 @@ onBeforeUnmount(() => {
       <div class="action-box">
         <div class="chip-group">
           <button
-            data-testid="layout-dagre"
+            data-testid="layout-focus"
             type="button"
             class="chip-btn"
-            :class="{ active: layout === 'dagre' }"
-            @click="changeLayout('dagre')"
+            :class="{ active: layout === 'focus' }"
+            @click="changeLayout('focus')"
           >
-            层级
+            聚焦
           </button>
           <button
             data-testid="layout-force"
@@ -264,13 +264,13 @@ onBeforeUnmount(() => {
           </button>
         </div>
 
-        <span v-if="layout === 'dagre' && dagreFocusNodeName" class="dagre-focus-indicator">
-          焦点: {{ dagreFocusNodeName }}
+        <span v-if="layout === 'focus' && focusSystemName" class="focus-indicator">
+          焦点: {{ focusSystemName }}
           <button
-            data-testid="dagre-focus-reselect"
+            data-testid="focus-reselect"
             type="button"
-            class="text-btn dagre-reselect-btn"
-            @click="emit('dagre-focus-reselect')"
+            class="text-btn focus-reselect-btn"
+            @click="emit('focus-reselect')"
           >
             重选
           </button>
@@ -468,7 +468,7 @@ onBeforeUnmount(() => {
   color: var(--im-accent);
 }
 
-.dagre-focus-indicator {
+.focus-indicator {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -485,7 +485,7 @@ onBeforeUnmount(() => {
   text-overflow: ellipsis;
 }
 
-.dagre-reselect-btn {
+.focus-reselect-btn {
   min-height: auto;
   padding: 0;
   font-size: 12px;

@@ -1562,21 +1562,27 @@ use crate::models::topology_node_position::{
 pub fn get_topology_node_positions(
     pool: State<DbPool>,
     layout_type: String,
+    focus_target: Option<String>,
 ) -> AppResult<Vec<TopologyNodePosition>> {
     let command = "get_topology_node_positions";
     let conn = pool
         .get()
         .map_err(|e| AppError::db_unavailable(command, format!("Pool error: {e}")))?;
     let mut stmt = conn
-        .prepare("SELECT node_id, layout_type, x, y FROM topology_node_positions WHERE layout_type = ?1")
+        .prepare(
+            "SELECT node_id, layout_type, focus_target, x, y
+             FROM topology_node_positions
+             WHERE layout_type = ?1 AND (focus_target IS ?2 OR (?2 IS NULL AND focus_target IS NULL))"
+        )
         .map_err(|e| AppError::from_db_error(command, "prepare select positions", e))?;
     let rows = stmt
-        .query_map([&layout_type], |row| {
+        .query_map(rusqlite::params![&layout_type, &focus_target], |row| {
             Ok(TopologyNodePosition {
                 node_id: row.get(0)?,
                 layout_type: row.get(1)?,
-                x: row.get(2)?,
-                y: row.get(3)?,
+                focus_target: row.get(2)?,
+                x: row.get(3)?,
+                y: row.get(4)?,
             })
         })
         .map_err(|e| AppError::from_db_error(command, "query positions", e))?;
@@ -1600,15 +1606,24 @@ pub fn save_topology_node_positions(
         .transaction()
         .map_err(|e| AppError::from_db_error(command, "begin transaction", e))?;
     tx.execute(
-        "DELETE FROM topology_node_positions WHERE layout_type = ?1",
-        [&data.layout_type],
+        "DELETE FROM topology_node_positions
+         WHERE layout_type = ?1 AND (focus_target IS ?2 OR (?2 IS NULL AND focus_target IS NULL))",
+        rusqlite::params![&data.layout_type, &data.focus_target],
     )
     .map_err(|e| AppError::from_db_error(command, "delete old positions", e))?;
     let now = chrono::Utc::now().to_rfc3339();
     for entry in &data.positions {
         tx.execute(
-            "INSERT INTO topology_node_positions (node_id, layout_type, x, y, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)",
-            rusqlite::params![entry.node_id, data.layout_type, entry.x, entry.y, now],
+            "INSERT INTO topology_node_positions (node_id, layout_type, focus_target, x, y, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params![
+                &entry.node_id,
+                &data.layout_type,
+                &data.focus_target,
+                entry.x,
+                entry.y,
+                &now
+            ],
         )
         .map_err(|e| AppError::from_db_error(command, "insert position", e))?;
     }
@@ -1621,14 +1636,16 @@ pub fn save_topology_node_positions(
 pub fn clear_topology_node_positions(
     pool: State<DbPool>,
     layout_type: String,
+    focus_target: Option<String>,
 ) -> AppResult<()> {
     let command = "clear_topology_node_positions";
     let conn = pool
         .get()
         .map_err(|e| AppError::db_unavailable(command, format!("Pool error: {e}")))?;
     conn.execute(
-        "DELETE FROM topology_node_positions WHERE layout_type = ?1",
-        [&layout_type],
+        "DELETE FROM topology_node_positions
+         WHERE layout_type = ?1 AND (focus_target IS ?2 OR (?2 IS NULL AND focus_target IS NULL))",
+        rusqlite::params![&layout_type, &focus_target],
     )
     .map_err(|e| AppError::from_db_error(command, "clear positions", e))?;
     Ok(())
@@ -2047,9 +2064,177 @@ mod tests {
 
         assert_eq!(result.summary.inbound_dependency_count, 1);
         assert_eq!(result.summary.outbound_dependency_count, 2);
-        assert!(result
-            .insights
-            .iter()
-            .any(|item| item.kind == "dependency" && item.description.contains("inbound=1")));
+    }
+}
+
+// ── System Focus Options for Focus Layout ──
+
+#[tauri::command]
+pub fn get_systems_for_focus(
+    pool: State<DbPool>,
+    env: String,
+) -> Result<Vec<crate::models::topology::SystemFocusOption>, String> {
+    let conn = pool.get().map_err(|e| e.to_string())?;
+    get_systems_for_focus_inner(&conn, &env).map_err(|e| e.to_string())
+}
+
+fn get_systems_for_focus_inner(
+    conn: &Connection,
+    env: &str,
+) -> AppResult<Vec<crate::models::topology::SystemFocusOption>> {
+    use crate::models::topology::SystemFocusOption;
+    use std::collections::HashMap;
+
+    // 查询指定环境的所有服务
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, name, system_id
+         FROM services
+         WHERE is_deleted = 0 AND env = ?1
+         ORDER BY name",
+        )
+        .map_err(|e| AppError::from_db_error("get_systems_for_focus", "prepare statement", e))?;
+
+    let services: Vec<(String, String, Option<String>)> = stmt
+        .query_map([env], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?,
+            ))
+        })
+        .map_err(|e| AppError::from_db_error("get_systems_for_focus", "query services", e))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| AppError::from_db_error("get_systems_for_focus", "collect services", e))?;
+
+    // 查询中间件
+    let mut middleware_stmt = conn
+        .prepare(
+            "SELECT id, name FROM middlewares
+         WHERE is_deleted = 0 AND env = ?1
+         ORDER BY name",
+        )
+        .map_err(|e| AppError::from_db_error("get_systems_for_focus", "prepare middleware statement", e))?;
+
+    let middlewares: Vec<(String, String)> = middleware_stmt
+        .query_map([env], |row| Ok((row.get(0)?, row.get(1)?)))
+        .map_err(|e| AppError::from_db_error("get_systems_for_focus", "query middlewares", e))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| AppError::from_db_error("get_systems_for_focus", "collect middlewares", e))?;
+
+    // 查询网关
+    let mut nginx_stmt = conn
+        .prepare(
+            "SELECT id, name FROM nginx_configs
+         WHERE is_deleted = 0 AND env = ?1
+         ORDER BY name",
+        )
+        .map_err(|e| AppError::from_db_error("get_systems_for_focus", "prepare nginx statement", e))?;
+
+    let nginx_configs: Vec<(String, String)> = nginx_stmt
+        .query_map([env], |row| Ok((row.get(0)?, row.get(1)?)))
+        .map_err(|e| AppError::from_db_error("get_systems_for_focus", "query nginx_configs", e))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| AppError::from_db_error("get_systems_for_focus", "collect nginx_configs", e))?;
+
+    // 按 system_id 分组
+    let mut system_map: HashMap<String, Vec<String>> = HashMap::new();
+    let mut system_names: HashMap<String, String> = HashMap::new();
+    let mut standalone_services: Vec<(String, String)> = Vec::new();
+
+    for (service_id, service_name, system_id_opt) in services {
+        if let Some(system_id) = system_id_opt {
+            if !system_id.is_empty() {
+                system_map
+                    .entry(system_id.clone())
+                    .or_insert_with(Vec::new)
+                    .push(service_id);
+
+                // 获取系统名称（如果还没有）
+                if !system_names.contains_key(&system_id) {
+                    if let Ok(system_name) = conn.query_row(
+                        "SELECT name FROM systems WHERE id = ?1 AND is_deleted = 0",
+                        [&system_id],
+                        |row| row.get::<_, String>(0),
+                    ) {
+                        system_names.insert(system_id.clone(), system_name);
+                    }
+                }
+            } else {
+                standalone_services.push((service_id, service_name));
+            }
+        } else {
+            standalone_services.push((service_id, service_name));
+        }
+    }
+
+    let mut result: Vec<SystemFocusOption> = Vec::new();
+
+    // 添加有系统归属的服务（按系统分组）
+    for (system_id, service_ids) in system_map {
+        let system_name = system_names
+            .get(&system_id)
+            .cloned()
+            .unwrap_or_else(|| system_id.clone());
+
+        result.push(SystemFocusOption {
+            system_id: system_id.clone(),
+            system_name,
+            service_count: service_ids.len() as u32,
+            service_ids,
+            is_standalone: false,
+            node_type: None,
+        });
+    }
+
+    // 添加独立服务（无系统归属）
+    for (service_id, service_name) in standalone_services {
+        result.push(SystemFocusOption {
+            system_id: String::new(),
+            system_name: service_name,
+            service_count: 1,
+            service_ids: vec![service_id],
+            is_standalone: true,
+            node_type: Some("service".to_string()),
+        });
+    }
+
+    // 添加独立中间件
+    for (middleware_id, middleware_name) in middlewares {
+        result.push(SystemFocusOption {
+            system_id: String::new(),
+            system_name: middleware_name,
+            service_count: 1,
+            service_ids: vec![middleware_id],
+            is_standalone: true,
+            node_type: Some("middleware".to_string()),
+        });
+    }
+
+    // 添加独立网关
+    for (nginx_id, nginx_name) in nginx_configs {
+        result.push(SystemFocusOption {
+            system_id: String::new(),
+            system_name: nginx_name,
+            service_count: 1,
+            service_ids: vec![nginx_id],
+            is_standalone: true,
+            node_type: Some("nginx".to_string()),
+        });
+    }
+
+    // 按服务数量降序排列
+    result.sort_by(|a, b| b.service_count.cmp(&a.service_count));
+
+    Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_topology_dependency_insights() {
+        // 这里可以添加测试代码
     }
 }

@@ -370,21 +370,39 @@ export function formatSystemComboLabel(systemId: string, systemNodes: TopologyNo
   return compactLabel(isOpaqueIdentifier(systemId) ? `系统 #${systemId.slice(-6)}` : systemId, 22);
 }
 
-export function filterDagreFocusSubgraph(
+export function filterFocusSubgraph(
   graph: TopologyGraph,
-  focusNodeId: string,
+  focusNodeIds: string[],
 ): TopologyGraph | null {
-  const focusNode = graph.nodes.find((node) => node.id === focusNodeId);
-  if (!focusNode) return null;
+  if (focusNodeIds.length === 0) return null;
 
-  const { highlightedNodeIds, highlightedEdgeIds } = collectDirectionalReachability(
-    focusNodeId,
-    graph.edges,
-  );
+  const allHighlightedNodeIds = new Set<string>();
+  const allHighlightedEdgeIds = new Set<string>();
 
-  const nodes = sortNodes(graph.nodes.filter((node) => highlightedNodeIds.has(node.id)));
-  const edges = graph.edges.filter((edge) => highlightedEdgeIds.has(edge.id));
-  const legendStats = computeLegendStats(nodes, edges, focusNode.env);
+  // 对每个焦点节点收集可达性
+  for (const focusNodeId of focusNodeIds) {
+    const focusNode = graph.nodes.find((node) => node.id === focusNodeId);
+    if (!focusNode) continue;
+
+    const { highlightedNodeIds, highlightedEdgeIds } = collectDirectionalReachability(
+      focusNodeId,
+      graph.edges,
+    );
+
+    highlightedNodeIds.forEach((id) => allHighlightedNodeIds.add(id));
+    highlightedEdgeIds.forEach((id) => allHighlightedEdgeIds.add(id));
+  }
+
+  if (allHighlightedNodeIds.size === 0) return null;
+
+  const nodes = sortNodes(graph.nodes.filter((node) => allHighlightedNodeIds.has(node.id)));
+  const edges = graph.edges.filter((edge) => allHighlightedEdgeIds.has(edge.id));
+
+  // 使用第一个焦点节点的环境作为参考
+  const firstFocusNode = graph.nodes.find((node) => node.id === focusNodeIds[0]);
+  const env = firstFocusNode?.env || "prod";
+
+  const legendStats = computeLegendStats(nodes, edges, env);
   const lanes = buildLanes(graph.lanes, nodes);
 
   return {
@@ -394,4 +412,12 @@ export function filterDagreFocusSubgraph(
     legendStats,
     layoutHints: graph.layoutHints,
   };
+}
+
+// 保留旧函数名以兼容现有代码
+export function filterDagreFocusSubgraph(
+  graph: TopologyGraph,
+  focusNodeId: string,
+): TopologyGraph | null {
+  return filterFocusSubgraph(graph, [focusNodeId]);
 }

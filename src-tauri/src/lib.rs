@@ -104,6 +104,7 @@ pub fn run() {
             commands::topology::get_topology_impact_v3,
             commands::topology::get_topology_evidence_v3,
             commands::topology::get_topology_troubleshoot_report_v3,
+            commands::topology::get_systems_for_focus,
             commands::topology::get_topology_node_positions,
             commands::topology::save_topology_node_positions,
             commands::topology::clear_topology_node_positions,
