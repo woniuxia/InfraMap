@@ -264,23 +264,26 @@ function navigateToManual() {
       </el-sub-menu>
     </el-menu>
 
-    <!-- 底部区域：使用手册 + 系统设置 + 折叠按钮（单行横向布局） -->
+    <!-- 底部区域：系统设置 + 使用手册 + 折叠按钮（单行横向布局） -->
     <div class="sidebar-bottom" :class="{ 'is-collapsed': appStore.sidebarCollapsed }">
-      <div class="manual-item" :class="{ 'is-active': isManualActive }" @click="navigateToManual">
-        <el-icon><QuestionFilled /></el-icon>
-        <span v-if="!appStore.sidebarCollapsed" class="manual-text">
-          {{ manualItem.name }}
-        </span>
-      </div>
       <div
         class="settings-item"
         :class="{ 'is-active': isSettingsActive }"
         @click="navigateToSettings"
+        :title="settingsItem.name"
       >
         <el-icon><Setting /></el-icon>
         <span v-if="!appStore.sidebarCollapsed" class="settings-text">
           {{ settingsItem.name }}
         </span>
+      </div>
+      <div
+        class="manual-item"
+        :class="{ 'is-active': isManualActive }"
+        @click="navigateToManual"
+        :title="manualItem.name"
+      >
+        <el-icon><QuestionFilled /></el-icon>
       </div>
       <div class="collapse-btn" @click="appStore.toggleSidebar">
         <el-icon size="18">
@@ -382,8 +385,7 @@ function navigateToManual() {
 }
 
 // 系统设置独立项样式
-.settings-item,
-.manual-item {
+.settings-item {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -430,13 +432,38 @@ function navigateToManual() {
     font-size: 18px;
     flex-shrink: 0;
   }
+}
 
-  &:not(.is-active) .el-icon {
-    margin-right: 10px;
+// 使用手册按钮样式
+.manual-item {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  border-radius: var(--im-radius-sm);
+  cursor: pointer;
+  transition: all var(--im-duration-base) var(--im-ease-standard);
+  color: var(--im-text-primary);
+
+  &:hover {
+    background: var(--im-surface-1);
   }
 
-  .is-collapsed & .el-icon {
-    margin-right: 0;
+  &.is-active {
+    background: var(--im-accent-dim);
+    color: var(--im-accent);
+  }
+
+  .is-collapsed & {
+    width: 44px;
+    margin: 0 auto;
+  }
+
+  .el-icon {
+    font-size: 18px;
+    flex-shrink: 0;
   }
 }
 

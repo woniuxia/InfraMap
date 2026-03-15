@@ -486,6 +486,53 @@ async function handleAnalyzeImpact() {
   await analyzeImpactForNode(node);
 }
 
+async function handleFocusView() {
+  if (!contextMenuNode.value) return;
+
+  const node = contextMenuNode.value;
+
+  // 检查节点是否有 systemId
+  if (!node.systemId && !node.system_id) {
+    ElMessage.warning("该节点未关联系统，无法进入聚焦视图");
+    closeContextMenu();
+    return;
+  }
+
+  // 如果是外部节点，提示不支持
+  if (isExternalNode(node)) {
+    ElMessage.info("外部节点不支持聚焦视图");
+    closeContextMenu();
+    return;
+  }
+
+  // 加载系统选项
+  try {
+    systemFocusOptions.value = await getSystemsForFocus(activeFilter.value.env);
+
+    // 查找节点对应的系统
+    const nodeSystemId = node.systemId || node.system_id;
+    const targetSystem = systemFocusOptions.value.find((opt) => opt.systemId === nodeSystemId);
+
+    if (!targetSystem) {
+      ElMessage.warning("未找到该节点所属的系统");
+      closeContextMenu();
+      return;
+    }
+
+    // 直接切换到聚焦视图，无需弹出对话框
+    selectedFocusSystem.value = targetSystem;
+    focusNodeIds.value = targetSystem.serviceIds;
+    selectedLayout.value = "focus";
+
+    ElMessage.success(`已切换到聚焦视图：${targetSystem.systemName}`);
+  } catch (error) {
+    ElMessage.error("切换聚焦视图失败");
+    console.error("切换聚焦视图失败:", error);
+  } finally {
+    closeContextMenu();
+  }
+}
+
 function handleSearch(payload: { matchIds: string[]; focusId?: string }) {
   if (payload.matchIds.length === 0) {
     canvasRef.value?.clearHighlight();
@@ -933,6 +980,14 @@ onBeforeUnmount(() => {
         @click.stop
       >
         <div data-testid="context-edit" class="context-menu-item" @click="handleEditNode">编辑</div>
+        <div
+          v-if="contextMenuNode?.systemId || contextMenuNode?.system_id"
+          data-testid="context-focus-view"
+          class="context-menu-item"
+          @click="handleFocusView"
+        >
+          聚焦视图
+        </div>
         <div data-testid="context-path-trace" class="context-menu-item" @click="startPathTrace">
           路径追踪（从此节点出发）
         </div>

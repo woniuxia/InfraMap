@@ -204,6 +204,38 @@ fn resource_exists(
     Ok(count > 0)
 }
 
+fn query_resource_name(
+    conn: &rusqlite::Connection,
+    resource_type: &str,
+    resource_id: &str,
+) -> Result<Option<String>, rusqlite::Error> {
+    let name: Option<String> = match resource_type {
+        "service" => conn
+            .query_row(
+                "SELECT name FROM services WHERE id = ?1 AND is_deleted = 0",
+                rusqlite::params![resource_id],
+                |row| row.get(0),
+            )
+            .ok(),
+        "middleware" => conn
+            .query_row(
+                "SELECT name FROM middlewares WHERE id = ?1 AND is_deleted = 0",
+                rusqlite::params![resource_id],
+                |row| row.get(0),
+            )
+            .ok(),
+        "nginx" => conn
+            .query_row(
+                "SELECT name FROM nginx_configs WHERE id = ?1 AND is_deleted = 0",
+                rusqlite::params![resource_id],
+                |row| row.get(0),
+            )
+            .ok(),
+        _ => None,
+    };
+    Ok(name)
+}
+
 fn ensure_resource_exists(
     command: &str,
     conn: &rusqlite::Connection,
@@ -361,12 +393,22 @@ fn replace_resource_call_relations_inner(
             created_count += 2;
         }
 
+        // 查询 owner 资源名称
+        let owner_name = query_resource_name(conn, &params.resource_type, &params.resource_id)
+            .ok()
+            .flatten();
+
+        // 构造有意义的 resource_name
+        let resource_name = owner_name
+            .as_ref()
+            .map(|name| format!("{} 的调用关系", name));
+
         insert_audit_log(
             conn,
             "update",
             "call_relation",
             &params.resource_id,
-            None,
+            resource_name.as_deref(),
             None,
         )
         .map_err(|e| AppError::from_db_error(command, "写入审计日志", e))?;

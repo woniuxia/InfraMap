@@ -46,11 +46,18 @@ function resourceTypeLabel(type: string) {
     (
       {
         host: "服务器",
-        application: "应用",
+        service: "服务",
+        system: "业务系统",
         middleware: "中间件",
         nginx: "网关",
+        contact: "联系人",
+        ip_address: "IP 地址",
+        host_ip_binding: "主机 IP 绑定",
         deployment: "部署关系",
         dependency: "依赖关系",
+        call_relation: "调用关系",
+        system_settings: "系统设置",
+        integrity: "完整性检查",
       } as Record<string, string>
     )[type] || type
   );
@@ -61,11 +68,18 @@ function resourceTypeTagType(type: string): "primary" | "success" | "warning" | 
     (
       {
         host: "primary",
-        application: "success",
+        service: "success",
+        system: "success",
         middleware: "warning",
         nginx: "danger",
+        contact: "info",
+        ip_address: "info",
+        host_ip_binding: "info",
         deployment: "info",
         dependency: "info",
+        call_relation: "info",
+        system_settings: "warning",
+        integrity: "warning",
       } as Record<string, "primary" | "success" | "warning" | "info" | "danger">
     )[type] || "info"
   );

@@ -120,12 +120,21 @@ fn bind_host_ip_inner(
             }
         }
 
+        // 查询 hostname
+        let host_name = conn
+            .query_row(
+                "SELECT hostname FROM hosts WHERE id = ?1 AND is_deleted = 0",
+                rusqlite::params![host_id],
+                |row| row.get::<_, String>(0),
+            )
+            .ok();
+
         insert_audit_log(
             conn,
             "update",
             "host_ip_binding",
             host_id,
-            Some(host_id),
+            host_name.as_deref(),
             Some(&format!("bind ip_id={}", ip_id)),
         )
         .map_err(|e| AppError::from_db_error(command, "写入审计日志", e))?;
@@ -157,12 +166,21 @@ fn unbind_host_ip_inner(
             ));
         }
 
+        // 查询 hostname
+        let host_name = conn
+            .query_row(
+                "SELECT hostname FROM hosts WHERE id = ?1 AND is_deleted = 0",
+                rusqlite::params![host_id],
+                |row| row.get::<_, String>(0),
+            )
+            .ok();
+
         insert_audit_log(
             conn,
             "update",
             "host_ip_binding",
             host_id,
-            Some(host_id),
+            host_name.as_deref(),
             Some(&format!("unbind ip_id={} at {}", ip_id, now)),
         )
         .map_err(|e| AppError::from_db_error(command, "写入审计日志", e))?;
