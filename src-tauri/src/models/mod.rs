@@ -15,3 +15,4 @@ pub mod snapshot;
 pub mod system;
 pub mod system_job;
 pub mod topology;
+pub mod topology_node_position;

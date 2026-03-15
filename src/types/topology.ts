@@ -309,3 +309,18 @@ export interface TopologyTroubleshootReport {
   evidence: TopologyEvidenceResponse;
   insights: TopologyTaskInsight[];
 }
+
+// ── Node position persistence ──
+
+export interface TopologyNodePosition {
+  node_id: string;
+  layout_type: string;
+  x: number;
+  y: number;
+}
+
+export interface TopologyNodePositionEntry {
+  node_id: string;
+  x: number;
+  y: number;
+}

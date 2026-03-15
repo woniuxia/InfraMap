@@ -9,6 +9,11 @@ import { useTopologyHighlight } from "@/components/topology/useTopologyHighlight
 import { useTopologyInteraction } from "@/components/topology/useTopologyInteraction";
 import { useTopologyLayout } from "@/components/topology/useTopologyLayout";
 import { useTopologyRenderer } from "@/components/topology/useTopologyRenderer";
+import {
+  getTopologyNodePositions,
+  saveTopologyNodePositions,
+  clearTopologyNodePositions,
+} from "@/api/topologyV3";
 
 const props = withDefaults(
   defineProps<{
@@ -48,6 +53,7 @@ let getCyImpl: () => Core | null = () => null;
 let syncGraphDataImpl: (options?: {
   preserveViewport?: boolean;
   runLayout?: boolean;
+  savedPositions?: Map<string, { x: number; y: number }>;
 }) => Promise<void> = async () => {};
 let applyRendererStylesImpl: () => void = () => {};
 let graphTheme: GraphTheme | null = null;
@@ -115,14 +121,15 @@ const { handleCanvasTap, handleNodeTap, handleNodeContextTap } = useTopologyInte
   emitCanvasBlankClick: () => emit("canvas-blank-click"),
 });
 
-const { snapshotLeafNodePositions, restoreLeafNodePositions, runLayout } = useTopologyLayout({
-  getCy: () => getCyImpl(),
-  getIsLargeGraph: () => renderFlags.isLargeGraph,
-  onFallbackToForce: () => {
-    activeLayout.value = "force";
-    applyRendererStylesImpl();
-  },
-});
+const { snapshotLeafNodePositions, restoreLeafNodePositions, runLayout, runIncrementalLayout } =
+  useTopologyLayout({
+    getCy: () => getCyImpl(),
+    getIsLargeGraph: () => renderFlags.isLargeGraph,
+    onFallbackToForce: () => {
+      activeLayout.value = "force";
+      applyRendererStylesImpl();
+    },
+  });
 
 interface GraphTheme {
   statusColors: Record<string, string>;
@@ -493,6 +500,7 @@ const {
   snapshotLeafNodePositions,
   restoreLeafNodePositions,
   runLayout,
+  runIncrementalLayout,
   applyHighlightState,
   emitLayoutResolved: (payload) => emit("layout-resolved", payload),
   handleCanvasTap,
@@ -508,6 +516,48 @@ const {
 getCyImpl = () => currentCy;
 syncGraphDataImpl = syncGraphData;
 applyRendererStylesImpl = applyRendererStyles;
+
+// ── Position persistence helpers ──
+
+let saveTimer: ReturnType<typeof setTimeout> | null = null;
+
+function collectLeafPositions(): Array<{ node_id: string; x: number; y: number }> {
+  if (!currentCy) return [];
+  const entries: Array<{ node_id: string; x: number; y: number }> = [];
+  currentCy
+    .nodes()
+    .not(":parent")
+    .forEach((node: cytoscape.NodeSingular) => {
+      const pos = node.position();
+      entries.push({ node_id: node.id(), x: pos.x, y: pos.y });
+    });
+  return entries;
+}
+
+function scheduleSavePositions() {
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    saveTimer = null;
+    const positions = collectLeafPositions();
+    if (positions.length === 0) return;
+    void saveTopologyNodePositions(activeLayout.value, positions);
+  }, 1500);
+}
+
+async function loadSavedPositions(
+  layoutType: string,
+): Promise<Map<string, { x: number; y: number }>> {
+  try {
+    const rows = await getTopologyNodePositions(layoutType);
+    const map = new Map<string, { x: number; y: number }>();
+    for (const row of rows) {
+      map.set(row.node_id, { x: row.x, y: row.y });
+    }
+    return map;
+  } catch {
+    return new Map();
+  }
+}
 
 watch(
   () => props.graphData,
@@ -541,12 +591,27 @@ watch(
   },
 );
 
-onMounted(() => {
+onMounted(async () => {
   mount();
-  void syncGraphData();
+  const savedPositions = await loadSavedPositions(activeLayout.value);
+  if (savedPositions.size > 0) {
+    await syncGraphData({ savedPositions });
+  } else {
+    await syncGraphData();
+  }
+  // After initial layout, save positions and start listening for drags
+  scheduleSavePositions();
+  // Listen for node drag-end to auto-save
+  const cy = currentCy;
+  if (cy) {
+    cy.on("free", "node", () => {
+      scheduleSavePositions();
+    });
+  }
 });
 
 onBeforeUnmount(() => {
+  if (saveTimer) clearTimeout(saveTimer);
   disposeDensity();
   dispose();
 });
@@ -559,7 +624,13 @@ async function setLayout(type: LayoutType) {
   if (type === activeLayout.value) return;
   activeLayout.value = type;
   applyRendererStylesImpl();
-  await syncGraphDataImpl({ preserveViewport: true, runLayout: true });
+  const savedPositions = await loadSavedPositions(type);
+  if (savedPositions.size > 0) {
+    await syncGraphDataImpl({ preserveViewport: true, savedPositions });
+  } else {
+    await syncGraphDataImpl({ preserveViewport: true, runLayout: true });
+  }
+  scheduleSavePositions();
 }
 
 function applyFilter() {
@@ -568,6 +639,12 @@ function applyFilter() {
 
 async function exportImage(type: "png" | "svg"): Promise<string | undefined> {
   return exportCanvasImage(type);
+}
+
+async function resetLayout() {
+  await clearTopologyNodePositions(activeLayout.value);
+  await syncGraphDataImpl({ runLayout: true });
+  scheduleSavePositions();
 }
 
 defineExpose({
@@ -579,6 +656,7 @@ defineExpose({
   setLayout,
   exportImage,
   clearHighlight,
+  resetLayout,
 });
 </script>
 

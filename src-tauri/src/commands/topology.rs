@@ -1550,6 +1550,90 @@ pub fn get_topology_troubleshoot_report_v3(
         .map_err(|e| AppError::from_db_error(command, "build topology troubleshoot report v3", e))
 }
 
+// ──────────────────────────────────────────────────────────
+// Node position persistence
+// ──────────────────────────────────────────────────────────
+
+use crate::models::topology_node_position::{
+    SaveTopologyPositionsInput, TopologyNodePosition,
+};
+
+#[tauri::command]
+pub fn get_topology_node_positions(
+    pool: State<DbPool>,
+    layout_type: String,
+) -> AppResult<Vec<TopologyNodePosition>> {
+    let command = "get_topology_node_positions";
+    let conn = pool
+        .get()
+        .map_err(|e| AppError::db_unavailable(command, format!("Pool error: {e}")))?;
+    let mut stmt = conn
+        .prepare("SELECT node_id, layout_type, x, y FROM topology_node_positions WHERE layout_type = ?1")
+        .map_err(|e| AppError::from_db_error(command, "prepare select positions", e))?;
+    let rows = stmt
+        .query_map([&layout_type], |row| {
+            Ok(TopologyNodePosition {
+                node_id: row.get(0)?,
+                layout_type: row.get(1)?,
+                x: row.get(2)?,
+                y: row.get(3)?,
+            })
+        })
+        .map_err(|e| AppError::from_db_error(command, "query positions", e))?;
+    let mut result = Vec::new();
+    for row in rows {
+        result.push(row.map_err(|e| AppError::from_db_error(command, "read position row", e))?);
+    }
+    Ok(result)
+}
+
+#[tauri::command]
+pub fn save_topology_node_positions(
+    pool: State<DbPool>,
+    data: SaveTopologyPositionsInput,
+) -> AppResult<()> {
+    let command = "save_topology_node_positions";
+    let mut conn = pool
+        .get()
+        .map_err(|e| AppError::db_unavailable(command, format!("Pool error: {e}")))?;
+    let tx = conn
+        .transaction()
+        .map_err(|e| AppError::from_db_error(command, "begin transaction", e))?;
+    tx.execute(
+        "DELETE FROM topology_node_positions WHERE layout_type = ?1",
+        [&data.layout_type],
+    )
+    .map_err(|e| AppError::from_db_error(command, "delete old positions", e))?;
+    let now = chrono::Utc::now().to_rfc3339();
+    for entry in &data.positions {
+        tx.execute(
+            "INSERT INTO topology_node_positions (node_id, layout_type, x, y, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params![entry.node_id, data.layout_type, entry.x, entry.y, now],
+        )
+        .map_err(|e| AppError::from_db_error(command, "insert position", e))?;
+    }
+    tx.commit()
+        .map_err(|e| AppError::from_db_error(command, "commit positions", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn clear_topology_node_positions(
+    pool: State<DbPool>,
+    layout_type: String,
+) -> AppResult<()> {
+    let command = "clear_topology_node_positions";
+    let conn = pool
+        .get()
+        .map_err(|e| AppError::db_unavailable(command, format!("Pool error: {e}")))?;
+    conn.execute(
+        "DELETE FROM topology_node_positions WHERE layout_type = ?1",
+        [&layout_type],
+    )
+    .map_err(|e| AppError::from_db_error(command, "clear positions", e))?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

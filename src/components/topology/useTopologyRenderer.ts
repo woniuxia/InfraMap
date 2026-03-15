@@ -48,6 +48,7 @@ interface GraphTheme {
 export interface TopologyRendererSyncOptions {
   preserveViewport?: boolean;
   runLayout?: boolean;
+  savedPositions?: Map<string, { x: number; y: number }>;
 }
 
 interface UseTopologyRendererOptions {
@@ -66,6 +67,10 @@ interface UseTopologyRendererOptions {
   snapshotLeafNodePositions: () => Map<string, { x: number; y: number }>;
   restoreLeafNodePositions: (positions: Map<string, { x: number; y: number }>) => void;
   runLayout: (layout: TopologyLayoutType) => Promise<TopologyLayoutRunResult>;
+  runIncrementalLayout: (
+    fixedPositions: Map<string, { x: number; y: number }>,
+    layout: TopologyLayoutType,
+  ) => Promise<TopologyLayoutRunResult>;
   applyHighlightState: (options: { allowFocus: boolean }) => void;
   emitLayoutResolved: (payload: TopologyLayoutRunResult) => void;
   handleCanvasTap: (event: EventObject) => void;
@@ -552,7 +557,30 @@ export function useTopologyRenderer(options: UseTopologyRendererOptions) {
     }
 
     let layoutResult: TopologyLayoutRunResult | null = null;
-    if (shouldRunLayout) {
+
+    // Saved positions path: restore from DB or run incremental layout for new nodes
+    if (syncOptions.savedPositions && syncOptions.savedPositions.size > 0) {
+      const currentLeafIds = new Set(
+        latestCy
+          .nodes()
+          .not(":parent")
+          .map((n) => n.id()),
+      );
+      const hasNewNodes = Array.from(currentLeafIds).some(
+        (id) => !syncOptions.savedPositions!.has(id),
+      );
+
+      if (!hasNewNodes) {
+        // All nodes have saved positions — restore instantly
+        options.restoreLeafNodePositions(syncOptions.savedPositions);
+      } else {
+        // New nodes detected — run incremental layout
+        layoutResult = await options.runIncrementalLayout(
+          syncOptions.savedPositions,
+          options.getLayout(),
+        );
+      }
+    } else if (shouldRunLayout) {
       layoutResult = await options.runLayout(options.getLayout());
     } else {
       options.restoreLeafNodePositions(preservedNodePositions);

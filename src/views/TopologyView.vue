@@ -510,6 +510,10 @@ function handleLayoutChange(type: "force" | "dagre") {
   selectedLayout.value = type;
 }
 
+function handleResetLayout() {
+  canvasRef.value?.resetLayout();
+}
+
 function handleLayoutResolved(payload: {
   requested: "force" | "dagre";
   applied: "force" | "dagre";
@@ -630,6 +634,7 @@ onBeforeUnmount(() => {
       @filter-change="handleFilterChange"
       @performance-optimization-change="handlePerformanceOptimizationChange"
       @layout-change="handleLayoutChange"
+      @reset-layout="handleResetLayout"
       @focus-mode-change="handleFocusModeChange"
       @export="handleExport"
       @refresh="loadData"

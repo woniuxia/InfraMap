@@ -6,6 +6,8 @@ import type {
   TopologyEvidenceResponse,
   TopologyImpactQuery,
   TopologyImpactResponse,
+  TopologyNodePosition,
+  TopologyNodePositionEntry,
   TopologyPathsQuery,
   TopologyPathsResponse,
   TopologySnapshotQuery,
@@ -52,4 +54,25 @@ export function getTopologyTroubleshootReportV3(
   query: TopologyTroubleshootReportQuery,
 ): Promise<TopologyTroubleshootReport> {
   return tauriInvoke<TopologyTroubleshootReport>("get_topology_troubleshoot_report_v3", { query });
+}
+
+// ── Node position persistence ──
+
+export function getTopologyNodePositions(layoutType: string): Promise<TopologyNodePosition[]> {
+  return tauriInvoke<TopologyNodePosition[]>("get_topology_node_positions", {
+    layoutType,
+  });
+}
+
+export function saveTopologyNodePositions(
+  layoutType: string,
+  positions: TopologyNodePositionEntry[],
+): Promise<void> {
+  return tauriInvoke<void>("save_topology_node_positions", {
+    data: { layout_type: layoutType, positions },
+  });
+}
+
+export function clearTopologyNodePositions(layoutType: string): Promise<void> {
+  return tauriInvoke<void>("clear_topology_node_positions", { layoutType });
 }

@@ -19,6 +19,7 @@ const emit = defineEmits<{
   (e: "search", payload: { matchIds: string[]; focusId?: string }): void;
   (e: "filter-change", payload: Partial<TopologyFilterState>): void;
   (e: "layout-change", type: "force" | "dagre"): void;
+  (e: "reset-layout"): void;
   (e: "export", type: "png" | "svg"): void;
   (e: "refresh"): void;
   (e: "fullscreen"): void;
@@ -260,6 +261,15 @@ onBeforeUnmount(() => {
             力导向
           </button>
         </div>
+
+        <button
+          data-testid="reset-layout"
+          type="button"
+          class="action-btn"
+          @click="emit('reset-layout')"
+        >
+          重置布局
+        </button>
 
         <button
           data-testid="export-png"

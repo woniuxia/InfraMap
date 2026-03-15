@@ -161,9 +161,104 @@ export function useTopologyLayout(options: UseTopologyLayoutOptions) {
     };
   }
 
+  async function runIncrementalLayout(
+    fixedPositions: Map<string, { x: number; y: number }>,
+    layoutType: TopologyLayoutType,
+  ): Promise<TopologyLayoutRunResult> {
+    const cy = options.getCy();
+    if (!cy) {
+      return { requested: layoutType, applied: layoutType, reason: "no_cy_instance" };
+    }
+
+    // Identify new nodes (leaf nodes not present in fixedPositions)
+    const leafNodes = cy.nodes().not(":parent");
+    const newNodes: cytoscape.NodeSingular[] = [];
+
+    // Apply saved positions first
+    cy.batch(() => {
+      leafNodes.forEach((node: cytoscape.NodeSingular) => {
+        const pos = fixedPositions.get(node.id());
+        if (pos) {
+          node.position(pos);
+        } else {
+          newNodes.push(node);
+        }
+      });
+    });
+
+    if (newNodes.length === 0) {
+      // All nodes have saved positions — use preset layout (instant)
+      return { requested: layoutType, applied: layoutType };
+    }
+
+    // Has new nodes — need incremental layout
+    if (layoutType === "dagre") {
+      // dagre doesn't support fixedNodeConstraint, run full dagre
+      return runLayout(layoutType);
+    }
+
+    // Build fixedNodeConstraint for fcose
+    const fixedNodeConstraint: Array<{ nodeId: string; position: { x: number; y: number } }> = [];
+    leafNodes.forEach((node: cytoscape.NodeSingular) => {
+      const pos = fixedPositions.get(node.id());
+      if (pos) {
+        fixedNodeConstraint.push({ nodeId: node.id(), position: pos });
+      }
+    });
+
+    const layoutOptions = {
+      name: "fcose",
+      quality: options.getIsLargeGraph() ? "default" : "proof",
+      randomize: false,
+      animate: false,
+      fit: true,
+      padding: 40,
+      packComponents: false,
+      gravity: 0.4,
+      gravityRange: 4.5,
+      nodeRepulsion: () => 6000,
+      idealEdgeLength: () => 180,
+      numIter: options.getIsLargeGraph() ? 1200 : 1800,
+      tile: true,
+      fixedNodeConstraint,
+    } as unknown as cytoscape.LayoutOptions;
+
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = (ok: boolean) => {
+        if (settled) return;
+        settled = true;
+        resolve({
+          requested: layoutType,
+          applied: layoutType,
+          reason: ok ? undefined : "incremental_layout_error",
+        });
+      };
+
+      let layout: ReturnType<Core["layout"]> | null = null;
+      try {
+        layout = cy.layout(layoutOptions);
+      } catch {
+        finish(false);
+        return;
+      }
+
+      layout.one("layoutstop", () => finish(true));
+      try {
+        layout.run();
+      } catch {
+        finish(false);
+        return;
+      }
+
+      globalThis.setTimeout(() => finish(true), options.getIsLargeGraph() ? 2600 : 1800);
+    });
+  }
+
   return {
     snapshotLeafNodePositions,
     restoreLeafNodePositions,
     runLayout,
+    runIncrementalLayout,
   };
 }
