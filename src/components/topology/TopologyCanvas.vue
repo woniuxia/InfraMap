@@ -312,13 +312,10 @@ function resolveEdgeDash(data: Record<string, unknown>, theme: GraphTheme): stri
 }
 
 function resolveEdgeCurveStyle(
-  data: Record<string, unknown>,
-  runtime: { dense: boolean; layout: "force" | "dagre" },
+  _data: Record<string, unknown>,
+  _runtime: { dense: boolean; layout: "force" | "dagre" },
 ): "bezier" | "taxi" {
-  if (data.crossEnv) return "bezier";
-  if (runtime.layout === "dagre" && runtime.dense) {
-    return "taxi";
-  }
+  // dagre 模式现在使用 fcose 算法,统一使用 bezier 曲线
   return "bezier";
 }
 

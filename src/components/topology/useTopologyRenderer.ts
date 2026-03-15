@@ -239,7 +239,7 @@ function resolveEdgeCurveStyle(
   data: Record<string, unknown>,
   runtime: { dense: boolean; layout: TopologyLayoutType },
 ): string {
-  if (runtime.layout === "dagre") return "taxi";
+  // dagre 模式现在使用 fcose 算法,使用 bezier 曲线更自然
   if (runtime.dense) return "straight";
   if (data.crossEnv) return "unbundled-bezier";
   return "bezier";
