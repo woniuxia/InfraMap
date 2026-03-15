@@ -19,6 +19,7 @@ import {
   Expand,
   User,
   More,
+  QuestionFilled,
 } from "@element-plus/icons-vue";
 import { markRaw, type Component, ref, computed, onMounted, onUnmounted, nextTick } from "vue";
 
@@ -142,13 +143,22 @@ const moreMenuGroups: MenuGroup[] = [
 
 // 底部独立项
 const settingsItem = { path: "/settings", name: "系统设置", icon: markRaw(Setting) };
+const manualItem = { path: "/manual", name: "使用手册", icon: markRaw(QuestionFilled) };
 
 // 判断系统设置是否激活
 const isSettingsActive = computed(() => route.path === settingsItem.path);
 
+// 判断使用手册是否激活
+const isManualActive = computed(() => route.path === manualItem.path);
+
 // 导航到系统设置
 function navigateToSettings() {
   router.push(settingsItem.path);
+}
+
+// 导航到使用手册
+function navigateToManual() {
+  router.push(manualItem.path);
 }
 </script>
 
@@ -254,8 +264,14 @@ function navigateToSettings() {
       </el-sub-menu>
     </el-menu>
 
-    <!-- 底部区域：系统设置 + 折叠按钮（单行横向布局） -->
+    <!-- 底部区域：使用手册 + 系统设置 + 折叠按钮（单行横向布局） -->
     <div class="sidebar-bottom" :class="{ 'is-collapsed': appStore.sidebarCollapsed }">
+      <div class="manual-item" :class="{ 'is-active': isManualActive }" @click="navigateToManual">
+        <el-icon><QuestionFilled /></el-icon>
+        <span v-if="!appStore.sidebarCollapsed" class="manual-text">
+          {{ manualItem.name }}
+        </span>
+      </div>
       <div
         class="settings-item"
         :class="{ 'is-active': isSettingsActive }"
@@ -366,7 +382,8 @@ function navigateToSettings() {
 }
 
 // 系统设置独立项样式
-.settings-item {
+.settings-item,
+.manual-item {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -423,7 +440,8 @@ function navigateToSettings() {
   }
 }
 
-.settings-text {
+.settings-text,
+.manual-text {
   font-size: 14px;
   white-space: nowrap;
   overflow: hidden;

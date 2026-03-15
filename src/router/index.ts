@@ -84,6 +84,12 @@ const routes = [
         component: () => import("@/views/SettingsView.vue"),
         meta: { title: "系统设置" },
       },
+      {
+        path: "manual",
+        name: "Manual",
+        component: () => import("@/views/ManualView.vue"),
+        meta: { title: "使用手册" },
+      },
     ],
   },
 ];
