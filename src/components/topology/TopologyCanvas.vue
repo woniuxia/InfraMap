@@ -558,8 +558,13 @@ async function loadSavedPositions(
 
 watch(
   () => props.graphData,
-  () => {
-    void syncGraphData();
+  async () => {
+    const savedPositions = await loadSavedPositions(activeLayout.value);
+    if (savedPositions.size > 0) {
+      await syncGraphData({ savedPositions });
+    } else {
+      await syncGraphData();
+    }
   },
 );
 
