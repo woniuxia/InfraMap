@@ -1,149 +1,281 @@
-# InfraMap - 基础设施依赖管理平台
+# InfraMap 仓库手册
 
-## 项目概述
+## 1. 文档定位
 
-完全离线的桌面应用，用于管理和可视化基础设施组件之间的依赖关系。面向 DevOps 工程师、开发者和架构师。
+- 本文件记录 InfraMap 当前仓库事实、目录结构、架构入口与模块分布，供开发者和代码代理快速建立上下文。
+- 协作规则、验证基线、危险操作和提交流程见 `AGENTS.md`。
+- `AGENTS.md` 与本文件都保留核心仓库事实；若脚本、测试入口、目录结构或构建方式变更，需同步更新两份文档。
 
-## 技术栈
+## 2. 项目概述
 
-| 层级       | 技术                                                   |
-| ---------- | ------------------------------------------------------ |
-| 前端框架   | Vue 3 (Composition API + `<script setup>`)             |
-| 类型系统   | TypeScript 5.9 (strict)                                |
-| UI 组件库  | Element Plus 2.13                                      |
-| 图可视化   | Cytoscape.js 3.x (+ cytoscape-dagre / cytoscape-fcose) |
-| 状态管理   | Pinia 3 (Setup Function 模式)                          |
-| 路由       | Vue Router 4                                           |
-| 构建工具   | Vite 7                                                 |
-| 桌面运行时 | Tauri 2.10                                             |
-| 后端语言   | Rust (2021 edition)                                    |
-| 数据库     | SQLite (rusqlite 0.32 + r2d2 连接池)                   |
-| 包管理器   | pnpm                                                   |
+- InfraMap 是一个完全离线的桌面应用，用于管理和可视化基础设施资源及其依赖关系。
+- 面向对象主要是 DevOps 工程师、开发者和架构师，默认中文 UI，主要目标平台是 Windows。
+- 前端通过 Vue 3 + Tauri 构建桌面界面，后端使用 Rust + SQLite 提供本地数据存储与查询能力。
 
-## 常用命令
+## 3. 技术栈
 
-```bash
-pnpm dev              # 启动前端开发服务器 (localhost:15420)
-pnpm build            # TypeScript 检查 + Vite 构建
-pnpm test             # 运行前端测试 (Vitest)
-pnpm test:watch       # 前端测试监听模式
-pnpm test:backend     # 运行 Rust 测试 (cd src-tauri && cargo test)
-pnpm build:installer  # 构建桌面安装包 (NSIS/MSI)
-```
+### 3.1 前端
 
-## 目录结构
+- Vue 3（Composition API + `<script setup lang="ts">`）
+- TypeScript 5.9，`tsconfig.json` 开启 `strict`
+- Vite 7
+- Element Plus 2.13
+- Pinia 3
+- Vue Router 4
+- Cytoscape.js 3，配套 `cytoscape-dagre`、`cytoscape-fcose`、`cytoscape-svg`、`dagre`
+- `unplugin-auto-import` 与 `unplugin-vue-components`
 
-```
-src/                          # 前端
-  api/                        # Tauri 命令封装 (每个资源一个文件)
-  components/                 # Vue 组件
-  composables/                # 可复用组合式函数
-  layouts/                    # 布局组件 (DefaultLayout)
-  router/                     # 路由定义
-  stores/                     # Pinia 状态仓库
-  styles/                     # 全局样式
-  types/                      # TypeScript 类型定义 (多文件拆分)
-    index.ts                  # re-export 入口
-    resource.ts               # 资源实体类型
-    common.ts                 # 通用类型 (分页、查询参数等)
-    topology.ts               # 拓扑图相关类型
-    dashboard.ts              # 仪表盘类型
-    import.ts                 # 批量导入类型
-    error.ts                  # 错误类型
-  icons/                      # 图标注册与解析
-  utils/invoke.ts             # Tauri invoke 统一封装
-  views/                      # 页面组件
-  components/
-    topology/                 # 拓扑图组件群 (TopologyCanvas, TopologyControlBar, TopologyDetailPanel 等)
-    resource-editors/         # 资源编辑对话框 (ServiceEditorDialog, MiddlewareEditorDialog 等)
-    contact/                  # 联系人组件 (ContactCard, ContactAvatar)
-    dashboard/                # 仪表盘组件
-    filters/                  # 搜索过滤组件 (SearchToolbar)
-    table/                    # 表格组件
-  __mocks__/tauri.ts          # 测试用 Tauri mock
+### 3.2 桌面与后端
 
-src-tauri/                    # 后端
-  src/
-    commands/                 # Tauri 命令处理函数 (每个资源一个文件)
-    db/                       # 数据库层
-      migrations/             # 迁移文件目录 (v001_init.rs, v002_rename_to_systems.rs, ...)
-      migration.rs            # 迁移运行器
-    models/                   # 数据模型 (Serde 序列化)
-    error.rs                  # AppError / AppResult 错误类型
-    storage.rs                # 存储路径解析
-    backup.rs                 # 备份/恢复逻辑
-    validation.rs             # 输入校验
-    lib.rs                    # 入口，注册所有命令
-```
+- Tauri 2.10
+- Rust 2021
+- rusqlite 0.32（启用 `bundled`、`backup`）
+- r2d2 / r2d2_sqlite
+- SQLite
+- `tauri-plugin-dialog`
+- `tauri-plugin-opener`
 
-## 架构约定
+### 3.3 测试与工具链
 
-### 前端
+- Vitest 4 + jsdom
+- Playwright
+- ESLint 8
+- Prettier 3
+- Husky 9 + lint-staged 15
+- pnpm
 
-**API 层** (`src/api/`): 每个资源一个文件，函数封装 `tauriInvoke` 调用，提供完整 TypeScript 类型。所有 API 在 `src/api/index.ts` 统一导出。
+## 4. 常用命令
 
-**Tauri 调用**: 统一使用 `src/utils/invoke.ts` 的 `tauriInvoke<T>()` 封装，自动处理错误并弹出 `ElMessage.error()` 提示。禁止直接调用 `@tauri-apps/api/core` 的 `invoke`。
+- `pnpm dev`：启动前端开发服务器，默认 `localhost:15420`。
+- `pnpm preview`：启动 Vite 预览服务器。
+- `pnpm tauri dev`：启动 Tauri 开发模式。
+- `pnpm build`：执行类型检查并构建前端。
+- `pnpm build:installer`：执行 `tauri build`，构建安装包。
+- `pnpm lint`：运行 ESLint。
+- `pnpm lint:fix`：运行 ESLint 自动修复。
+- `pnpm format`：执行 Prettier 写回格式。
+- `pnpm format:check`：检查 Prettier 格式。
+- `pnpm test`：运行前端单元测试。
+- `pnpm test:watch`：Vitest 监听模式。
+- `pnpm test:e2e`：运行 Playwright 端到端测试。
+- `pnpm test:backend`：进入 `src-tauri` 执行 Rust 测试。
+- `pnpm sync-version <version>`：同步版本号到前端与 Tauri 配置。
+- `pnpm build:win`：调用 `scripts/build-tauri-win.ps1` 执行 Windows 构建。
+- `pnpm release:win -Tag "vX.Y.Z"`：调用 `scripts/release-win.ps1` 执行构建、打包与发布。
+- `pnpm prepare`：安装 Husky hooks。
 
-**组合式函数** (`src/composables/`): `useResourceList<T>` 封装了分页列表的完整逻辑 (加载、搜索、筛选、分页、删除确认)，所有资源列表页面复用此 composable。
+## 5. 目录结构
 
-**组件风格**: `<script setup lang="ts">` + `<template>` + `<style scoped lang="scss">`。使用 ref/reactive 管理状态，onMounted 初始化数据。
+### 5.1 根目录
 
-**自动导入**: Vue/VueRouter/Pinia API 和 Element Plus 组件均通过 unplugin 自动导入，无需手动 import。
+- `src/`：前端业务代码。
+- `src-tauri/`：Rust/Tauri 后端。
+- `tests/e2e/`：Playwright 端到端测试。
+- `scripts/`：版本同步与 Windows 构建发布脚本。
+- `public/`：前端静态资源。
+- `.husky/`：Git hooks。
+- `.husky/_/`：Husky 辅助目录。
+- `lint-staged.config.mjs`：暂存文件格式化与 lint 规则。
+- `playwright.config.ts`、`vitest.config.ts`：前端测试入口配置。
+- `infraMap.svg`、`app-icon.png`、`gen_icon.py`：图标源与生成脚本。
+- `AGENTS.md`：协作规范。
+- `CLAUDE.md`：仓库手册。
 
-**路径别名**: `@/` 映射到 `src/`。
+### 5.2 `src/`
 
-### 后端
+- `api/`：Tauri 命令的类型化封装；`src/api/index.ts` 负责统一导出。
+- `assets/`：静态样式资源与前端素材。
+- `components/`：可复用业务组件，包括拓扑、编辑器、筛选器、手册分节等。
+- `composables/`：组合式逻辑，例如错误展示、列表交互等。
+- `constants/`：常量定义。
+- `docs/`：前端内嵌说明内容。
+- `icons/`：图标注册与解析。
+- `layouts/`：页面布局与导航框架。
+- `router/`：Vue Router 路由。
+- `stores/`：Pinia store。
+- `styles/`：主题变量、全局样式、反馈样式。
+- `types/`：TypeScript 类型定义与声明扩展。
+- `utils/`：工具函数与 Tauri 调用封装。
+- `views/`：页面级视图，当前包含仪表盘、主机、IP、系统、服务、中间件、网关、联系人、批量录入、任务中心、数据健康、拓扑图、设置、使用手册等页面。
+- `__mocks__/tauri.ts`：Vitest 的 Tauri mock。
+- `auto-imports.d.ts`、`components.d.ts`：自动导入生成的声明文件。
 
-**命令模式**: `#[tauri::command]` 函数接收 `State<DbPool>` + 参数，返回 `Result<T, String>`。命令名使用 snake_case。
+### 5.3 `src-tauri/src/`
 
-**CRUD 约定**:
+- `commands/`：Tauri 命令处理函数，按资源与能力分文件。
+- `db/`：数据库层，包含连接池、CRUD 辅助、事务、迁移、审计与 schema 常量。
+- `models/`：序列化模型与返回结构。
+- `backup.rs`：备份、恢复、JSON 导入导出相关逻辑。
+- `error.rs`：结构化错误定义与运行时日志输出。
+- `storage.rs`：数据库和备份目录路径解析与迁移。
+- `validation.rs`：输入校验逻辑。
+- `lib.rs`：应用 setup、依赖注入、命令注册入口。
+- `main.rs`：Tauri 二进制入口。
+- `test_helpers.rs`：Rust 测试辅助方法。
 
-- `list_{resource}(params: QueryParams) -> PagedResult<T>`
-- `get_{resource}(id: String) -> T`
-- `save_{resource}(data: T) -> ()` (根据 id 是否存在自动 insert/update)
-- `soft_delete_{resource}(id: String) -> ()`
+## 6. 前端架构约定
 
-**软删除**: 所有实体包含 `is_deleted: i32` (0/1) 和 `deleted_at: Option<String>`。查询默认过滤 `WHERE is_deleted = 0`。
+### 6.1 应用入口与路由
 
-**校验**: `validation.rs` 提供 `validate_{resource}()` 函数，在 save 命令中调用。校验函数有完整单元测试。
+- `src/main.ts` 创建 Vue 应用，注册 Pinia 与 Router，并在缺省情况下将 `document.documentElement.dataset.theme` 设为 `light`。
+- 路由入口是 `src/router/index.ts`，当前主布局是 `DefaultLayout`。
+- 当前一级业务页面包括：
+- `DashboardView`
+- `HostsView`
+- `IpAddressesView`
+- `SystemsView`
+- `ServicesView`
+- `MiddlewaresView`
+- `NginxConfigsView`
+- `ContactsView`
+- `ImportWorkbenchView`
+- `JobCenterView`
+- `IntegrityCenterView`
+- `TopologyView`
+- `SettingsView`
+- `ManualView`
 
-**数据库迁移**: `db/migrations/` 目录下按版本号独立文件管理（`v001_init.rs`、`v002_rename_to_systems.rs` 等），`migration.rs` 运行器负责顺序执行并事务保护。`db/schema.rs` 存储列名校验常量（用于迁移验证）。
+### 6.2 API 与错误处理
 
-**审计日志**: 所有 CUD 操作自动记录到 `audit_logs` 表。
+- 所有业务侧 Tauri 调用统一通过 `src/utils/invoke.ts` 的 `tauriInvoke<T>()` 封装。
+- `tauriInvoke()` 内部调用 `@tauri-apps/api/core` 的 `invoke`，并统一走错误归一化与展示流程。
+- `src/api/*.ts` 负责资源级 API 封装，按资源或能力拆分文件，并通过 `src/api/index.ts` 聚合导出。
+- 测试中的原生调用统一通过 `src/__mocks__/tauri.ts` 模拟。
 
-### 通用
+### 6.3 主题与样式
 
-**类型定义**: 前端类型拆分在 `src/types/` 多文件中，`index.ts` 为 re-export 入口；后端模型在 `src-tauri/src/models/` 下按资源分文件。前后端字段命名保持一致 (后端用 `#[serde(rename)]` 适配)。
+- 主题变量集中在 `src/styles/variables.scss`，统一使用 `--im-*` token。
+- 主题切换基于 `html[data-theme="light|dark"]`。
+- `src/styles/global.scss` 提供全局背景、滚动条、固定列、焦点态等样式。
+- `src/styles/element-plus-feedback.css` 补充 Element Plus 的反馈样式映射。
 
-**错误处理**: 后端将所有错误转为 `String` 返回，前端通过 `tauriInvoke` 统一捕获并显示。
+### 6.4 构建与自动导入
 
-## 测试约定
+- `vite.config.ts` 配置了 `@` 指向 `src/` 的别名。
+- `unplugin-auto-import` 自动导入 Vue、Vue Router、Pinia API。
+- `unplugin-vue-components` 配合 `ElementPlusResolver` 自动注册组件。
+- 自动导入声明文件输出到 `src/auto-imports.d.ts` 与 `src/components.d.ts`。
+- Vite 构建对 Cytoscape 与拓扑相关模块做了手动分包，减少主包体积。
 
-**前端**: Vitest + jsdom 环境。测试文件与源码同目录，`.test.ts` 后缀。Tauri invoke 通过 `src/__mocks__/tauri.ts` 的 handler 机制 mock。Element Plus 的 `ElMessage` 需在测试中 `vi.mock('element-plus')`。
+## 7. 后端架构约定
 
-**后端**: Rust 标准 `#[cfg(test)] mod tests`，测试辅助函数在 `test_helpers.rs`。
+### 7.1 应用启动与命令注册
 
-## 数据库
+- `src-tauri/src/lib.rs` 在应用 setup 阶段完成：
+- 解析存储路径。
+- 初始化 SQLite 连接池。
+- 创建迁移前备份。
+- 执行数据库迁移。
+- 注入 `DbPool` 与 `StoragePaths`。
+- 启动自动备份线程。
+- Tauri 命令通过 `tauri::generate_handler!` 注册，当前覆盖资源 CRUD、部署关系、调用关系、拓扑分析、设置、任务中心、数据健康、批量导入、快照、分类术语、备份恢复等能力。
 
-SQLite 数据库存储在 OS 标准应用数据目录。r2d2 连接池默认 8 连接。
+### 7.2 错误模型
 
-**核心表**: hosts, ip_addresses, host_ip_bindings, services, systems, contacts, middlewares, nginx_configs, deployments, dependencies, call_relations, audit_logs, system_settings, schema_version, system_jobs, taxonomy_terms, taxonomy_bindings, import_jobs, snapshots。
+- 后端统一使用 `AppResult<T> = Result<T, AppError>`。
+- `AppError` 包含 `code`、`message`、`details`、`command`、`retryable` 等字段，支持前端做统一展示和重试判断。
+- 运行时错误与告警通过 `error.rs` 中的日志辅助函数写入标准错误输出。
 
-**唯一约束**: services/middlewares/nginx_configs 以 (name, env) 唯一；systems 以 (name, env) 唯一；deployments 以 (resource_id, resource_type, host_id) 唯一；dependencies 以 (source_id, target_id, relation_type) 唯一 (均限 is_deleted=0)。
+### 7.3 数据库层
 
-## 注意事项
+- 连接池定义在 `src-tauri/src/db/pool.rs`，当前启用：
+- `PRAGMA journal_mode=WAL`
+- `PRAGMA foreign_keys=ON`
+- `PRAGMA busy_timeout=5000`
+- 连接池默认 `max_size(8)`。
+- `src-tauri/src/db` 目前包含：
+- `audit.rs`
+- `crud.rs`
+- `macros.rs`
+- `migration.rs`
+- `migrations/`
+- `pool.rs`
+- `schema.rs`
+- `transaction.rs`
 
-- 中文 UI，面向国内用户
-- 完全离线运行，无外部 API 依赖
-- 新增资源类型需同时更新: models -> db/migrations (新增迁移文件) -> commands -> validation -> 前端 types -> api -> view（参考已有资源：contacts, ip_addresses, host_ip_bindings）
-- 图可视化使用 Cytoscape.js 3.x，拓扑相关代码在 `src/components/topology/` 下
-- Windows 平台为主要目标 (NSIS + MSI 安装包)
+### 7.4 迁移与存储
 
-## 主要功能模块
+- 当前迁移目录为 `src-tauri/src/db/migrations`，已存在：
+- `v001_init.rs`
+- `v002_rename_to_systems.rs`
+- `v003_topology_node_positions.rs`
+- `v004_add_focus_target.rs`
+- `hooks.rs`
+- 存储路径逻辑位于 `storage.rs`：
+- 默认数据库文件名为 `inframap.db`
+- 备份目录名为 `backups`
+- 引导配置文件名为 `storage-bootstrap.json`
+- 支持自定义存储根目录与存储迁移
 
-- **拓扑图 V3**：7 个 Tauri 命令，API 封装在 `src/api/topologyV3.ts`，后端在 `src-tauri/src/commands/topology.rs`
-- **数据治理**：integrity（数据健康检查）、system_jobs（任务中心）、import_jobs（批量录入）、snapshots（快照导入导出）
-- **联系人管理**：contacts，支持卡片视图和列表视图双模式
-- **IP 地址管理**：ip_addresses + host_ip_bindings（IP 与主机绑定关系）
-- **分类术语**：taxonomy（术语标签，taxonomy_terms + taxonomy_bindings）
-- **调用关系**：call_relations（服务间调用链，`src/api/call-relations.ts`）
+## 8. 数据与领域事实
+
+### 8.1 当前核心实体
+
+- 主机：`hosts`
+- IP 地址与绑定：`ip_addresses`、`host_ip_bindings`
+- 系统与服务：`systems`、`services`
+- 中间件与网关：`middlewares`、`nginx_configs`
+- 部署关系：`deployments`
+- 调用关系：`call_relations`
+- 联系人：`contacts`
+- 分类术语：`taxonomy_terms`、`taxonomy_bindings`、`taxonomy_term_stats`
+- 审计日志：`audit_logs`
+- 系统设置与任务：`system_settings`、`system_jobs`
+- 批量导入：`import_jobs`、`import_job_rows`、`import_job_issues`
+- 拓扑节点位置：`topology_node_positions`
+
+### 8.2 数据层通用约定
+
+- 当前数据库以软删除为主，业务表普遍包含 `is_deleted`、`deleted_at` 字段。
+- 查询逻辑通常默认过滤 `is_deleted = 0`。
+- 删除流程普遍通过数据库辅助层与审计逻辑收敛处理。
+- 拓扑、导入、完整性检查、备份恢复等能力依赖同一套本地 SQLite 数据。
+
+### 8.3 常见唯一约束
+
+- `systems(name, env)`：系统名称与环境组合唯一。
+- `services(name, env, type)`：服务名称、环境、类型组合唯一。
+- `middlewares(name, env)`：中间件名称与环境组合唯一。
+- `nginx_configs(name, env)`：网关名称与环境组合唯一。
+- `ip_addresses(ip_address, env)`：IP 与环境组合唯一。
+- `host_ip_bindings(host_id, ip_id)`：主机与 IP 绑定唯一。
+- `deployments(resource_id, resource_type, host_id)`：部署关系唯一。
+- `call_relations(owner_id, owner_type, peer_id, peer_type, direction, relation_type)`：调用关系唯一。
+- `taxonomy_terms(field_key, normalized_value)`：分类词条归一化值唯一。
+- `taxonomy_bindings(term_id, resource_type, resource_id)`：词条绑定唯一。
+- `import_job_rows(job_id, row_no)`：导入作业内的行号唯一。
+
+## 9. 测试约定
+
+- 前端单测使用 Vitest + jsdom。
+- 测试文件通常与源码同目录，后缀为 `*.test.ts`。
+- Tauri 调用在前端测试中通过 `src/__mocks__/tauri.ts` 进行 mock。
+- Playwright 配置位于 `playwright.config.ts`，测试目录固定为 `tests/e2e`。
+- Playwright 会自行拉起 `pnpm dev --host 127.0.0.1 --port 4173` 作为测试 Web Server。
+- 当前 e2e 用例覆盖删除确认布局与调用关系目标标签等关键场景。
+- Rust 后端测试通过 `pnpm test:backend` 执行，测试辅助逻辑集中在 `src-tauri/src/test_helpers.rs`。
+
+## 10. 当前模块地图
+
+- 资源管理：主机、IP、系统、服务、中间件、网关、联系人。
+- 关系管理：部署关系、调用关系、系统与服务关联、主机与 IP 绑定。
+- 分析能力：拓扑图、路径分析、影响面、故障排查报告、聚焦视图。
+- 数据治理：完整性检查、批量导入、任务中心、分类术语。
+- 运维能力：设置、存储路径迁移、备份恢复、JSON 导入导出、使用手册。
+
+## 11. 构建与发布补充
+
+- `src-tauri/tauri.conf.json` 当前配置：
+- `beforeDevCommand` 使用 `pnpm dev`
+- `beforeBuildCommand` 使用 `pnpm build`
+- 安装包目标是 `nsis` 和 `msi`
+- 图标由 `src-tauri/icons/*` 提供
+- Windows NSIS 语言包含简体中文和英文
+- `pnpm sync-version` 会同步更新 `package.json`、`src-tauri/Cargo.toml`、`src-tauri/tauri.conf.json`
+- `scripts/README.md` 记录了 `sync-version.ps1`、`build-tauri-win.ps1`、`release-win.ps1` 的参数、前置要求与产物说明。
+
+## 12. 协作提示
+
+- 改动协作规则、验证策略、危险操作与提交流程时，优先更新 `AGENTS.md`。
+- 改动命令脚本、目录结构、模块入口、架构事实与发布流程时，必须同步更新本文件和 `AGENTS.md`。
+- 如果文档描述与仓库实现冲突，以仓库代码和配置为准，并在同轮工作中修正文档。
