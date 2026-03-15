@@ -13,6 +13,7 @@ const props = defineProps<{
   focusNeighborhoodEnabled: boolean;
   layout: "force" | "dagre";
   performanceOptimizationEnabled: boolean;
+  dagreFocusNodeName: string | null;
 }>();
 
 const emit = defineEmits<{
@@ -25,6 +26,7 @@ const emit = defineEmits<{
   (e: "fullscreen"): void;
   (e: "focus-mode-change", enabled: boolean): void;
   (e: "performance-optimization-change", enabled: boolean): void;
+  (e: "dagre-focus-reselect"): void;
 }>();
 
 const NODE_KIND_LABELS: Record<TopologyGroupKind, string> = {
@@ -262,6 +264,18 @@ onBeforeUnmount(() => {
           </button>
         </div>
 
+        <span v-if="layout === 'dagre' && dagreFocusNodeName" class="dagre-focus-indicator">
+          焦点: {{ dagreFocusNodeName }}
+          <button
+            data-testid="dagre-focus-reselect"
+            type="button"
+            class="text-btn dagre-reselect-btn"
+            @click="emit('dagre-focus-reselect')"
+          >
+            重选
+          </button>
+        </span>
+
         <button
           data-testid="reset-layout"
           type="button"
@@ -452,6 +466,31 @@ onBeforeUnmount(() => {
 
 .text-btn:hover {
   color: var(--im-accent);
+}
+
+.dagre-focus-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 4px 10px;
+  border: 1px solid var(--im-border-active);
+  border-radius: var(--im-radius-sm);
+  background: var(--im-accent-soft);
+  color: var(--im-accent);
+  font-size: 12px;
+  white-space: nowrap;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dagre-reselect-btn {
+  min-height: auto;
+  padding: 0;
+  font-size: 12px;
+  color: var(--im-accent);
+  text-decoration: underline;
 }
 
 .action-box {

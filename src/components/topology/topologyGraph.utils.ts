@@ -8,6 +8,7 @@ import type {
   TopologyNode,
   TopologyNodeType,
 } from "@/types";
+import { collectDirectionalReachability } from "@/components/topology/topologyDirectionalReachability.utils";
 
 export type TopologyEdgeType = NonNullable<TopologyEdge["edgeType"]>;
 
@@ -367,4 +368,30 @@ export function formatSystemComboLabel(systemId: string, systemNodes: TopologyNo
     if (node.systemName) return compactLabel(node.systemName, 22);
   }
   return compactLabel(isOpaqueIdentifier(systemId) ? `系统 #${systemId.slice(-6)}` : systemId, 22);
+}
+
+export function filterDagreFocusSubgraph(
+  graph: TopologyGraph,
+  focusNodeId: string,
+): TopologyGraph | null {
+  const focusNode = graph.nodes.find((node) => node.id === focusNodeId);
+  if (!focusNode) return null;
+
+  const { highlightedNodeIds, highlightedEdgeIds } = collectDirectionalReachability(
+    focusNodeId,
+    graph.edges,
+  );
+
+  const nodes = sortNodes(graph.nodes.filter((node) => highlightedNodeIds.has(node.id)));
+  const edges = graph.edges.filter((edge) => highlightedEdgeIds.has(edge.id));
+  const legendStats = computeLegendStats(nodes, edges, focusNode.env);
+  const lanes = buildLanes(graph.lanes, nodes);
+
+  return {
+    lanes,
+    nodes,
+    edges,
+    legendStats,
+    layoutHints: graph.layoutHints,
+  };
 }

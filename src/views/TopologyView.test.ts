@@ -493,6 +493,9 @@ function mountView(options?: {
         NginxConfigEditorDialog: NginxConfigEditorDialogStub,
         ElButton: true,
         ElEmpty: true,
+        ElDialog: true,
+        ElSelect: true,
+        ElOption: true,
         Teleport: true,
       },
       directives: {
@@ -594,7 +597,16 @@ describe("TopologyView", () => {
     expect(wrapper.get('[data-testid="control-layout"]').text()).toBe("force");
     expect(wrapper.get('[data-testid="topology-canvas"]').attributes("data-layout")).toBe("force");
 
+    // Clicking dagre opens the focus dialog — layout stays 'force' until confirmed
     await wrapper.get('[data-testid="emit-layout-dagre"]').trigger("click");
+    await flushPromises();
+
+    expect(wrapper.get('[data-testid="control-layout"]').text()).toBe("force");
+
+    // Simulate dialog confirmation: select a node and confirm
+    const state = (wrapper.vm as { $: { setupState: Record<string, unknown> } }).$.setupState;
+    state.dagreFocusPendingNodeId = "node-1";
+    state.handleDagreFocusConfirm();
     await flushPromises();
 
     expect(wrapper.get('[data-testid="control-layout"]').text()).toBe("dagre");

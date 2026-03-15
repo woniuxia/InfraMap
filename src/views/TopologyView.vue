@@ -31,6 +31,7 @@ import type {
 import {
   DEFAULT_TOPOLOGY_FILTER,
   filterTopologyGraph,
+  filterDagreFocusSubgraph,
   isExternalTopologyNode,
   type TopologyFilterState,
 } from "@/components/topology/topologyGraph.utils";
@@ -66,10 +67,19 @@ const effectiveFilter = computed<TopologyFilterState>(() =>
         showAllEdges: true,
       },
 );
-const graphData = computed(() => filterTopologyGraph(rawGraphData.value, effectiveFilter.value));
+const graphData = computed(() => {
+  const filtered = filterTopologyGraph(rawGraphData.value, effectiveFilter.value);
+  if (!filtered || selectedLayout.value !== "dagre" || !dagreFocusNodeId.value) return filtered;
+  return filterDagreFocusSubgraph(filtered, dagreFocusNodeId.value) ?? filtered;
+});
 const canvasRef = ref<InstanceType<typeof TopologyCanvas>>();
 const selectedLayout = ref<"force" | "dagre">("force");
 const warnedLayoutFallbackReasons = new Set<string>();
+
+const dagreFocusNodeId = ref<string | null>(null);
+const dagreFocusDialogVisible = ref(false);
+const pendingDagreSwitch = ref(false);
+const dagreFocusPendingNodeId = ref<string | null>(null);
 
 type TopologyWorkbenchTab = "overview" | "evidence" | "path" | "impact";
 
@@ -506,8 +516,54 @@ function handlePerformanceOptimizationChange(enabled: boolean) {
   persistPerformanceOptimizationPreference(enabled);
 }
 
+const selectableNodes = computed(() => {
+  const filtered = filterTopologyGraph(rawGraphData.value, effectiveFilter.value);
+  if (!filtered) return [];
+  return filtered.nodes
+    .filter((node) => !isExternalTopologyNode(node))
+    .map((node) => ({ id: node.id, name: node.name }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+});
+
+const dagreFocusNodeName = computed(() => {
+  if (!dagreFocusNodeId.value) return null;
+  const node = graphData.value?.nodes.find((n) => n.id === dagreFocusNodeId.value);
+  if (node) return node.name;
+  const raw = rawGraphData.value?.nodes.find((n) => n.id === dagreFocusNodeId.value);
+  return raw?.name ?? null;
+});
+
 function handleLayoutChange(type: "force" | "dagre") {
+  if (type === "dagre") {
+    pendingDagreSwitch.value = selectedLayout.value !== "dagre";
+    dagreFocusPendingNodeId.value = dagreFocusNodeId.value;
+    dagreFocusDialogVisible.value = true;
+    return;
+  }
+  dagreFocusNodeId.value = null;
   selectedLayout.value = type;
+}
+
+function handleDagreFocusConfirm() {
+  if (!dagreFocusPendingNodeId.value) return;
+  dagreFocusNodeId.value = dagreFocusPendingNodeId.value;
+  selectedLayout.value = "dagre";
+  dagreFocusDialogVisible.value = false;
+  pendingDagreSwitch.value = false;
+}
+
+function handleDagreFocusCancelOrClose() {
+  dagreFocusDialogVisible.value = false;
+  if (pendingDagreSwitch.value) {
+    selectedLayout.value = "force";
+    pendingDagreSwitch.value = false;
+  }
+}
+
+function handleDagreFocusReselect() {
+  pendingDagreSwitch.value = false;
+  dagreFocusPendingNodeId.value = dagreFocusNodeId.value;
+  dagreFocusDialogVisible.value = true;
 }
 
 function handleResetLayout() {
@@ -607,8 +663,32 @@ watch(
     if (envStore.currentEnv !== newEnv) {
       envStore.setEnv(newEnv);
     }
+
+    if (selectedLayout.value === "dagre" && dagreFocusNodeId.value) {
+      const filtered = filterTopologyGraph(rawGraphData.value, {
+        ...effectiveFilter.value,
+        env: newEnv,
+      });
+      const stillVisible = filtered?.nodes.some((n) => n.id === dagreFocusNodeId.value);
+      if (!stillVisible) {
+        dagreFocusNodeId.value = null;
+        selectedLayout.value = "force";
+        ElMessage.warning("环境切换后焦点节点不可见，已切回力导向布局");
+      }
+    }
   },
 );
+
+watch(rawGraphData, (newData) => {
+  if (selectedLayout.value !== "dagre" || !dagreFocusNodeId.value) return;
+  const filtered = filterTopologyGraph(newData, effectiveFilter.value);
+  const stillExists = filtered?.nodes.some((n) => n.id === dagreFocusNodeId.value);
+  if (!stillExists) {
+    dagreFocusNodeId.value = null;
+    selectedLayout.value = "force";
+    ElMessage.warning("焦点节点已不存在，已切回力导向布局");
+  }
+});
 
 onMounted(() => {
   performanceOptimizationEnabled.value = readPerformanceOptimizationPreference();
@@ -630,6 +710,7 @@ onBeforeUnmount(() => {
       :layout="selectedLayout"
       :focus-neighborhood-enabled="focusNeighborhoodEnabled"
       :performance-optimization-enabled="performanceOptimizationEnabled"
+      :dagre-focus-node-name="dagreFocusNodeName"
       @search="handleSearch"
       @filter-change="handleFilterChange"
       @performance-optimization-change="handlePerformanceOptimizationChange"
@@ -639,6 +720,7 @@ onBeforeUnmount(() => {
       @export="handleExport"
       @refresh="loadData"
       @fullscreen="toggleFullscreen"
+      @dagre-focus-reselect="handleDagreFocusReselect"
     />
 
     <div class="task-view-bar">
@@ -833,6 +915,40 @@ onBeforeUnmount(() => {
       :initial-draft="nginxEditorDraft"
       @saved="handleNodeEditorSaved"
     />
+
+    <el-dialog
+      v-model="dagreFocusDialogVisible"
+      title="选择焦点节点"
+      width="420px"
+      :close-on-click-modal="false"
+      @close="handleDagreFocusCancelOrClose"
+    >
+      <p class="dagre-focus-hint">层级布局将仅展示所选节点的上下游依赖链</p>
+      <el-select
+        v-model="dagreFocusPendingNodeId"
+        filterable
+        placeholder="搜索并选择节点"
+        style="width: 100%"
+        data-testid="dagre-focus-select"
+      >
+        <el-option
+          v-for="item in selectableNodes"
+          :key="item.id"
+          :label="item.name"
+          :value="item.id"
+        />
+      </el-select>
+      <template #footer>
+        <el-button @click="handleDagreFocusCancelOrClose">取消</el-button>
+        <el-button
+          type="primary"
+          :disabled="!dagreFocusPendingNodeId"
+          @click="handleDagreFocusConfirm"
+        >
+          确认
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -1057,6 +1173,11 @@ onBeforeUnmount(() => {
 .context-menu-item:hover {
   background: var(--im-surface-2);
   color: var(--im-accent);
+}
+.dagre-focus-hint {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: var(--im-text-secondary);
 }
 
 @media (max-width: 1080px) {

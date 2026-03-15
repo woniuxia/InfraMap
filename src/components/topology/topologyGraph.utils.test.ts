@@ -4,6 +4,7 @@ import {
   DEFAULT_TOPOLOGY_FILTER,
   computeLegendStats,
   filterTopologyGraph,
+  filterDagreFocusSubgraph,
   formatHostDisplayName,
   formatHostComboLabel,
   isOpaqueIdentifier,
@@ -264,5 +265,71 @@ describe("topologyGraph utils", () => {
       }),
     ]);
     expect(label).toBe("payment-host · 10.6.1…");
+  });
+
+  describe("filterDagreFocusSubgraph", () => {
+    it("should return null when focus node does not exist", () => {
+      const graph = createGraphFixture();
+      const result = filterDagreFocusSubgraph(graph, "non-existent-id");
+      expect(result).toBeNull();
+    });
+
+    it("should return subgraph containing only reachable nodes and edges", () => {
+      const graph = createGraphFixture();
+      const result = filterDagreFocusSubgraph(graph, "app-prod-1");
+      expect(result).not.toBeNull();
+
+      const nodeIds = result!.nodes.map((n) => n.id);
+      expect(nodeIds).toContain("app-prod-1");
+      expect(nodeIds).toContain("mw-prod-1");
+      expect(nodeIds).toContain("app-test-1");
+      expect(nodeIds).toContain("ng-dev-1");
+
+      const edgeIds = result!.edges.map((e) => e.id);
+      expect(edgeIds).toContain("edge-1");
+      expect(edgeIds).toContain("edge-2");
+      expect(edgeIds).toContain("edge-3");
+    });
+
+    it("should return only the focus node when it has no connections", () => {
+      const isolatedNode = createNode({
+        id: "isolated-1",
+        name: "Isolated",
+        nodeType: "service",
+        env: "prod",
+        groupKind: "service",
+      });
+      const graph: TopologyGraph = {
+        lanes: [
+          { id: "prod", label: "生产", order: 0, nodeCount: 1, appCount: 1 },
+          { id: "test", label: "测试", order: 1, nodeCount: 0, appCount: 0 },
+          { id: "dev", label: "开发", order: 2, nodeCount: 0, appCount: 0 },
+        ],
+        nodes: [isolatedNode],
+        edges: [],
+        legendStats: computeLegendStats([isolatedNode], [], "prod"),
+        layoutHints: { laneOrder: ["prod"], defaultCollapsedGroups: [], highDensityMode: false },
+      };
+
+      const result = filterDagreFocusSubgraph(graph, "isolated-1");
+      expect(result).not.toBeNull();
+      expect(result!.nodes).toHaveLength(1);
+      expect(result!.nodes[0].id).toBe("isolated-1");
+      expect(result!.edges).toHaveLength(0);
+    });
+
+    it("should recompute legend stats for the subgraph", () => {
+      const graph = createGraphFixture();
+      const result = filterDagreFocusSubgraph(graph, "mw-prod-1");
+      expect(result).not.toBeNull();
+
+      const nodeIds = result!.nodes.map((n) => n.id);
+      expect(nodeIds).toContain("mw-prod-1");
+      expect(nodeIds).toContain("app-prod-1");
+
+      expect(result!.legendStats.serviceCount).toBeLessThanOrEqual(
+        graph.legendStats!.serviceCount!,
+      );
+    });
   });
 });

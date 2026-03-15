@@ -109,7 +109,7 @@ describe("ErrorDetailDialog", () => {
 
   it("clears all errors from dialog action", async () => {
     const wrapper = mountDialog();
-    const presenter = useErrorPresenter() as Record<string, any>;
+    const presenter = useErrorPresenter() as Record<string, unknown>;
     presentInfraError(createInfraError("a"));
     vi.advanceTimersByTime(4000);
     await nextTick();

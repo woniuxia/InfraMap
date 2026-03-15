@@ -48,7 +48,7 @@ describe("useErrorPresenter", () => {
   });
 
   it("records full error history and shows collapsed badge immediately", () => {
-    const presenter = errorPresenter.useErrorPresenter() as Record<string, any>;
+    const presenter = errorPresenter.useErrorPresenter() as Record<string, unknown>;
     const error = createInfraError("one");
 
     errorPresenter.presentInfraError(error);
@@ -66,7 +66,7 @@ describe("useErrorPresenter", () => {
   });
 
   it("dedupes toast within 1.8s but still keeps all error records", () => {
-    const presenter = errorPresenter.useErrorPresenter() as Record<string, any>;
+    const presenter = errorPresenter.useErrorPresenter() as Record<string, unknown>;
     const error = createInfraError("dup");
 
     errorPresenter.presentInfraError(error);
@@ -77,7 +77,7 @@ describe("useErrorPresenter", () => {
   });
 
   it("restores collapsed badge after closing detail dialog", () => {
-    const presenter = errorPresenter.useErrorPresenter() as Record<string, any>;
+    const presenter = errorPresenter.useErrorPresenter() as Record<string, unknown>;
     const error = createInfraError("detail");
 
     errorPresenter.presentInfraError(error);
@@ -91,7 +91,7 @@ describe("useErrorPresenter", () => {
   });
 
   it("provides clearInfraErrorHistory and fully resets state", () => {
-    const presenter = errorPresenter.useErrorPresenter() as Record<string, any>;
+    const presenter = errorPresenter.useErrorPresenter() as Record<string, unknown>;
     const api = errorPresenter as Record<string, unknown>;
     const clearHistory = api.clearInfraErrorHistory;
     errorPresenter.presentInfraError(createInfraError("reset"));
